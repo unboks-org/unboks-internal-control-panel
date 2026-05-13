@@ -129,6 +129,111 @@ h3 {
   font-size: 11px;
 }
 
+.tenant-selector {
+  background: #f6f8fb;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  padding: 4px;
+}
+
+.tenant-selector.is-active,
+.tenant-selector.is-open {
+  border-color: var(--color-blue);
+  box-shadow: 0 0 0 2px var(--color-blue-soft);
+}
+
+.tenant-selector-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 2px;
+  grid-template-columns: 1fr auto;
+  min-height: 0;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.tenant-selector-button:hover {
+  background: #eef1f5;
+  border-radius: 6px;
+}
+
+.tenant-selector-eyebrow {
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 700;
+  grid-column: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tenant-selector-current {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 700;
+  grid-column: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tenant-selector-caret {
+  color: var(--color-muted);
+  font-size: 10px;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.tenant-selector-list {
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px 0 0;
+}
+
+.tenant-selector-item {
+  align-items: center;
+  border-radius: 6px;
+  color: var(--color-text);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 8px;
+  padding: 6px 10px;
+  text-decoration: none;
+}
+
+.tenant-selector-item:hover {
+  background: #eef1f5;
+}
+
+.tenant-selector-item.active {
+  background: var(--color-blue-soft);
+  color: var(--color-blue);
+}
+
+.tenant-selector-dot {
+  border-radius: 50%;
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+
+.tenant-selector-dot.tenant-status-active {
+  background: var(--color-green);
+}
+
+.tenant-selector-dot.tenant-status-paused {
+  background: var(--color-yellow);
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;
@@ -736,6 +841,95 @@ code {
 
 .settings-note {
   margin-top: 14px;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Compact data lists (home + tenant workspace)                             */
+/* ------------------------------------------------------------------------ */
+
+.datapoint-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.datapoint-list li {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  padding: 8px 0;
+}
+
+.datapoint-list li:first-child {
+  border-top: 0;
+}
+
+.datapoint-label {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.datapoint-value {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.inline-link-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.inline-link {
+  align-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  color: var(--color-text);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  text-decoration: none;
+}
+
+.inline-link:hover {
+  background: #f1f3f4;
+}
+
+.compact-note {
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+.action-list {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.action-list button {
+  background: #ffffff;
+  text-align: left;
+  width: 100%;
+}
+
+.button-disabled,
+button.button-disabled,
+.button-disabled:hover {
+  background: #f6f7f9;
+  border-color: var(--color-border);
+  color: var(--color-muted);
+  cursor: not-allowed;
 }
 
 /* ------------------------------------------------------------------------ */

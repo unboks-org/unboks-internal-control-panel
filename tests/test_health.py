@@ -67,7 +67,8 @@ def test_create_onboarding_lead_persists_and_rejects_duplicate(monkeypatch, tmp_
 
     home = client.get("/admin")
     assert home.status_code == 200
-    assert "test@example.com" in home.text
+    # Home is a compact operational snapshot; lead total should be at least 1
+    assert "Onboarding leads" in home.text
 
     duplicate = client.post(
         "/admin/onboarding/leads",
@@ -83,7 +84,7 @@ def test_create_onboarding_lead_persists_and_rejects_duplicate(monkeypatch, tmp_
     assert "test@example.com" in persisted.text
 
 
-def test_admin_shell_renders_sidebar_and_active_state(monkeypatch, tmp_path) -> None:
+def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
     monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
@@ -92,28 +93,80 @@ def test_admin_shell_renders_sidebar_and_active_state(monkeypatch, tmp_path) -> 
 
     home = client.get("/admin")
     assert home.status_code == 200
-    assert 'class="app-shell"' in home.text or "app-shell" in home.text
+    assert "app-shell" in home.text
+    assert "tenant-selector" in home.text
+    assert "Unboks Demo" in home.text
+    assert "Consulta Despertares" in home.text
+    assert "BlueFinn Charters" in home.text
+    # Sidebar must only show TENANTS, HOME, SETTINGS — not Onboarding/Reviews
     assert "sidebar-nav" in home.text
-    assert "Onboarding / Leads" in home.text
-    assert "Reviews" in home.text
-    assert "Settings" in home.text
+    assert ">Home<" in home.text
+    assert ">Settings<" in home.text
+    # Sidebar must not contain Onboarding/Reviews as nav-items (they live in body links only)
+    sidebar = home.text.split('class="sidebar-nav"', 1)[1].split("</nav>", 1)[0]
+    assert "Onboarding" not in sidebar
+    assert "Reviews" not in sidebar
+    assert "Home" in sidebar
+    assert "Settings" in sidebar
+    # Active state on Home
     assert 'aria-current="page"' in home.text
-
-    onboarding = client.get("/admin/onboarding")
-    assert onboarding.status_code == 200
-    assert "sidebar-nav" in onboarding.text
-    assert 'href="/admin/onboarding"' in onboarding.text
-    assert 'aria-current="page"' in onboarding.text
-
-    reviews = client.get("/admin/reviews")
-    assert reviews.status_code == 200
-    assert "Awaiting review" in reviews.text
-    assert "sidebar-nav" in reviews.text
 
     settings_page = client.get("/admin/settings")
     assert settings_page.status_code == 200
+    assert "tenant-selector" in settings_page.text
     assert "sidebar-nav" in settings_page.text
-    assert "Settings" in settings_page.text
+
+
+def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    workspace = client.get("/admin/tenants/unboks-demo")
+    assert workspace.status_code == 200
+    assert "Unboks Demo" in workspace.text
+    assert "Tenant workspace" in workspace.text
+    assert "Dashboard" in workspace.text
+    assert "Channels" in workspace.text
+    assert "Source of Truth" in workspace.text
+    assert "Onboarding" in workspace.text
+    assert "Last sync" in workspace.text
+    assert "Recent changes" in workspace.text
+    # Actions are placeholders, must render disabled
+    assert "Edit tenant info" in workspace.text
+    assert "Open tenant dashboard" in workspace.text
+    assert "Push changes to tenant dashboard" in workspace.text
+    assert "Pause tenant" in workspace.text
+    assert "Reset onboarding / resend onboarding link" in workspace.text
+    assert "View Source of Truth" in workspace.text
+    assert "View activity log" in workspace.text
+    assert "disabled" in workspace.text
+    assert 'aria-current="page"' in workspace.text
+
+    # /admin/tenants redirects to first tenant
+    index = client.get("/admin/tenants", follow_redirects=False)
+    assert index.status_code == 303
+    assert index.headers["location"] == "/admin/tenants/unboks-demo"
+
+    # Unknown tenant returns 404 but still renders shell
+    missing = client.get("/admin/tenants/no-such-tenant")
+    assert missing.status_code == 404
+
+
+def test_admin_onboarding_and_reviews_still_reachable(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    onboarding = client.get("/admin/onboarding")
+    assert onboarding.status_code == 200
+    reviews = client.get("/admin/reviews")
+    assert reviews.status_code == 200
+    assert "Awaiting review" in reviews.text
 
 
 def test_public_onboarding_does_not_render_admin_shell(monkeypatch, tmp_path) -> None:

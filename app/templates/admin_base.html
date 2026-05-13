@@ -21,7 +21,48 @@
         </div>
       </div>
 
-      <nav class="sidebar-nav">
+      <div
+        class="tenant-selector {% if active == 'tenants' %}is-active{% endif %}"
+        data-tenant-selector
+      >
+        <button
+          type="button"
+          class="tenant-selector-button"
+          data-tenant-toggle
+          aria-expanded="{% if active == 'tenants' %}true{% else %}false{% endif %}"
+          aria-controls="tenant-selector-list"
+        >
+          <span class="tenant-selector-eyebrow">Tenants</span>
+          <span class="tenant-selector-current">
+            {% if active_tenant %}
+              {{ active_tenant.name }}
+            {% else %}
+              Select tenant
+            {% endif %}
+          </span>
+          <span class="tenant-selector-caret" aria-hidden="true">&#9662;</span>
+        </button>
+        <ul
+          id="tenant-selector-list"
+          class="tenant-selector-list"
+          {% if active != 'tenants' %}hidden{% endif %}
+        >
+          {% for tenant in tenants %}
+            <li>
+              <a
+                href="/admin/tenants/{{ tenant.id }}"
+                class="tenant-selector-item {% if active_tenant and active_tenant.id == tenant.id %}active{% endif %}"
+                {% if active_tenant and active_tenant.id == tenant.id %}aria-current="page"{% endif %}
+              >
+                <span class="tenant-selector-dot tenant-status-{{ tenant.status }}" aria-hidden="true"></span>
+                <span>{{ tenant.name }}</span>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Sections">
         <a
           href="/admin"
           class="nav-item {% if active == 'home' %}active{% endif %}"
@@ -29,22 +70,6 @@
         >
           <span class="nav-dot"></span>
           <span>Home</span>
-        </a>
-        <a
-          href="/admin/onboarding"
-          class="nav-item {% if active == 'onboarding' %}active{% endif %}"
-          {% if active == 'onboarding' %}aria-current="page"{% endif %}
-        >
-          <span class="nav-dot"></span>
-          <span>Onboarding / Leads</span>
-        </a>
-        <a
-          href="/admin/reviews"
-          class="nav-item {% if active == 'reviews' %}active{% endif %}"
-          {% if active == 'reviews' %}aria-current="page"{% endif %}
-        >
-          <span class="nav-dot"></span>
-          <span>Reviews</span>
         </a>
         <a
           href="/admin/settings"

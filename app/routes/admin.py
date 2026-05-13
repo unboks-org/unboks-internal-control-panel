@@ -26,6 +26,7 @@ from app.security import (
     set_session_cookie,
     verify_admin_password,
 )
+from app.tenants import Tenant, get_tenant, list_tenants
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -33,6 +34,15 @@ templates = Jinja2Templates(directory="app/templates")
 
 REVIEW_AWAITING_STATUSES = {"form_submitted"}
 REVIEW_DECIDED_STATUSES = {"review_needs_changes", "review_approved", "tenant_ready"}
+
+
+def _shell_context(active: str, active_tenant: Optional[Tenant] = None) -> dict:
+    """Context every admin template needs so the sidebar renders."""
+    return {
+        "active": active,
+        "tenants": list_tenants(),
+        "active_tenant": active_tenant,
+    }
 
 
 @router.get("/", include_in_schema=False)
@@ -95,6 +105,47 @@ def admin_home(request: Request) -> Response:
     return render_home(request)
 
 
+@router.get("/admin/tenants", response_class=HTMLResponse)
+def admin_tenants_index(request: Request) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenants = list_tenants()
+    if tenants:
+        return RedirectResponse(url=f"/admin/tenants/{tenants[0].id}", status_code=303)
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@router.get("/admin/tenants/{tenant_id}", response_class=HTMLResponse)
+def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return templates.TemplateResponse(
+            request,
+            "admin_home.html",
+            {
+                **_shell_context("home"),
+                "totals": _pipeline_totals(list_leads()),
+                "tenant_count": len(list_tenants()),
+                "tenant_error": f"Tenant '{tenant_id}' not found.",
+            },
+            status_code=404,
+        )
+    return templates.TemplateResponse(
+        request,
+        "admin_tenant_workspace.html",
+        {
+            **_shell_context("tenants", active_tenant=tenant),
+            "tenant": tenant,
+        },
+    )
+
+
 @router.get("/admin/onboarding", response_class=HTMLResponse)
 def admin_onboarding(request: Request) -> Response:
     settings = get_settings()
@@ -122,7 +173,7 @@ def admin_settings(request: Request) -> Response:
     return templates.TemplateResponse(
         request,
         "admin_settings.html",
-        {"active": "settings"},
+        _shell_context("settings"),
     )
 
 
@@ -313,9 +364,9 @@ def render_home(request: Request) -> HTMLResponse:
         request,
         "admin_home.html",
         {
-            "active": "home",
+            **_shell_context("home"),
             "totals": totals,
-            "recent_leads": leads[:5],
+            "tenant_count": len(list_tenants()),
         },
     )
 
@@ -332,7 +383,7 @@ def render_onboarding(
         request,
         "admin_onboarding.html",
         {
-            "active": "onboarding",
+            **_shell_context("onboarding"),
             "error": error,
             "sent_notice": sent_notice,
             "email_result": email_result,
@@ -353,7 +404,7 @@ def render_reviews(request: Request) -> HTMLResponse:
         request,
         "admin_reviews.html",
         {
-            "active": "reviews",
+            **_shell_context("reviews"),
             "awaiting": awaiting,
             "decided": decided,
             "intake_answer_counts": list_intake_answer_counts(),
@@ -374,7 +425,7 @@ def render_lead_detail(
         request,
         "onboarding_lead_detail.html",
         {
-            "active": "reviews",
+            **_shell_context("reviews"),
             "error": error,
             "lead": lead,
             "answers": answers,

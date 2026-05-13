@@ -53,9 +53,38 @@
     });
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initSidebarDrawer);
-  } else {
+  function initTenantSelector() {
+    var selector = document.querySelector("[data-tenant-selector]");
+    if (!selector) {
+      return;
+    }
+    var toggle = selector.querySelector("[data-tenant-toggle]");
+    var list = selector.querySelector(".tenant-selector-list");
+    if (!toggle || !list) {
+      return;
+    }
+    toggle.addEventListener("click", function () {
+      var isHidden = list.hasAttribute("hidden");
+      if (isHidden) {
+        list.removeAttribute("hidden");
+        toggle.setAttribute("aria-expanded", "true");
+        selector.classList.add("is-open");
+      } else {
+        list.setAttribute("hidden", "");
+        toggle.setAttribute("aria-expanded", "false");
+        selector.classList.remove("is-open");
+      }
+    });
+  }
+
+  function init() {
     initSidebarDrawer();
+    initTenantSelector();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
   }
 })();
