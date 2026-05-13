@@ -74,7 +74,19 @@ ESCALATION_MODES: tuple[tuple[str, str], ...] = (
 @dataclass(frozen=True)
 class TenantChannel:
     name: str
-    state: str  # connected | disconnected | unknown
+    state: str            # connected | disconnected | error | unknown
+    last_message: str = "—"
+    last_sync: str = "—"
+
+
+CHANNEL_CATALOG: tuple[str, ...] = (
+    "WhatsApp",
+    "Email",
+    "Instagram",
+    "Facebook",
+    "Telegram",
+    "Website chat",
+)
 
 
 @dataclass(frozen=True)
@@ -179,9 +191,12 @@ _TENANTS: tuple[Tenant, ...] = (
             recent_replies=(),
         ),
         channels=(
-            TenantChannel("Web widget", "connected"),
             TenantChannel("WhatsApp", "disconnected"),
             TenantChannel("Email", "disconnected"),
+            TenantChannel("Instagram", "disconnected"),
+            TenantChannel("Facebook", "disconnected"),
+            TenantChannel("Telegram", "disconnected"),
+            TenantChannel("Website chat", "connected"),
         ),
         billing=TenantBilling(
             status="active",
@@ -204,11 +219,7 @@ _TENANTS: tuple[Tenant, ...] = (
         name="Consulta Despertares",
         status="active",
         plan="trial",
-        channels=(
-            TenantChannel("Web widget", "unknown"),
-            TenantChannel("WhatsApp", "unknown"),
-            TenantChannel("Email", "unknown"),
-        ),
+        channels=tuple(TenantChannel(name, "disconnected") for name in CHANNEL_CATALOG),
         billing=TenantBilling(
             status="trial",
             trial_days_left=12,
@@ -223,11 +234,7 @@ _TENANTS: tuple[Tenant, ...] = (
         name="BlueFinn Charters",
         status="active",
         plan="trial",
-        channels=(
-            TenantChannel("Web widget", "unknown"),
-            TenantChannel("WhatsApp", "unknown"),
-            TenantChannel("Email", "unknown"),
-        ),
+        channels=tuple(TenantChannel(name, "disconnected") for name in CHANNEL_CATALOG),
         billing=TenantBilling(
             status="trial",
             trial_days_left=5,

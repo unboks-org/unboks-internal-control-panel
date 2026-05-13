@@ -141,8 +141,6 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Push changes" in workspace.text
     assert "Edit tenant" in workspace.text
     assert "Pause tenant" in workspace.text
-    # Operational cards
-    assert "op-grid" in workspace.text
     # AI Agent control panel
     assert "agent-panel" in workspace.text
     assert "Agent replies" in workspace.text
@@ -173,6 +171,15 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         assert action in workspace.text
     # Cancel tenant must be visually separated in a danger zone
     assert "billing-danger" in workspace.text
+    # Channels control panel
+    assert "channels-panel" in workspace.text
+    for channel in ("WhatsApp", "Email", "Instagram", "Facebook", "Telegram", "Website chat"):
+        assert channel in workspace.text
+    # Per-channel actions
+    assert "Configure" in workspace.text
+    assert "Disconnect" in workspace.text
+    assert "Not connected" in workspace.text  # at least one channel is not connected
+    assert "Last message" in workspace.text
     # Push changes panel
     assert "push-panel" in workspace.text
     assert "Push changes" in workspace.text

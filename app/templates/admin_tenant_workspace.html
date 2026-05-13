@@ -52,22 +52,40 @@
     <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Pause tenant</button>
   </section>
 
-  {# 4. Operational cards #}
-  <section class="op-grid" aria-label="Operational state">
-    <article class="op-card">
-      <header>
+  {# 4. Channels control #}
+  <section class="channels-panel" aria-label="Channels">
+    <header class="channels-panel-header">
+      <div>
         <h3>Channels</h3>
-        <span class="status-chip status-{{ 'ok' if tenant.health.channels == 'ok' else 'unknown' }}">{{ tenant.health.channels }}</span>
-      </header>
-      <ul class="channel-list">
-        {% for ch in tenant.channels %}
-          <li>
-            <span class="channel-name">{{ ch.name }}</span>
-            <span class="status-chip status-{{ 'ok' if ch.state == 'connected' else 'unknown' }}">{{ ch.state }}</span>
-          </li>
-        {% endfor %}
-      </ul>
-    </article>
+        <p class="muted compact-note">Customer channels connected for this tenant.</p>
+      </div>
+      <span class="status-chip status-{{ 'ok' if tenant.health.channels == 'ok' else 'unknown' }}">{{ tenant.health.channels }}</span>
+    </header>
+
+    <div class="channels-grid">
+      {% for ch in tenant.channels %}
+        {% set ch_class = {'connected': 'ok', 'disconnected': 'unknown', 'error': 'down'}.get(ch.state, 'unknown') %}
+        <article class="channel-card">
+          <header class="channel-card-header">
+            <h4>{{ ch.name }}</h4>
+            <span class="status-chip status-{{ ch_class }}">
+              {% if ch.state == 'connected' %}Connected
+              {% elif ch.state == 'error' %}Error
+              {% else %}Not connected
+              {% endif %}
+            </span>
+          </header>
+          <dl class="channel-kv">
+            <dt>Last message</dt><dd>{{ ch.last_message }}</dd>
+            <dt>Last sync</dt><dd>{{ ch.last_sync }}</dd>
+          </dl>
+          <div class="channel-card-actions">
+            <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Configure</button>
+            <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Disconnect</button>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
   </section>
 
   {# 4c. AI Agent control panel #}
