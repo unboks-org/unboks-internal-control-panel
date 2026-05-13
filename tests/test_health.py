@@ -130,23 +130,39 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     workspace = client.get("/admin/tenants/unboks-demo")
     assert workspace.status_code == 200
     assert "Unboks Demo" in workspace.text
-    assert "Tenant workspace" in workspace.text
-    assert "Dashboard" in workspace.text
-    assert "Channels" in workspace.text
-    assert "Source of Truth" in workspace.text
-    assert "Onboarding" in workspace.text
-    assert "Last sync" in workspace.text
-    assert "Recent changes" in workspace.text
-    # Actions are placeholders, must render disabled
-    assert "Edit tenant info" in workspace.text
+    # Soft-colored tenant header
+    assert "tenant-header" in workspace.text
+    # Compact health strip with all 6 cells
+    assert "health-strip" in workspace.text
+    for label in ("Inbox", "AI Agent", "Channels", "Source of Truth", "Escalations", "Billing / Trial"):
+        assert label in workspace.text
+    # Primary controls
     assert "Open tenant dashboard" in workspace.text
-    assert "Push changes to tenant dashboard" in workspace.text
+    assert "Push changes" in workspace.text
+    assert "Edit tenant" in workspace.text
     assert "Pause tenant" in workspace.text
-    assert "Reset onboarding / resend onboarding link" in workspace.text
-    assert "View Source of Truth" in workspace.text
-    assert "View activity log" in workspace.text
+    # Operational cards
+    assert "op-grid" in workspace.text
+    # Activity log shows empty state
+    assert "Activity" in workspace.text
+    # Danger zone
+    assert "danger-zone" in workspace.text
+    assert "Suspend / cut off tenant" in workspace.text
+    # All controls are still placeholders, must render disabled
     assert "disabled" in workspace.text
     assert 'aria-current="page"' in workspace.text
+
+
+def test_tenant_workspace_shows_no_activity_for_empty_tenant(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    workspace = client.get("/admin/tenants/consulta-despertares")
+    assert workspace.status_code == 200
+    assert "No activity yet" in workspace.text
 
     # /admin/tenants redirects to first tenant
     index = client.get("/admin/tenants", follow_redirects=False)

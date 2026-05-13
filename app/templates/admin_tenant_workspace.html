@@ -1,88 +1,118 @@
 {% extends "admin_base.html" %}
 
 {% block title %}{{ tenant.name }} | Unboks Internal{% endblock %}
-{% block section_eyebrow %}Tenant workspace{% endblock %}
+{% block section_eyebrow %}Tenant{% endblock %}
 {% block page_title %}{{ tenant.name }}{% endblock %}
 {% block page_subtitle %}
   <p class="muted">
-    Tenant ID <code>{{ tenant.id }}</code> &middot;
-    <span class="status-chip status-{% if tenant.status == 'active' %}ok{% else %}unknown{% endif %}">{{ tenant.status }}</span>
+    <code>{{ tenant.id }}</code> &middot; {{ tenant.plan }} &middot; {{ tenant.status }}
   </p>
 {% endblock %}
 
 {% block content %}
-  <section class="panel">
-    <div class="panel-header compact-header">
-      <h2>Status</h2>
-      <span class="status-chip status-neutral">Placeholders</span>
+  {# 1. Soft colored tenant header #}
+  <header class="tenant-header tenant-header-{{ tenant.status }}" aria-label="Tenant header">
+    <div>
+      <h2 class="tenant-header-name">{{ tenant.name }}</h2>
+      <p class="tenant-header-meta">
+        <code>{{ tenant.id }}</code>
+        <span class="dot-sep">&middot;</span>
+        Plan: <strong>{{ tenant.plan }}</strong>
+        <span class="dot-sep">&middot;</span>
+        Status: <strong>{{ tenant.status }}</strong>
+      </p>
     </div>
-    <ul class="datapoint-list">
-      <li>
-        <span class="datapoint-label">Dashboard</span>
-        <span class="status-chip status-{% if tenant.dashboard_status == 'ok' %}ok{% else %}unknown{% endif %}">{{ tenant.dashboard_status }}</span>
-      </li>
-      <li>
-        <span class="datapoint-label">Channels</span>
-        <span class="status-chip status-{% if tenant.channels_status == 'ok' %}ok{% else %}unknown{% endif %}">{{ tenant.channels_status }}</span>
-      </li>
-      <li>
-        <span class="datapoint-label">Source of Truth</span>
-        <span class="status-chip status-{% if tenant.sot_status == 'ok' %}ok{% else %}unknown{% endif %}">{{ tenant.sot_status }}</span>
-      </li>
-      <li>
-        <span class="datapoint-label">Onboarding</span>
-        <span class="status-chip status-{% if tenant.onboarding_status == 'complete' %}ok{% else %}unknown{% endif %}">{{ tenant.onboarding_status }}</span>
-      </li>
-      <li>
-        <span class="datapoint-label">Last sync</span>
-        <span class="datapoint-value muted">{{ tenant.last_sync }}</span>
-      </li>
-    </ul>
+    <span class="status-chip status-{{ 'ok' if tenant.status == 'active' else 'unknown' }}">{{ tenant.status }}</span>
+  </header>
+
+  {# 2. Compact health strip #}
+  <section class="health-strip" aria-label="Tenant health">
+    {% set chips = [
+      ('Inbox', tenant.health.inbox),
+      ('AI Agent', tenant.health.ai_agent),
+      ('Channels', tenant.health.channels),
+      ('Source of Truth', tenant.health.sot),
+      ('Escalations', tenant.health.escalations),
+      ('Billing / Trial', tenant.health.billing),
+    ] %}
+    {% for label, state in chips %}
+      <div class="health-cell health-{{ state }}">
+        <span class="health-dot" aria-hidden="true"></span>
+        <span class="health-label">{{ label }}</span>
+        <span class="health-state">{{ state }}</span>
+      </div>
+    {% endfor %}
   </section>
 
-  <section class="panel">
-    <div class="panel-header compact-header">
-      <h2>Actions</h2>
-      <span class="status-chip status-neutral">Not wired yet</span>
-    </div>
-    <ul class="action-list" aria-label="Tenant actions">
-      <li><button type="button" class="button-link button-disabled" disabled aria-disabled="true" title="Not wired yet">Edit tenant info</button></li>
-      <li><button type="button" class="button-link button-disabled" disabled aria-disabled="true" title="Not wired yet">Open tenant dashboard</button></li>
-      <li><button type="button" class="button-link button-disabled" disabled aria-disabled="true" title="Not wired yet">Push changes to tenant dashboard</button></li>
-      <li><button type="button" class="button-link button-disabled" disabled aria-disabled="true" title="Not wired yet">Pause tenant</button></li>
-      <li><button type="button" class="button-link button-disabled" disabled aria-disabled="true" title="Not wired yet">Reset onboarding / resend onboarding link</button></li>
-      <li><button type="button" class="button-link button-disabled" disabled aria-disabled="true" title="Not wired yet">View Source of Truth</button></li>
-      <li><button type="button" class="button-link button-disabled" disabled aria-disabled="true" title="Not wired yet">View activity log</button></li>
-    </ul>
-    <p class="muted compact-note">All tenant actions are placeholders until backend wiring lands. The disabled state is intentional.</p>
+  {# 3. Primary controls #}
+  <section class="controls-row" aria-label="Primary controls">
+    <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Open tenant dashboard</button>
+    <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Push changes</button>
+    <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Edit tenant</button>
+    <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Pause tenant</button>
   </section>
 
-  <section class="panel">
-    <div class="panel-header compact-header">
-      <h2>Recent changes</h2>
-    </div>
-    {% if tenant.recent_changes %}
-      <ul class="datapoint-list">
-        {% for change in tenant.recent_changes %}
+  {# 4. Operational cards #}
+  <section class="op-grid" aria-label="Operational state">
+    <article class="op-card">
+      <header>
+        <h3>Source of Truth</h3>
+        <span class="status-chip status-{{ 'ok' if tenant.health.sot == 'ok' else 'unknown' }}">{{ tenant.health.sot }}</span>
+      </header>
+      <p class="muted">{{ tenant.sot.summary }}</p>
+      <p class="op-meta">Last edited: {{ tenant.sot.last_edited }}</p>
+    </article>
+
+    <article class="op-card">
+      <header>
+        <h3>AI Agent</h3>
+        <span class="status-chip status-{{ 'ok' if tenant.health.ai_agent == 'ok' else 'unknown' }}">{{ tenant.health.ai_agent }}</span>
+      </header>
+      <dl class="op-kv">
+        <dt>Model</dt><dd>{{ tenant.agent.model }}</dd>
+        <dt>Tone</dt><dd>{{ tenant.agent.tone }}</dd>
+        <dt>Handoff</dt><dd>{{ tenant.agent.handoff }}</dd>
+      </dl>
+    </article>
+
+    <article class="op-card">
+      <header>
+        <h3>Channels</h3>
+        <span class="status-chip status-{{ 'ok' if tenant.health.channels == 'ok' else 'unknown' }}">{{ tenant.health.channels }}</span>
+      </header>
+      <ul class="channel-list">
+        {% for ch in tenant.channels %}
           <li>
-            <span class="datapoint-label">&middot;</span>
-            <span class="datapoint-value muted">{{ change }}</span>
+            <span class="channel-name">{{ ch.name }}</span>
+            <span class="status-chip status-{{ 'ok' if ch.state == 'connected' else 'unknown' }}">{{ ch.state }}</span>
           </li>
         {% endfor %}
       </ul>
+    </article>
+  </section>
+
+  {# 5. Activity log #}
+  <section class="op-card activity-card" aria-label="Activity log">
+    <header>
+      <h3>Activity</h3>
+    </header>
+    {% if tenant.activity %}
+      <ul class="activity-list">
+        {% for entry in tenant.activity %}
+          <li>{{ entry }}</li>
+        {% endfor %}
+      </ul>
     {% else %}
-      <p class="muted compact-note">No changes recorded yet.</p>
+      <p class="muted compact-note">No activity yet.</p>
     {% endif %}
   </section>
 
-  <section class="panel">
-    <div class="panel-header compact-header">
-      <h2>Onboarding &amp; reviews</h2>
+  {# 6. Danger zone #}
+  <section class="danger-zone" aria-label="Danger zone">
+    <div>
+      <h3>Danger zone</h3>
+      <p class="muted">Suspend cuts off the tenant from all channels and the AI agent. Used for non-payment, abuse, or emergency stop.</p>
     </div>
-    <ul class="inline-link-list">
-      <li><a class="inline-link" href="/admin/onboarding">Onboarding / Leads</a></li>
-      <li><a class="inline-link" href="/admin/reviews">Review queue</a></li>
-    </ul>
-    <p class="muted compact-note">Onboarding and review flows remain available globally; per-tenant scoping will arrive when these flows are tied to a tenant_id.</p>
+    <button type="button" class="danger-btn" disabled aria-disabled="true" title="Not wired yet">Suspend / cut off tenant</button>
   </section>
 {% endblock %}

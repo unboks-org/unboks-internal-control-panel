@@ -1,25 +1,54 @@
-"""Placeholder tenant registry for J3-P0-04 / J3-P0-05.
+"""Placeholder tenant registry for the ICP command center.
 
-The internal control panel is tenant-first. Real tenant storage will land in a
-later milestone; for now we expose a small, hard-coded list so the UI shell can
-be wired end-to-end without faking persistence.
+The internal control panel is tenant-first. Real persistence will land in a
+later milestone; for now we expose a small, hard-coded list so the UI can be
+wired end-to-end without faking storage.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
+
+
+@dataclass(frozen=True)
+class TenantHealth:
+    inbox: str = "unknown"        # ok | warn | down | unknown
+    ai_agent: str = "unknown"
+    channels: str = "unknown"
+    sot: str = "unknown"
+    escalations: str = "unknown"
+    billing: str = "unknown"      # ok | trial | overdue | unknown
+
+
+@dataclass(frozen=True)
+class TenantSourceOfTruth:
+    summary: str = "Not configured"
+    last_edited: str = "—"
+
+
+@dataclass(frozen=True)
+class TenantAgent:
+    model: str = "—"
+    tone: str = "—"
+    handoff: str = "—"
+
+
+@dataclass(frozen=True)
+class TenantChannel:
+    name: str
+    state: str  # connected | disconnected | unknown
 
 
 @dataclass(frozen=True)
 class Tenant:
     id: str
     name: str
-    status: str  # "active" | "paused"
-    dashboard_status: str
-    channels_status: str
-    sot_status: str
-    onboarding_status: str
-    last_sync: str
-    recent_changes: tuple[str, ...]
+    status: str  # active | paused | suspended
+    plan: str   # demo | trial | paid
+    health: TenantHealth = field(default_factory=TenantHealth)
+    sot: TenantSourceOfTruth = field(default_factory=TenantSourceOfTruth)
+    agent: TenantAgent = field(default_factory=TenantAgent)
+    channels: tuple[TenantChannel, ...] = field(default_factory=tuple)
+    activity: tuple[str, ...] = field(default_factory=tuple)
 
 
 _TENANTS: tuple[Tenant, ...] = (
@@ -27,37 +56,48 @@ _TENANTS: tuple[Tenant, ...] = (
         id="unboks-demo",
         name="Unboks Demo",
         status="active",
-        dashboard_status="ok",
-        channels_status="ok",
-        sot_status="ok",
-        onboarding_status="complete",
-        last_sync="not yet wired",
-        recent_changes=(
-            "Placeholder: tenant created",
-            "Placeholder: dashboard provisioned",
+        plan="demo",
+        health=TenantHealth(
+            inbox="ok",
+            ai_agent="ok",
+            channels="ok",
+            sot="ok",
+            escalations="ok",
+            billing="ok",
         ),
+        sot=TenantSourceOfTruth(
+            summary="Demo SoT seeded with 12 entries.",
+            last_edited="—",
+        ),
+        agent=TenantAgent(model="gpt-4o-mini", tone="friendly", handoff="manual"),
+        channels=(
+            TenantChannel("Web widget", "connected"),
+            TenantChannel("WhatsApp", "disconnected"),
+            TenantChannel("Email", "disconnected"),
+        ),
+        activity=(),
     ),
     Tenant(
         id="consulta-despertares",
         name="Consulta Despertares",
         status="active",
-        dashboard_status="unknown",
-        channels_status="unknown",
-        sot_status="unknown",
-        onboarding_status="unknown",
-        last_sync="not yet wired",
-        recent_changes=(),
+        plan="trial",
+        channels=(
+            TenantChannel("Web widget", "unknown"),
+            TenantChannel("WhatsApp", "unknown"),
+            TenantChannel("Email", "unknown"),
+        ),
     ),
     Tenant(
         id="bluefinn-charters",
         name="BlueFinn Charters",
         status="active",
-        dashboard_status="unknown",
-        channels_status="unknown",
-        sot_status="unknown",
-        onboarding_status="unknown",
-        last_sync="not yet wired",
-        recent_changes=(),
+        plan="trial",
+        channels=(
+            TenantChannel("Web widget", "unknown"),
+            TenantChannel("WhatsApp", "unknown"),
+            TenantChannel("Email", "unknown"),
+        ),
     ),
 )
 
