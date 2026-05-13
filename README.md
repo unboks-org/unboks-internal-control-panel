@@ -9,6 +9,8 @@ This repository is for Nr 3 only: the private Unboks.org internal control panel.
 - `/healthz`
 - password-protected `/admin`
 - local onboarding lead creation/status list
+- secure onboarding link generation
+- welcome email sending or manual-send preview when SMTP is not configured
 - Docker service shape for `wtyj-admin` on port `8010`
 - nginx IP allowlist template
 
@@ -26,6 +28,8 @@ cp .env.example .env
 Set `NR3_ADMIN_PASSWORD` and `NR3_SESSION_SECRET` in `.env`.
 
 Onboarding leads are stored in SQLite at `data/nr3.db` by default. The database file is local runtime state and is not committed.
+
+Email sending uses SMTP only when all SMTP environment variables are configured. Without SMTP, the admin screen generates a secure link and shows a manual-send preview without marking the email as sent.
 
 ## Run
 

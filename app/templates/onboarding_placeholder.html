@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Onboarding | Unboks{% endblock %}
+
+{% block body %}
+  <section class="login-panel">
+    <p class="eyebrow">Unboks onboarding</p>
+    <h1>Secure link valid</h1>
+    <p class="muted">Onboarding form coming next. Your secure link is valid.</p>
+    {% if lead.business_name %}
+      <p class="placeholder-detail">{{ lead.business_name }}</p>
+    {% endif %}
+  </section>
+{% endblock %}

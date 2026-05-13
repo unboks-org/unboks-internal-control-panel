@@ -158,6 +158,12 @@ button:hover {
   color: var(--color-red);
 }
 
+.alert-success {
+  background: var(--color-green-soft);
+  border: 1px solid #c7e6cf;
+  color: var(--color-green);
+}
+
 .status-chip {
   border-radius: 999px;
   display: inline-flex;
@@ -179,6 +185,36 @@ button:hover {
 .status-lead {
   background: var(--color-blue-soft);
   color: var(--color-blue);
+}
+
+.status-neutral {
+  background: #f1f3f4;
+  color: var(--color-muted);
+}
+
+.button-small {
+  font-size: 12px;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.manual-email-block {
+  background: #fbfbfd;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+}
+
+.compact-header {
+  margin-bottom: 2px;
+}
+
+h3 {
+  font-size: 14px;
+  margin: 0 0 4px;
 }
 
 .lead-form {
@@ -260,6 +296,14 @@ code {
   background: #fbfbfd;
   color: var(--color-muted);
   font-size: 12px;
+}
+
+.placeholder-detail {
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-weight: 650;
+  margin-top: 16px;
+  padding-top: 16px;
 }
 
 @media (max-width: 720px) {

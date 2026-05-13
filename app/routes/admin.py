@@ -4,8 +4,10 @@ from starlette.templating import Jinja2Templates
 from typing import Optional
 
 from app.config import get_settings
+from app.emailer import EmailSendResult, prepare_or_send_onboarding_email
 from app.onboarding import (
     LeadInput,
+    LeadNotFoundError,
     LeadValidationError,
     clean_optional,
     create_lead,
@@ -26,6 +28,27 @@ templates = Jinja2Templates(directory="app/templates")
 @router.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
     return RedirectResponse(url="/admin", status_code=303)
+
+
+@router.post("/admin/onboarding/leads/{lead_id}/send-email", response_class=HTMLResponse)
+def send_onboarding_email(request: Request, lead_id: int) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        result = prepare_or_send_onboarding_email(lead_id)
+    except LeadNotFoundError:
+        return render_admin(
+            request,
+            error="Onboarding lead not found.",
+            status_code=404,
+        )
+    return render_admin(
+        request,
+        email_result=result,
+        sent_notice="Onboarding email sent." if result.sent else None,
+    )
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -145,6 +168,8 @@ def render_admin(
     request: Request,
     error: Optional[str] = None,
     form: Optional[dict[str, str]] = None,
+    email_result: Optional[EmailSendResult] = None,
+    sent_notice: Optional[str] = None,
     status_code: int = 200,
 ) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -152,6 +177,8 @@ def render_admin(
         "admin.html",
         {
             "error": error,
+            "sent_notice": sent_notice,
+            "email_result": email_result,
             "form": form or {},
             "leads": list_leads(),
         },
