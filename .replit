@@ -14,3 +14,10 @@ build = ["pip", "install", "-r", "requirements.txt"]
 
 [gitHubImport]
 requiredFiles = [".replit"]
+
+[agent]
+expertMode = true
+
+[[ports]]
+localPort = 8010
+externalPort = 80
