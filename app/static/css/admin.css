@@ -1727,6 +1727,91 @@ button.button-disabled,
   }
 }
 
+/* Tenant notes / internal CRM */
+.notes-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  padding: 14px 16px;
+}
+
+.notes-panel-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.notes-panel-header h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+
+.notes-panel-summary {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+}
+
+.notes-list {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  list-style: none;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.note-row {
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 12px;
+}
+
+.note-row:last-child {
+  border-bottom: none;
+}
+
+.note-row.note-pinned {
+  background: #fafbfc;
+}
+
+.note-row-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 6px;
+}
+
+.note-prio,
+.note-pin-chip {
+  font-size: 10px;
+}
+
+.note-body {
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.note-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.notes-empty {
+  margin: 0;
+}
+
 /* Onboarding control */
 .onboarding-panel {
   background: var(--color-surface);

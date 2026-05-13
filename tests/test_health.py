@@ -228,6 +228,25 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert anomaly_section is not None
     for banned in ("emergency", "EMERGENCY", "URGENT", "CRITICAL ALERT"):
         assert banned not in anomaly_section.group(0)
+    # Tenant notes / internal CRM
+    assert "notes-panel" in workspace.text
+    assert "Tenant notes" in workspace.text
+    assert "Internal only. Never shown to the tenant." in workspace.text
+    assert "Last note:" in workspace.text
+    # Demo tenant has 2 seeded notes
+    assert "Reference tenant" in workspace.text
+    assert "Schedule quarterly review" in workspace.text
+    # Priority and pin chips
+    assert "Pinned" in workspace.text
+    for prio in ("Normal", "Important", "Critical"):
+        # Normal must appear (seed); Important/Critical may not on this tenant — skip strict
+        if prio == "Normal":
+            assert prio in workspace.text
+    # Actions
+    for action in ("Add note", "Edit note", "Pin note", "Unpin note", "Mark follow-up done"):
+        assert action in workspace.text
+    # Follow-up label appears for note-demo-2
+    assert "Follow-up:" in workspace.text
     # Onboarding control panel
     assert "onboarding-panel" in workspace.text
     for label in ("Intake link", "Intake submitted", "Review", "Missing setup items", "Next action"):

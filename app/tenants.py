@@ -174,6 +174,25 @@ class TenantBilling:
     payment_status: str = "—"        # ok | pending | failed | —
 
 
+NOTE_PRIORITIES: tuple[tuple[str, str], ...] = (
+    ("normal", "Normal"),
+    ("important", "Important"),
+    ("critical", "Critical"),
+)
+
+
+@dataclass(frozen=True)
+class TenantNote:
+    id: str
+    body: str
+    author: str = "—"           # placeholder
+    created_at: str = "—"       # placeholder
+    priority: str = "normal"    # normal | important | critical
+    pinned: bool = False
+    follow_up_date: Optional[str] = None  # placeholder
+    follow_up_done: bool = False
+
+
 @dataclass(frozen=True)
 class Tenant:
     id: str
@@ -190,6 +209,7 @@ class Tenant:
     escalations: TenantEscalations = field(default_factory=TenantEscalations)
     onboarding: TenantOnboarding = field(default_factory=TenantOnboarding)
     activity: tuple[TenantActivityEntry, ...] = field(default_factory=tuple)
+    notes: tuple[TenantNote, ...] = field(default_factory=tuple)
 
 
 _TENANTS: tuple[Tenant, ...] = (
@@ -198,6 +218,25 @@ _TENANTS: tuple[Tenant, ...] = (
         name="Unboks Demo",
         status="active",
         plan="demo",
+        notes=(
+            TenantNote(
+                id="note-demo-1",
+                body="Reference tenant — keep in sync with Nr2 demo content.",
+                author="—",
+                created_at="—",
+                priority="normal",
+                pinned=True,
+            ),
+            TenantNote(
+                id="note-demo-2",
+                body="Schedule quarterly review of demo SoT entries.",
+                author="—",
+                created_at="—",
+                priority="normal",
+                pinned=False,
+                follow_up_date="—",
+            ),
+        ),
         health=TenantHealth(
             inbox="ok",
             ai_agent="ok",
@@ -322,6 +361,17 @@ _TENANTS: tuple[Tenant, ...] = (
             payment_status="—",
         ),
         access=TenantAccess(status="needs_invite", operators=()),
+        notes=(
+            TenantNote(
+                id="note-consulta-1",
+                body="Owner asked for Spanish-only tone. Confirm during onboarding call.",
+                author="—",
+                created_at="—",
+                priority="important",
+                pinned=True,
+                follow_up_date="—",
+            ),
+        ),
     ),
     Tenant(
         id="bluefinn-charters",
@@ -340,6 +390,11 @@ _TENANTS: tuple[Tenant, ...] = (
         access=TenantAccess(status="needs_invite", operators=()),
     ),
 )
+
+
+def sorted_notes(notes: tuple[TenantNote, ...]) -> tuple[TenantNote, ...]:
+    """Pinned first, then in original order (newest-first is the caller's job)."""
+    return tuple(sorted(notes, key=lambda n: (0 if n.pinned else 1,)))
 
 
 def list_tenants() -> tuple[Tenant, ...]:

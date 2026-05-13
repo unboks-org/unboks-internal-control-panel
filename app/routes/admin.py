@@ -32,11 +32,13 @@ from app.tenants import (
     ANOMALY_STATUSES,
     CLOUD_PROVIDERS,
     ESCALATION_MODES,
+    NOTE_PRIORITIES,
     UPLOAD_CATEGORIES,
     Tenant,
     get_tenant,
     list_anomalies,
     list_tenants,
+    sorted_notes,
 )
 
 router = APIRouter()
@@ -151,6 +153,8 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "anomalies": list_anomalies(),
             "anomaly_signals": ANOMALY_SIGNALS,
             "anomaly_statuses": dict(ANOMALY_STATUSES),
+            "notes": sorted_notes(tenant.notes),
+            "note_priorities": NOTE_PRIORITIES,
         },
     )
 

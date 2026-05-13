@@ -639,6 +639,62 @@
     </div>
   </section>
 
+  {# 4j. Tenant notes / internal CRM (not visible to tenant) #}
+  <section class="notes-panel" aria-label="Tenant notes">
+    <header class="notes-panel-header">
+      <div>
+        <h3>Tenant notes</h3>
+        <p class="muted compact-note">Internal only. Never shown to the tenant.</p>
+      </div>
+      <div class="notes-panel-summary">
+        <span class="muted compact-note">
+          Last note:
+          <strong>{{ notes[0].created_at if notes else '—' }}</strong>
+        </span>
+        <button type="button" class="control-btn" aria-disabled="true" title="Not wired yet" disabled>
+          Add note
+        </button>
+      </div>
+    </header>
+    {% if notes %}
+      <ul class="notes-list">
+        {% for note in notes %}
+          {% set prio_class = {'normal': 'unknown', 'important': 'warn', 'critical': 'down'}.get(note.priority, 'unknown') %}
+          <li class="note-row{% if note.pinned %} note-pinned{% endif %}">
+            <div class="note-row-head">
+              <span class="status-chip status-{{ prio_class }} note-prio">{{ note.priority | capitalize }}</span>
+              {% if note.pinned %}<span class="status-chip status-lead note-pin-chip">Pinned</span>{% endif %}
+              <span class="note-author muted">{{ note.author }}</span>
+              <span class="dot-sep muted">&middot;</span>
+              <span class="note-date muted">{{ note.created_at }}</span>
+              {% if note.follow_up_date %}
+                <span class="dot-sep muted">&middot;</span>
+                <span class="note-followup muted">
+                  Follow-up: <strong>{{ note.follow_up_date }}</strong>
+                  {% if note.follow_up_done %}<span class="status-chip status-ok">Done</span>{% endif %}
+                </span>
+              {% endif %}
+            </div>
+            <p class="note-body">{{ note.body }}</p>
+            <div class="note-actions">
+              <button type="button" class="control-btn" aria-disabled="true" title="Not wired yet" disabled>Edit note</button>
+              <button type="button" class="control-btn" aria-disabled="true" title="Not wired yet" disabled>
+                {{ "Unpin note" if note.pinned else "Pin note" }}
+              </button>
+              {% if note.follow_up_date and not note.follow_up_done %}
+                <button type="button" class="control-btn" aria-disabled="true" title="Not wired yet" disabled>
+                  Mark follow-up done
+                </button>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted compact-note notes-empty">No internal notes yet.</p>
+    {% endif %}
+  </section>
+
   {# 5. Activity log / audit trail #}
   <section class="activity-panel" aria-label="Activity log">
     <header class="activity-panel-header">
