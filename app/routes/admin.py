@@ -55,7 +55,7 @@ def _shell_context(active: str, active_tenant: Optional[Tenant] = None) -> dict:
 
 @router.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/tenants", status_code=303)
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -87,7 +87,7 @@ def login_submit(request: Request, password: str = Form(default="")) -> Response
             status_code=401,
         )
 
-    response = RedirectResponse(url="/admin", status_code=303)
+    response = RedirectResponse(url="/admin/tenants", status_code=303)
     set_session_cookie(response, create_session_value(settings), settings)
     return response
 
@@ -105,12 +105,12 @@ def logout() -> RedirectResponse:
 
 
 @router.get("/admin", response_class=HTMLResponse)
-def admin_home(request: Request) -> Response:
+def admin_root(request: Request) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
-    return render_home(request)
+    return RedirectResponse(url="/admin/tenants", status_code=303)
 
 
 @router.get("/admin/tenants", response_class=HTMLResponse)
@@ -122,7 +122,7 @@ def admin_tenants_index(request: Request) -> Response:
     tenants = list_tenants()
     if tenants:
         return RedirectResponse(url=f"/admin/tenants/{tenants[0].id}", status_code=303)
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/settings", status_code=303)
 
 
 @router.get("/admin/tenants/{tenant_id}", response_class=HTMLResponse)
@@ -133,17 +133,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
         return redirect
     tenant = get_tenant(tenant_id)
     if tenant is None:
-        return templates.TemplateResponse(
-            request,
-            "admin_home.html",
-            {
-                **_shell_context("home"),
-                "totals": _pipeline_totals(list_leads()),
-                "tenant_count": len(list_tenants()),
-                "tenant_error": f"Tenant '{tenant_id}' not found.",
-            },
-            status_code=404,
-        )
+        return RedirectResponse(url="/admin/tenants", status_code=303)
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
@@ -367,20 +357,6 @@ def _pipeline_totals(leads) -> dict[str, int]:
         "in_intake": in_intake,
         "awaiting_review": awaiting_review,
     }
-
-
-def render_home(request: Request) -> HTMLResponse:
-    leads = list_leads()
-    totals = _pipeline_totals(leads)
-    return templates.TemplateResponse(
-        request,
-        "admin_home.html",
-        {
-            **_shell_context("home"),
-            "totals": totals,
-            "tenant_count": len(list_tenants()),
-        },
-    )
 
 
 def render_onboarding(

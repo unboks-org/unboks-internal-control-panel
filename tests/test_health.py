@@ -65,11 +65,6 @@ def test_create_onboarding_lead_persists_and_rejects_duplicate(monkeypatch, tmp_
     assert "Test Business" in onboarding.text
     assert "lead_created" in onboarding.text
 
-    home = client.get("/admin")
-    assert home.status_code == 200
-    # Home is a compact operational snapshot; lead total should be at least 1
-    assert "Onboarding leads" in home.text
-
     duplicate = client.post(
         "/admin/onboarding/leads",
         data={"email": "TEST@example.com"},
@@ -91,28 +86,29 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     client = TestClient(app)
     client.post("/login", data={"password": "test-password"})
 
-    home = client.get("/admin")
-    assert home.status_code == 200
-    assert "app-shell" in home.text
-    assert "tenant-selector" in home.text
-    # Tenants button label must be exactly "Tenants" — no "Select tenant" placeholder
-    assert "tenant-selector-label" in home.text
-    assert "Select tenant" not in home.text
-    assert "Unboks Demo" in home.text
-    assert "Consulta Despertares" in home.text
-    assert "BlueFinn Charters" in home.text
-    # Sidebar must only show TENANTS, HOME, SETTINGS — not Onboarding/Reviews
-    assert "sidebar-nav" in home.text
-    assert ">Home<" in home.text
-    assert ">Settings<" in home.text
-    # Sidebar must not contain Onboarding/Reviews as nav-items (they live in body links only)
-    sidebar = home.text.split('class="sidebar-nav"', 1)[1].split("</nav>", 1)[0]
+    # /admin redirects straight to the first tenant workspace — no Home page
+    landing = client.get("/admin", follow_redirects=False)
+    assert landing.status_code == 303
+    assert landing.headers["location"] == "/admin/tenants"
+
+    shell = client.get("/admin")  # follows redirects to first tenant workspace
+    assert shell.status_code == 200
+    assert "app-shell" in shell.text
+    assert "tenant-selector" in shell.text
+    assert "tenant-selector-label" in shell.text
+    assert "Select tenant" not in shell.text
+    assert "Unboks Demo" in shell.text
+    assert "Consulta Despertares" in shell.text
+    assert "BlueFinn Charters" in shell.text
+    # Sidebar must only show TENANTS and SETTINGS — Home was removed; no Onboarding/Reviews
+    assert "sidebar-nav" in shell.text
+    assert ">Settings<" in shell.text
+    sidebar = shell.text.split('class="sidebar-nav"', 1)[1].split("</nav>", 1)[0]
+    assert "Home" not in sidebar
+    assert ">Home<" not in shell.text
     assert "Onboarding" not in sidebar
     assert "Reviews" not in sidebar
-    assert "Home" in sidebar
     assert "Settings" in sidebar
-    # Active state on Home
-    assert 'aria-current="page"' in home.text
 
     settings_page = client.get("/admin/settings")
     assert settings_page.status_code == 200
@@ -254,9 +250,10 @@ def test_tenant_workspace_shows_no_activity_for_empty_tenant(monkeypatch, tmp_pa
     assert index.status_code == 303
     assert index.headers["location"] == "/admin/tenants/unboks-demo"
 
-    # Unknown tenant returns 404 but still renders shell
-    missing = client.get("/admin/tenants/no-such-tenant")
-    assert missing.status_code == 404
+    # Unknown tenant redirects back to the tenants index (no Home page exists)
+    missing = client.get("/admin/tenants/no-such-tenant", follow_redirects=False)
+    assert missing.status_code == 303
+    assert missing.headers["location"] == "/admin/tenants"
 
 
 def test_admin_onboarding_and_reviews_still_reachable(monkeypatch, tmp_path) -> None:
