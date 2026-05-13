@@ -144,6 +144,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "upload_categories": UPLOAD_CATEGORIES,
             "escalation_modes": ESCALATION_MODES,
             "activity_type_labels": dict(ACTIVITY_TYPES),
+            "attention_items": _compute_attention_items(list_tenants()),
         },
     )
 
@@ -338,6 +339,70 @@ def onboarding_lead_setup_summary(request: Request, lead_id: int) -> Response:
 # ---------------------------------------------------------------------------
 # Render helpers
 # ---------------------------------------------------------------------------
+
+
+_ATTENTION_KIND_LABELS: tuple[tuple[str, str], ...] = (
+    ("problem", "Problem tenant"),
+    ("setup_incomplete", "Setup incomplete"),
+    ("trial_ending_soon", "Trial ending soon"),
+    ("channels_disconnected", "Channels disconnected"),
+    ("agent_paused", "Agent paused"),
+    ("sot_missing", "SOT missing"),
+)
+
+
+def _compute_attention_items(tenants) -> list[dict]:
+    items: list[dict] = []
+    for t in tenants:
+        # Problem (worst-case bucket): hard escalations or billing overdue/cancelled
+        if t.escalations.hard_count > 0 or t.billing.status in ("overdue", "cancelled"):
+            items.append({
+                "tenant_id": t.id, "tenant_name": t.name,
+                "kind": "problem", "label": "Problem tenant", "severity": "P0",
+            })
+
+        # Setup incomplete
+        if t.onboarding.status != "ready":
+            items.append({
+                "tenant_id": t.id, "tenant_name": t.name,
+                "kind": "setup_incomplete", "label": "Setup incomplete", "severity": "P1",
+            })
+
+        # Trial ending soon
+        days_left = t.billing.trial_days_left
+        if days_left is not None and days_left <= 7:
+            items.append({
+                "tenant_id": t.id, "tenant_name": t.name,
+                "kind": "trial_ending_soon", "label": "Trial ending soon",
+                "severity": "P0" if days_left <= 2 else "P1",
+            })
+
+        # Channels disconnected
+        if t.health.channels in ("warn", "down") or (
+            t.channels and all(ch.state != "connected" for ch in t.channels)
+        ):
+            items.append({
+                "tenant_id": t.id, "tenant_name": t.name,
+                "kind": "channels_disconnected", "label": "Channels disconnected", "severity": "P2",
+            })
+
+        # Agent paused (auto-reply off or human takeover active)
+        if not t.agent.auto_reply_enabled or t.agent.human_takeover_active:
+            items.append({
+                "tenant_id": t.id, "tenant_name": t.name,
+                "kind": "agent_paused", "label": "Agent paused", "severity": "P2",
+            })
+
+        # SOT missing
+        if t.sot.status not in ("ok",) or t.sot.files_count == 0:
+            items.append({
+                "tenant_id": t.id, "tenant_name": t.name,
+                "kind": "sot_missing", "label": "SOT missing", "severity": "P2",
+            })
+
+    severity_order = {"P0": 0, "P1": 1, "P2": 2}
+    items.sort(key=lambda i: (severity_order.get(i["severity"], 9), i["tenant_name"]))
+    return items
 
 
 def _pipeline_totals(leads) -> dict[str, int]:

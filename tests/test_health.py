@@ -193,6 +193,17 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Disconnect" in workspace.text
     assert "Not connected" in workspace.text  # at least one channel is not connected
     assert "Last message" in workspace.text
+    # Attention center (cross-tenant)
+    assert "attention-center" in workspace.text
+    assert "Needs attention" in workspace.text
+    # With current seed data the trial tenants trigger setup/trial/channels/SOT/agent flags
+    assert "Trial ending soon" in workspace.text
+    assert "Setup incomplete" in workspace.text
+    assert "Channels disconnected" in workspace.text
+    assert "Open tenant" in workspace.text
+    # Severity chips: at least P1 must appear given seed data
+    assert ">P1<" in workspace.text
+    assert "attention-sev" in workspace.text
     # Onboarding control panel
     assert "onboarding-panel" in workspace.text
     for label in ("Intake link", "Intake submitted", "Review", "Missing setup items", "Next action"):
