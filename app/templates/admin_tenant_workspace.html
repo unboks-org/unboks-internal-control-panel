@@ -434,6 +434,74 @@
     </div>
   </section>
 
+  {# 4i. Onboarding control #}
+  {% set ob = tenant.onboarding %}
+  {% set ob_status_class = {
+      'not_started': 'unknown',
+      'sent': 'warn',
+      'started': 'warn',
+      'submitted': 'lead',
+      'reviewed': 'lead',
+      'ready': 'ok'
+    }.get(ob.status, 'unknown') %}
+  {% set ob_status_label = {
+      'not_started': 'Not started',
+      'sent': 'Sent',
+      'started': 'Started',
+      'submitted': 'Submitted',
+      'reviewed': 'Reviewed',
+      'ready': 'Ready'
+    }.get(ob.status, ob.status) %}
+  {% set ob_link_class = {'not_generated': 'unknown', 'active': 'ok', 'expired': 'down'}.get(ob.intake_link_status, 'unknown') %}
+  {% set ob_link_label = {'not_generated': 'Not generated', 'active': 'Active', 'expired': 'Expired'}.get(ob.intake_link_status, ob.intake_link_status) %}
+  <section class="onboarding-panel" aria-label="Onboarding">
+    <header class="onboarding-panel-header">
+      <div>
+        <h3>Onboarding</h3>
+        <p class="muted compact-note">Tenant setup and intake state.</p>
+      </div>
+      <span class="status-chip status-{{ ob_status_class }}">{{ ob_status_label }}</span>
+    </header>
+
+    <div class="onboarding-stats">
+      <div class="data-stat">
+        <span class="data-stat-label">Intake link</span>
+        <span class="data-stat-value">
+          <span class="status-chip status-{{ ob_link_class }}">{{ ob_link_label }}</span>
+        </span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Intake submitted</span>
+        <span class="data-stat-value">{{ ob.intake_submitted_at }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Review</span>
+        <span class="data-stat-value">{{ ob.review_status }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Missing setup items</span>
+        <span class="data-stat-value">
+          {{ ob.missing_items_count }}
+          {% if ob.missing_items_count > 0 %}<span class="status-chip status-warn">to do</span>{% endif %}
+        </span>
+      </div>
+    </div>
+
+    <div class="onboarding-next">
+      <span class="data-stat-label">Next action</span>
+      <p class="onboarding-next-text">{{ ob.next_action }}</p>
+    </div>
+
+    <div class="onboarding-actions">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Send onboarding link</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Copy onboarding link</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Complete onboarding</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Review submitted answers</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Mark tenant ready</button>
+      <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Reset onboarding</button>
+    </div>
+  </section>
+
   {# 4h. Escalations #}
   {% set esc = tenant.escalations %}
   {% set esc_state_class = 'down' if esc.hard_count > 0 else ('warn' if esc.open_count > 0 or esc.soft_count > 0 else 'ok') %}

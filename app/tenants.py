@@ -117,6 +117,16 @@ def activity_type_label(value: str) -> str:
 
 
 @dataclass(frozen=True)
+class TenantOnboarding:
+    status: str = "not_started"           # not_started | sent | started | submitted | reviewed | ready
+    intake_link_status: str = "not_generated"  # not_generated | active | expired
+    intake_submitted_at: str = "—"
+    review_status: str = "—"
+    missing_items_count: int = 0
+    next_action: str = "Send onboarding link"
+
+
+@dataclass(frozen=True)
 class TenantEscalations:
     open_count: int = 0
     soft_count: int = 0
@@ -178,6 +188,7 @@ class Tenant:
     push: TenantPushState = field(default_factory=TenantPushState)
     access: TenantAccess = field(default_factory=TenantAccess)
     escalations: TenantEscalations = field(default_factory=TenantEscalations)
+    onboarding: TenantOnboarding = field(default_factory=TenantOnboarding)
     activity: tuple[TenantActivityEntry, ...] = field(default_factory=tuple)
 
 
@@ -256,6 +267,14 @@ _TENANTS: tuple[Tenant, ...] = (
             alert_email=True,
             alert_telegram=False,
             operator_on_duty="—",
+        ),
+        onboarding=TenantOnboarding(
+            status="ready",
+            intake_link_status="not_generated",
+            intake_submitted_at="—",
+            review_status="—",
+            missing_items_count=0,
+            next_action="No action required.",
         ),
         access=TenantAccess(
             status="active",

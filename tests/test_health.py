@@ -176,6 +176,13 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Disconnect" in workspace.text
     assert "Not connected" in workspace.text  # at least one channel is not connected
     assert "Last message" in workspace.text
+    # Onboarding control panel
+    assert "onboarding-panel" in workspace.text
+    for label in ("Intake link", "Intake submitted", "Review", "Missing setup items", "Next action"):
+        assert label in workspace.text
+    for action in ("Send onboarding link", "Copy onboarding link", "Complete onboarding",
+                   "Review submitted answers", "Mark tenant ready", "Reset onboarding"):
+        assert action in workspace.text
     # Escalations panel
     assert "escalations-panel" in workspace.text
     for label in ("Open", "Soft escalations", "Hard escalations", "Avg response time",
