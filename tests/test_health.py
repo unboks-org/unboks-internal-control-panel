@@ -143,6 +143,26 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Pause tenant" in workspace.text
     # Operational cards
     assert "op-grid" in workspace.text
+    # AI Agent control panel
+    assert "agent-panel" in workspace.text
+    assert "Agent replies" in workspace.text
+    assert "Auto-reply" in workspace.text
+    assert "Human takeover" in workspace.text
+    assert "Learning from operator answers" in workspace.text
+    assert "Escalation behavior" in workspace.text
+    assert "Soft escalation allowed" in workspace.text
+    assert "Hard escalation allowed" in workspace.text
+    assert "Both allowed" in workspace.text
+    assert "Tone / personality" in workspace.text
+    assert "Edit tone" in workspace.text
+    assert "Escalation rules" in workspace.text
+    assert "Edit rules" in workspace.text
+    assert "Test Agent reply" in workspace.text
+    # Each toggle must be a real disabled control, not a passive chip
+    assert workspace.text.count('class="agent-toggle"') >= 4
+    # Forbidden legacy terminology
+    assert "Soft mode" not in workspace.text
+    assert "Hard mode" not in workspace.text
     # Source of Truth / Data Room
     assert "data-room" in workspace.text
     assert "Knowledge items" in workspace.text
@@ -176,6 +196,8 @@ def test_tenant_workspace_shows_no_activity_for_empty_tenant(monkeypatch, tmp_pa
     workspace = client.get("/admin/tenants/consulta-despertares")
     assert workspace.status_code == 200
     assert "No activity yet" in workspace.text
+    # Empty tenant must show "No recent replies yet" inside the AI Agent panel
+    assert "No recent replies yet" in workspace.text
 
     # /admin/tenants redirects to first tenant
     index = client.get("/admin/tenants", follow_redirects=False)

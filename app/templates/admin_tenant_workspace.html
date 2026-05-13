@@ -56,18 +56,6 @@
   <section class="op-grid" aria-label="Operational state">
     <article class="op-card">
       <header>
-        <h3>AI Agent</h3>
-        <span class="status-chip status-{{ 'ok' if tenant.health.ai_agent == 'ok' else 'unknown' }}">{{ tenant.health.ai_agent }}</span>
-      </header>
-      <dl class="op-kv">
-        <dt>Model</dt><dd>{{ tenant.agent.model }}</dd>
-        <dt>Tone</dt><dd>{{ tenant.agent.tone }}</dd>
-        <dt>Handoff</dt><dd>{{ tenant.agent.handoff }}</dd>
-      </dl>
-    </article>
-
-    <article class="op-card">
-      <header>
         <h3>Channels</h3>
         <span class="status-chip status-{{ 'ok' if tenant.health.channels == 'ok' else 'unknown' }}">{{ tenant.health.channels }}</span>
       </header>
@@ -80,6 +68,85 @@
         {% endfor %}
       </ul>
     </article>
+  </section>
+
+  {# 4c. AI Agent control panel #}
+  <section class="agent-panel" aria-label="AI Agent">
+    <header class="agent-panel-header">
+      <div>
+        <h3>AI Agent</h3>
+        <p class="muted compact-note">Per-tenant agent behavior. Replies, auto-reply, escalation behavior, takeover, and learning.</p>
+      </div>
+      <span class="status-chip status-{{ 'ok' if tenant.health.ai_agent == 'ok' else 'unknown' }}">{{ tenant.health.ai_agent }}</span>
+    </header>
+
+    <div class="agent-toggle-row">
+      <button type="button" class="agent-toggle" disabled aria-disabled="true" title="Not wired yet">
+        <span class="agent-toggle-label">Agent replies</span>
+        <span class="status-chip status-{{ 'ok' if tenant.agent.replies_enabled else 'unknown' }}">{{ 'ON' if tenant.agent.replies_enabled else 'OFF' }}</span>
+      </button>
+      <button type="button" class="agent-toggle" disabled aria-disabled="true" title="Not wired yet">
+        <span class="agent-toggle-label">Auto-reply</span>
+        <span class="status-chip status-{{ 'ok' if tenant.agent.auto_reply_enabled else 'unknown' }}">{{ 'ON' if tenant.agent.auto_reply_enabled else 'OFF' }}</span>
+      </button>
+      <button type="button" class="agent-toggle" disabled aria-disabled="true" title="Not wired yet">
+        <span class="agent-toggle-label">Human takeover</span>
+        <span class="status-chip status-{{ 'warn' if tenant.agent.human_takeover_active else 'unknown' }}">{{ 'Active' if tenant.agent.human_takeover_active else 'Not active' }}</span>
+      </button>
+      <button type="button" class="agent-toggle" disabled aria-disabled="true" title="Not wired yet">
+        <span class="agent-toggle-label">Learning from operator answers</span>
+        <span class="status-chip status-{{ 'ok' if tenant.agent.learning_enabled else 'unknown' }}">{{ 'ON' if tenant.agent.learning_enabled else 'OFF' }}</span>
+      </button>
+    </div>
+
+    <div class="agent-grid">
+      <div class="agent-block">
+        <h4>Escalation behavior</h4>
+        <ul class="escalation-list">
+          {% for value, label in escalation_modes %}
+            <li>
+              <span>{{ label }}</span>
+              <span class="status-chip status-{{ 'ok' if tenant.agent.escalation_mode == value else 'unknown' }}">
+                {% if tenant.agent.escalation_mode == value %}selected{% else %}—{% endif %}
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+        <p class="muted compact-note">
+          Soft escalation: agent needs help, operator guides, agent replies.<br>
+          Hard escalation: human takeover, agent stops, operator replies directly.
+        </p>
+      </div>
+
+      <div class="agent-block">
+        <h4>Tone / personality</h4>
+        <p class="agent-summary">{{ tenant.agent.tone_summary }}</p>
+        <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Edit tone</button>
+      </div>
+
+      <div class="agent-block">
+        <h4>Escalation rules</h4>
+        <p class="agent-summary">{{ tenant.agent.escalation_rules_summary }}</p>
+        <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Edit rules</button>
+      </div>
+    </div>
+
+    <div class="agent-actions">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Test Agent reply</button>
+    </div>
+
+    <div class="agent-replies">
+      <h4>Recent Agent replies</h4>
+      {% if tenant.agent.recent_replies %}
+        <ul class="reply-list">
+          {% for reply in tenant.agent.recent_replies %}
+            <li>{{ reply }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted compact-note">No recent replies yet.</p>
+      {% endif %}
+    </div>
   </section>
 
   {# 4b. Source of Truth / Data Room #}

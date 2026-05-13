@@ -1136,6 +1136,155 @@ button.button-disabled,
   margin-bottom: 14px;
 }
 
+/* AI Agent control panel */
+.agent-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  padding: 16px 18px;
+}
+
+.agent-panel-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.agent-panel-header h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+
+.agent-toggle-row {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.agent-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--color-border);
+  color: var(--color-text);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.agent-toggle[disabled],
+.agent-toggle[disabled]:hover {
+  cursor: not-allowed;
+}
+
+.agent-toggle:first-child {
+  border-left: 0;
+}
+
+.agent-toggle-label {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.agent-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-bottom: 12px;
+}
+
+.agent-block {
+  background: #fafbfc;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.agent-block h4 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.agent-summary {
+  color: var(--color-text);
+  font-size: 12px;
+  margin: 0;
+}
+
+.escalation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.escalation-list li {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  padding: 6px 0;
+}
+
+.escalation-list li:first-child {
+  border-top: 0;
+}
+
+.agent-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.agent-replies h4 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0 0 6px;
+  text-transform: uppercase;
+}
+
+.reply-list {
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.reply-list li {
+  border-bottom: 1px solid var(--color-border);
+  padding: 6px 0;
+}
+
+@media (max-width: 720px) {
+  .agent-toggle-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .agent-toggle {
+    border-top: 1px solid var(--color-border);
+  }
+}
+
 /* Source of Truth / Data Room */
 .data-room {
   background: var(--color-surface);

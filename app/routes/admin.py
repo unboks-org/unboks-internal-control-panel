@@ -28,6 +28,7 @@ from app.security import (
 )
 from app.tenants import (
     CLOUD_PROVIDERS,
+    ESCALATION_MODES,
     UPLOAD_CATEGORIES,
     Tenant,
     get_tenant,
@@ -150,6 +151,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "tenant": tenant,
             "cloud_providers": CLOUD_PROVIDERS,
             "upload_categories": UPLOAD_CATEGORIES,
+            "escalation_modes": ESCALATION_MODES,
         },
     )
 

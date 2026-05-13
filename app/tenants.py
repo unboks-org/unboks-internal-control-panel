@@ -54,6 +54,21 @@ class TenantAgent:
     model: str = "—"
     tone: str = "—"
     handoff: str = "—"
+    replies_enabled: bool = False
+    auto_reply_enabled: bool = False
+    escalation_mode: str = "both"   # soft | hard | both
+    human_takeover_active: bool = False
+    learning_enabled: bool = False
+    tone_summary: str = "Not configured"
+    escalation_rules_summary: str = "Not configured"
+    recent_replies: tuple[str, ...] = field(default_factory=tuple)
+
+
+ESCALATION_MODES: tuple[tuple[str, str], ...] = (
+    ("soft", "Soft escalation allowed"),
+    ("hard", "Hard escalation allowed"),
+    ("both", "Both allowed"),
+)
 
 
 @dataclass(frozen=True)
@@ -99,7 +114,22 @@ _TENANTS: tuple[Tenant, ...] = (
             last_sync="—",
             pending_review=0,
         ),
-        agent=TenantAgent(model="gpt-4o-mini", tone="friendly", handoff="manual"),
+        agent=TenantAgent(
+            model="gpt-4o-mini",
+            tone="friendly",
+            handoff="manual",
+            replies_enabled=True,
+            auto_reply_enabled=True,
+            escalation_mode="both",
+            human_takeover_active=False,
+            learning_enabled=True,
+            tone_summary="Friendly, concise, neutral. Mirrors customer language.",
+            escalation_rules_summary=(
+                "Soft: ask operator when unsure about price, stock, or policy. "
+                "Hard: hand over on refund, complaint, or explicit human request."
+            ),
+            recent_replies=(),
+        ),
         channels=(
             TenantChannel("Web widget", "connected"),
             TenantChannel("WhatsApp", "disconnected"),
