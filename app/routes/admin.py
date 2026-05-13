@@ -28,11 +28,14 @@ from app.security import (
 )
 from app.tenants import (
     ACTIVITY_TYPES,
+    ANOMALY_SIGNALS,
+    ANOMALY_STATUSES,
     CLOUD_PROVIDERS,
     ESCALATION_MODES,
     UPLOAD_CATEGORIES,
     Tenant,
     get_tenant,
+    list_anomalies,
     list_tenants,
 )
 
@@ -145,6 +148,9 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "escalation_modes": ESCALATION_MODES,
             "activity_type_labels": dict(ACTIVITY_TYPES),
             "attention_items": _compute_attention_items(list_tenants()),
+            "anomalies": list_anomalies(),
+            "anomaly_signals": ANOMALY_SIGNALS,
+            "anomaly_statuses": dict(ANOMALY_STATUSES),
         },
     )
 

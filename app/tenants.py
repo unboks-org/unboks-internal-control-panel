@@ -351,3 +351,39 @@ def get_tenant(tenant_id: str) -> Optional[Tenant]:
         if tenant.id == tenant_id:
             return tenant
     return None
+
+
+# Anomaly monitor (UI-only, no real detection backend yet).
+ANOMALY_SIGNALS: tuple[tuple[str, str], ...] = (
+    ("message_volume_spike", "Message volume spike"),
+    ("escalation_spike", "Escalation spike"),
+    ("agent_reply_failure", "Agent reply failure"),
+    ("channel_disconnected", "Channel disconnected"),
+    ("repeated_complaint", "Repeated customer complaint"),
+    ("sot_missing_or_stale", "SOT missing / stale"),
+    ("long_unanswered", "Long unanswered conversation"),
+    ("unusual_order_pattern", "Unusual booking/order pattern"),
+    ("error_rate_spike", "Error rate spike"),
+)
+
+ANOMALY_STATUSES: tuple[tuple[str, str], ...] = (
+    ("new", "New"),
+    ("investigating", "Investigating"),
+    ("resolved", "Resolved"),
+)
+
+
+@dataclass(frozen=True)
+class AnomalyFlag:
+    tenant_id: str
+    tenant_name: str
+    signal: str           # key from ANOMALY_SIGNALS
+    signal_label: str
+    severity: str         # P0 | P1 | P2
+    first_detected: str   # display string, e.g. "—"
+    status: str           # new | investigating | resolved
+
+
+def list_anomalies() -> tuple[AnomalyFlag, ...]:
+    # No real detection backend yet — return empty to render the placeholder state.
+    return ()

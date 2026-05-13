@@ -1,0 +1,351 @@
+Yes. Send this to Replit as one queue.
+
+NR3 ICP QUEUE — Build tenant-first internal control panel items in order
+Context:
+This is Nr 3: Unboks.org Internal Control Panel.
+It is tenant-first. Home has been deleted because it is redundant.
+The ICP starts from Tenants. The sidebar must stay spartan.
+Sidebar must show only:
+1. TENANTS
+2. SETTINGS
+Rules for all tasks:
+- Work only inside unboks-org/unboks-internal-control-panel.
+- Do not touch Nr 2 / unboks-dashboard-api.
+- Do not touch BensonOpas/wtyj-agent.
+- Do not touch production data.
+- Do not wire real backend unless already safely available.
+- UI/product structure first.
+- FastAPI + Jinja2 + vanilla HTML/CSS/JS only.
+- No React.
+- No Vite.
+- No marketing fluff.
+- No fake dramatic data.
+- If data is not real, show calm placeholder/empty state.
+- Keep it spartan, compact, operational.
+- Tests must pass after each logical batch.
+- Commit and push after each logical batch if possible.
+- Final report per task: files changed, UX changes, tests result, commit hash, pushed yes/no.
+Use Musk / first-principles engineering:
+1. Question every requirement.
+2. Delete unnecessary parts.
+3. Simplify and optimize.
+4. Accelerate only after structure is right.
+5. Automate only after manual workflow is correct.
+==================================================
+TASK 1 — J3-P0-17 Remove Home assumptions and make Tenants default landing page
+==================================================
+Goal:
+Home is deleted/redundant. ICP starts from Tenants.
+Required behavior:
+- Sidebar only shows TENANTS and SETTINGS.
+- After login, redirect to Tenants page / first tenant workspace.
+- No Home link in sidebar.
+- No Home route visible in UI.
+- Any Home stats that matter must move into tenant workspace if useful.
+- Keep Settings.
+- Keep public onboarding routes working.
+==================================================
+TASK 2 — J3-P0-18 Add global tenant search / quick switcher
+==================================================
+Goal:
+ICP must let operator quickly find and switch tenants.
+Add at top of Tenants sidebar section:
+- Search tenants input
+- Filters:
+  - Active
+  - Trial
+  - Paused
+  - Problem
+- Tenant count
+Behavior:
+- Typing filters tenant list.
+- Clicking tenant opens tenant workspace.
+- Keep it compact.
+- Placeholder tenant data is OK.
+==================================================
+TASK 3 — J3-P0-19 Add tenant status/problem center
+==================================================
+Goal:
+ICP must show which tenants need attention.
+Add compact section in Tenants view:
+- Needs attention
+- Problem tenants
+- Setup incomplete
+- Trial ending soon
+- Channels disconnected
+- Agent paused
+- SOT missing
+Each item shows:
+- Tenant name
+- Issue type
+- Severity: P0 / P1 / P2
+- Action: Open tenant
+Rules:
+- UI only for now.
+- No fake dramatic alerts.
+- Use placeholder/demo data only.
+- Keep it compact.
+==================================================
+TASK 4 — J3-P0-20 Add anomaly monitor / unusual behavior flags
+==================================================
+Goal:
+ICP must flag strange or unusual tenant behavior.
+Add compact Anomaly Monitor section.
+Signals:
+- Message volume spike
+- Escalation spike
+- Agent reply failure
+- Channel disconnected
+- Repeated customer complaint
+- SOT missing / stale
+- Long unanswered conversation
+- Unusual booking/order pattern
+- Error rate spike
+Each flag shows:
+- Tenant
+- Signal
+- Severity: P0 / P1 / P2
+- First detected
+- Status: New / Investigating / Resolved
+- Action: Open tenant
+- Action: Mark reviewed
+Rules:
+- UI only for now.
+- No real detection backend yet.
+- Calm language: “Unusual activity”, not “emergency”.
+- Do not fake live monitoring.
+- If no real data, show:
+  “No unusual activity detected.”
+==================================================
+TASK 5 — J3-P0-21 Tenant notes / internal CRM
+==================================================
+Goal:
+ICP must let Unboks team keep internal notes per tenant.
+Add compact Tenant Notes section:
+- Internal notes
+- Last note
+- Note author placeholder
+- Note date placeholder
+- Priority: Normal / Important / Critical
+- Next follow-up date placeholder
+Actions:
+- Add note
+- Edit note
+- Pin note
+- Mark follow-up done
+Rules:
+- UI only for now.
+- No real persistence yet unless already available.
+- Do not show notes to tenant.
+==================================================
+TASK 6 — J3-P0-22 Tenant setup checklist
+==================================================
+Goal:
+ICP must show tenant setup progress.
+Add compact Setup Checklist:
+- Tenant profile completed
+- Onboarding form completed
+- Source of Truth uploaded
+- Channels connected
+- AI Agent configured
+- Escalation rules configured
+- Operators invited
+- Dashboard ready
+- Trial/payment configured
+Each checklist item:
+- Status: Done / Missing / Needs review
+- Action: Open relevant section
+Show:
+- Setup completion percentage
+- Next required action
+Rules:
+- UI only for now.
+- No fake completion if unknown.
+- Use placeholder statuses clearly.
+==================================================
+TASK 7 — J3-P0-23 Tenant contract / plan details
+==================================================
+Goal:
+ICP must show commercial/account status per tenant.
+Add compact Contract / Plan card:
+- Plan: Trial / Basic / Pro / Custom
+- Trial start
+- Trial end
+- Monthly price placeholder
+- Setup fee placeholder
+- Contract status: Draft / Active / Paused / Cancelled
+- Payment status: Not configured / Paid / Overdue
+Actions:
+- Edit plan
+- Extend trial
+- Mark paid
+- Pause contract
+- Cancel tenant
+Rules:
+- UI only.
+- Danger actions visually separated.
+==================================================
+TASK 8 — J3-P0-24 Tenant permissions / feature toggles
+==================================================
+Goal:
+ICP must show which features are enabled per tenant.
+Add Feature Toggles card:
+- WhatsApp inbox
+- Email inbox
+- Instagram/Facebook
+- Telegram alerts
+- AI auto-reply
+- Soft escalations
+- Hard escalations / human takeover
+- Learning from operator answers
+- Source of Truth sync
+- Appointment/order handling
+- Analytics
+Each toggle:
+- Enabled / Disabled placeholder
+- Not wired yet if no backend
+Rules:
+- UI only.
+- Use correct terminology:
+  Soft escalation = Agent needs help, operator guides, Agent replies.
+  Hard escalation = Human takeover, Agent stops, operator replies directly.
+- Do NOT use “Soft mode” or “Hard mode”.
+==================================================
+TASK 9 — J3-P0-25 Tenant deployment/runtime status
+==================================================
+Goal:
+ICP must show whether a tenant’s systems are healthy.
+Add Runtime Status card:
+- Dashboard status
+- Agent status
+- API status
+- Channel webhook status
+- Last sync
+- Last error
+- Uptime placeholder
+- Current environment: staging / production placeholder
+Actions:
+- Check status
+- Restart sync
+- View logs
+- Open dashboard
+Rules:
+- UI only.
+- No fake “healthy” if unknown; use “Unknown / Not wired yet”.
+==================================================
+TASK 10 — J3-P0-26 Tenant backup/export controls
+==================================================
+Goal:
+ICP must show how tenant data can be exported/backed up.
+Add Backup / Export card:
+- Export tenant config
+- Export Source of Truth
+- Export activity log
+- Export onboarding answers
+- Last backup placeholder
+- Backup status placeholder
+Actions:
+- Export config
+- Export SOT
+- Download setup summary
+- Create backup
+Rules:
+- UI only unless existing export exists.
+- Do not create destructive actions.
+- No fake successful backup.
+==================================================
+TASK 11 — J3-P1-27 Tenant communication log
+==================================================
+Goal:
+ICP should show communication history with tenant/client.
+Add Communication Log card:
+- Last email sent
+- Last onboarding link sent
+- Last operator note
+- Last client reply placeholder
+Actions:
+- View communication log
+- Send internal email placeholder
+- Copy onboarding link
+Rules:
+- UI only.
+- No SMTP wiring.
+- No fake messages.
+==================================================
+TASK 12 — J3-P1-28 Tenant billing invoice history
+==================================================
+Goal:
+ICP should show future billing/invoice history.
+Add Invoice History card:
+- Invoice number placeholder
+- Date
+- Amount
+- Status: Draft / Sent / Paid / Overdue
+- Action: View invoice
+- Action: Mark paid placeholder
+Rules:
+- UI only.
+- No payment integration.
+==================================================
+TASK 13 — J3-P1-29 Global ICP audit log
+==================================================
+Goal:
+ICP should eventually show actions across all tenants.
+Add Settings or Tenants-level placeholder:
+“Global ICP audit log”
+Show:
+- Last internal admin action
+- Actor
+- Tenant affected
+- Time
+- Action type
+If no data:
+“No audit events yet.”
+Actions:
+- View global audit log
+- Export audit log
+Rules:
+- UI only.
+==================================================
+TASK 14 — J3-P1-30 ICP admin user management
+==================================================
+Goal:
+Settings should show future ICP admin user management.
+In Settings, add Admin Users section:
+- Current admin user placeholder
+- Role: Owner / Admin / Operator
+- Last login placeholder
+- 2FA placeholder
+- Status: Active
+Actions:
+- Invite admin
+- Change role
+- Disable user
+- Rotate admin password placeholder
+Rules:
+- UI only.
+- Do not implement real auth changes.
+==================================================
+GLOBAL ACCEPTANCE
+==================================================
+After queue:
+- Sidebar only: TENANTS, SETTINGS.
+- Tenants is first and primary.
+- Tenant workspace feels like command center.
+- No Home page assumptions remain.
+- No dead fake noise.
+- All placeholder actions are clearly marked if not wired.
+- Existing onboarding/review functionality is not deleted.
+- Public onboarding routes still work.
+- Tests pass.
+- Git status clean.
+- Commit(s) pushed.
+Final report:
+- Which tasks completed
+- Which tasks skipped and why
+- Files changed
+- Routes changed
+- Tests result
+- Latest commit hash
+- Pushed yes/no
+- Remaining recommended next work

@@ -204,6 +204,30 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Severity chips: at least P1 must appear given seed data
     assert ">P1<" in workspace.text
     assert "attention-sev" in workspace.text
+    # Anomaly monitor (UI-only, currently empty -> placeholder + watch list)
+    assert "anomaly-monitor" in workspace.text
+    assert "Anomaly monitor" in workspace.text
+    assert "No unusual activity detected." in workspace.text
+    for label in (
+        "Message volume spike",
+        "Escalation spike",
+        "Agent reply failure",
+        "Channel disconnected",
+        "Repeated customer complaint",
+        "SOT missing / stale",
+        "Long unanswered conversation",
+        "Unusual booking/order pattern",
+        "Error rate spike",
+    ):
+        assert label in workspace.text
+    # Calm language in the anomaly monitor section — no alarmist words
+    import re as _re
+    anomaly_section = _re.search(
+        r'<section class="anomaly-monitor".*?</section>', workspace.text, _re.DOTALL
+    )
+    assert anomaly_section is not None
+    for banned in ("emergency", "EMERGENCY", "URGENT", "CRITICAL ALERT"):
+        assert banned not in anomaly_section.group(0)
     # Onboarding control panel
     assert "onboarding-panel" in workspace.text
     for label in ("Intake link", "Intake submitted", "Review", "Missing setup items", "Next action"):
