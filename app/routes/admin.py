@@ -157,8 +157,144 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "notes": sorted_notes(tenant.notes),
             "note_priorities": NOTE_PRIORITIES,
             "setup_checklist": compute_setup_checklist(tenant),
+            "contract": _build_contract(tenant),
+            "feature_toggles": _build_feature_toggles(tenant),
+            "runtime": _build_runtime(tenant),
+            "backup": _build_backup(tenant),
+            "comms_log": _build_comms_log(tenant),
+            "invoices": _build_invoices(tenant),
         },
     )
+
+
+def _build_contract(tenant: Tenant) -> dict:
+    b = tenant.billing
+    plan_label = b.plan if b.plan and b.plan != "—" else (
+        "Trial" if b.status == "trial" else "—"
+    )
+    contract_status_map = {
+        "trial": ("Draft", "warn"),
+        "active": ("Active", "ok"),
+        "paused": ("Paused", "warn"),
+        "overdue": ("Active", "warn"),
+        "cancelled": ("Cancelled", "down"),
+    }
+    contract_status, contract_class = contract_status_map.get(
+        b.status, ("Draft", "unknown")
+    )
+    payment_status_map = {
+        "ok": ("Paid", "ok"),
+        "pending": ("Pending", "warn"),
+        "failed": ("Overdue", "down"),
+        "—": ("Not configured", "unknown"),
+    }
+    payment_status, payment_class = payment_status_map.get(
+        b.payment_status, ("Not configured", "unknown")
+    )
+    return {
+        "plan_label": plan_label,
+        "trial_start": "—",
+        "trial_end": "—" if b.trial_days_left is None else f"in {b.trial_days_left} days",
+        "monthly_price": b.monthly_price,
+        "setup_fee": "—",
+        "contract_status": contract_status,
+        "contract_class": contract_class,
+        "payment_status": payment_status,
+        "payment_class": payment_class,
+    }
+
+
+_FEATURE_TOGGLE_DEFS: tuple[tuple[str, str], ...] = (
+    ("whatsapp_inbox", "WhatsApp inbox"),
+    ("email_inbox", "Email inbox"),
+    ("instagram_facebook", "Instagram / Facebook"),
+    ("telegram_alerts", "Telegram alerts"),
+    ("ai_auto_reply", "AI auto-reply"),
+    ("soft_escalations", "Soft escalations"),
+    ("hard_escalations", "Hard escalations / human takeover"),
+    ("learning_from_operator", "Learning from operator answers"),
+    ("sot_sync", "Source of Truth sync"),
+    ("appointment_order_handling", "Appointment / order handling"),
+    ("analytics", "Analytics"),
+)
+
+
+def _build_feature_toggles(tenant: Tenant) -> list[dict]:
+    # Derive a few from real fields; the rest stay 'Not wired yet'.
+    derived: dict[str, bool] = {}
+    for ch in tenant.channels:
+        name = ch.name.lower()
+        if name == "whatsapp":
+            derived["whatsapp_inbox"] = ch.state == "connected"
+        elif name == "email":
+            derived["email_inbox"] = ch.state == "connected"
+        elif name in ("instagram", "facebook"):
+            derived["instagram_facebook"] = derived.get("instagram_facebook", False) or ch.state == "connected"
+        elif name == "telegram":
+            derived["telegram_alerts"] = ch.state == "connected"
+    if tenant.agent.auto_reply_enabled:
+        derived["ai_auto_reply"] = True
+    if tenant.agent.escalation_mode in ("soft", "both"):
+        derived["soft_escalations"] = True
+    if tenant.agent.escalation_mode in ("hard", "both"):
+        derived["hard_escalations"] = True
+    if tenant.agent.learning_enabled:
+        derived["learning_from_operator"] = True
+    if tenant.sot.cloud_status == "connected":
+        derived["sot_sync"] = True
+
+    items: list[dict] = []
+    for key, label in _FEATURE_TOGGLE_DEFS:
+        if key in derived:
+            state = "enabled" if derived[key] else "disabled"
+            wired = True
+        else:
+            state = "unknown"
+            wired = False
+        items.append({"key": key, "label": label, "state": state, "wired": wired})
+    return items
+
+
+def _build_runtime(tenant: Tenant) -> dict:
+    return {
+        "dashboard_status": ("Unknown", "unknown"),
+        "agent_status": (
+            ("Active", "ok") if tenant.agent.auto_reply_enabled else ("Paused", "warn")
+        ),
+        "api_status": ("Unknown", "unknown"),
+        "webhook_status": ("Unknown", "unknown"),
+        "last_sync": "—",
+        "last_error": "—",
+        "uptime": "—",
+        "environment": "Not wired yet",
+    }
+
+
+def _build_backup(tenant: Tenant) -> dict:
+    return {
+        "last_backup": "—",
+        "status": ("Not wired yet", "unknown"),
+        "items": (
+            "Tenant config",
+            "Source of Truth",
+            "Activity log",
+            "Onboarding answers",
+        ),
+    }
+
+
+def _build_comms_log(tenant: Tenant) -> dict:
+    return {
+        "last_email_sent": "—",
+        "last_onboarding_link_sent": "—",
+        "last_operator_note": (tenant.notes[0].created_at if tenant.notes else "—"),
+        "last_client_reply": "—",
+    }
+
+
+def _build_invoices(tenant: Tenant) -> list[dict]:
+    # No payment integration. Empty by default.
+    return []
 
 
 @router.get("/admin/onboarding", response_class=HTMLResponse)
@@ -188,7 +324,20 @@ def admin_settings(request: Request) -> Response:
     return templates.TemplateResponse(
         request,
         "admin_settings.html",
-        _shell_context("settings"),
+        {
+            **_shell_context("settings"),
+            "audit_events": (),
+            "admin_users": (
+                {
+                    "name": "Internal admin",
+                    "email": "—",
+                    "role": "Owner",
+                    "last_login": "—",
+                    "two_factor": "Not configured",
+                    "status": "Active",
+                },
+            ),
+        },
     )
 
 

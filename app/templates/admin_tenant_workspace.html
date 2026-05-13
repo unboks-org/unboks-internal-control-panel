@@ -740,6 +740,156 @@
     {% endif %}
   </section>
 
+  {# 4k. Contract / plan #}
+  <section class="contract-card" aria-label="Contract and plan">
+    <header class="card-header">
+      <div>
+        <h3>Contract / plan</h3>
+        <p class="muted compact-note">Commercial status. UI only.</p>
+      </div>
+      <span class="status-chip status-{{ contract.contract_class }}">{{ contract.contract_status }}</span>
+    </header>
+    <dl class="kv-grid">
+      <div><dt>Plan</dt><dd>{{ contract.plan_label }}</dd></div>
+      <div><dt>Trial start</dt><dd>{{ contract.trial_start }}</dd></div>
+      <div><dt>Trial end</dt><dd>{{ contract.trial_end }}</dd></div>
+      <div><dt>Monthly price</dt><dd>{{ contract.monthly_price }}</dd></div>
+      <div><dt>Setup fee</dt><dd>{{ contract.setup_fee }}</dd></div>
+      <div><dt>Payment status</dt><dd><span class="status-chip status-{{ contract.payment_class }}">{{ contract.payment_status }}</span></dd></div>
+    </dl>
+    <div class="control-row">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Edit plan</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Extend trial</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Mark paid</button>
+    </div>
+    <div class="control-row danger-row">
+      <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Pause contract</button>
+      <button type="button" class="danger-btn" disabled aria-disabled="true" title="Not wired yet">Cancel tenant</button>
+    </div>
+  </section>
+
+  {# 4l. Feature toggles #}
+  <section class="features-card" aria-label="Feature toggles">
+    <header class="card-header">
+      <div>
+        <h3>Feature toggles</h3>
+        <p class="muted compact-note">Per-tenant capabilities. Soft escalation = Agent needs help, operator guides, Agent replies. Hard escalation = Human takeover, Agent stops, operator replies directly.</p>
+      </div>
+    </header>
+    <ul class="features-list">
+      {% for f in feature_toggles %}
+        {% set state_label = {'enabled': 'Enabled', 'disabled': 'Disabled', 'unknown': 'Not wired yet'}[f.state] %}
+        {% set state_class = {'enabled': 'ok', 'disabled': 'unknown', 'unknown': 'unknown'}[f.state] %}
+        <li class="feature-row">
+          <span class="feature-label">{{ f.label }}</span>
+          <span class="status-chip status-{{ state_class }}">{{ state_label }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  {# 4m. Runtime status #}
+  <section class="runtime-card" aria-label="Runtime status">
+    <header class="card-header">
+      <div>
+        <h3>Runtime status</h3>
+        <p class="muted compact-note">Tenant-side systems. Detection backend not wired.</p>
+      </div>
+      <span class="status-chip status-unknown">{{ runtime.environment }}</span>
+    </header>
+    <dl class="kv-grid">
+      <div><dt>Dashboard</dt><dd><span class="status-chip status-{{ runtime.dashboard_status[1] }}">{{ runtime.dashboard_status[0] }}</span></dd></div>
+      <div><dt>Agent</dt><dd><span class="status-chip status-{{ runtime.agent_status[1] }}">{{ runtime.agent_status[0] }}</span></dd></div>
+      <div><dt>API</dt><dd><span class="status-chip status-{{ runtime.api_status[1] }}">{{ runtime.api_status[0] }}</span></dd></div>
+      <div><dt>Channel webhooks</dt><dd><span class="status-chip status-{{ runtime.webhook_status[1] }}">{{ runtime.webhook_status[0] }}</span></dd></div>
+      <div><dt>Last sync</dt><dd>{{ runtime.last_sync }}</dd></div>
+      <div><dt>Last error</dt><dd>{{ runtime.last_error }}</dd></div>
+      <div><dt>Uptime</dt><dd>{{ runtime.uptime }}</dd></div>
+      <div><dt>Environment</dt><dd>{{ runtime.environment }}</dd></div>
+    </dl>
+    <div class="control-row">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Check status</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Restart sync</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">View logs</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Open dashboard</button>
+    </div>
+  </section>
+
+  {# 4n. Backup / export #}
+  <section class="backup-card" aria-label="Backup and export">
+    <header class="card-header">
+      <div>
+        <h3>Backup / export</h3>
+        <p class="muted compact-note">Tenant data export. UI only.</p>
+      </div>
+      <span class="status-chip status-{{ backup.status[1] }}">{{ backup.status[0] }}</span>
+    </header>
+    <dl class="kv-grid">
+      <div><dt>Last backup</dt><dd>{{ backup.last_backup }}</dd></div>
+      <div><dt>Includes</dt><dd>{{ backup['items'] | join(', ') }}</dd></div>
+    </dl>
+    <div class="control-row">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Export config</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Export SOT</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Download setup summary</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Create backup</button>
+    </div>
+  </section>
+
+  {# 4o. Communication log #}
+  <section class="comms-card" aria-label="Communication log">
+    <header class="card-header">
+      <div>
+        <h3>Communication log</h3>
+        <p class="muted compact-note">Last contact points with tenant/client.</p>
+      </div>
+    </header>
+    <dl class="kv-grid">
+      <div><dt>Last email sent</dt><dd>{{ comms_log.last_email_sent }}</dd></div>
+      <div><dt>Last onboarding link sent</dt><dd>{{ comms_log.last_onboarding_link_sent }}</dd></div>
+      <div><dt>Last operator note</dt><dd>{{ comms_log.last_operator_note }}</dd></div>
+      <div><dt>Last client reply</dt><dd>{{ comms_log.last_client_reply }}</dd></div>
+    </dl>
+    <div class="control-row">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">View communication log</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Send internal email</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Copy onboarding link</button>
+    </div>
+  </section>
+
+  {# 4p. Invoice history #}
+  <section class="invoices-card" aria-label="Invoice history">
+    <header class="card-header">
+      <div>
+        <h3>Invoice history</h3>
+        <p class="muted compact-note">No payment integration yet.</p>
+      </div>
+    </header>
+    {% if invoices %}
+      <table class="invoices-table">
+        <thead>
+          <tr><th>Invoice #</th><th>Date</th><th>Amount</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for inv in invoices %}
+            <tr>
+              <td>{{ inv.number }}</td>
+              <td>{{ inv.date }}</td>
+              <td>{{ inv.amount }}</td>
+              <td><span class="status-chip status-{{ inv.status_class }}">{{ inv.status_label }}</span></td>
+              <td class="invoice-actions">
+                <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">View invoice</button>
+                <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Mark paid</button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted compact-note">No invoices yet.</p>
+    {% endif %}
+  </section>
+
   {# 5. Activity log / audit trail #}
   <section class="activity-panel" aria-label="Activity log">
     <header class="activity-panel-header">

@@ -37,4 +37,68 @@
     </div>
     <p class="muted">You are signed in as the internal admin. Sign out from the sidebar when finished.</p>
   </section>
+
+  {# Global ICP audit log (placeholder) #}
+  <section class="panel" aria-label="Global ICP audit log">
+    <div class="panel-header">
+      <h2>Global ICP audit log</h2>
+      <span class="status-chip status-unknown">Not wired yet</span>
+    </div>
+    <p class="muted compact-note">Internal admin actions across all tenants will appear here.</p>
+    {% if audit_events %}
+      <table class="audit-table">
+        <thead>
+          <tr><th>Time</th><th>Actor</th><th>Tenant</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          {% for evt in audit_events %}
+            <tr>
+              <td>{{ evt.time }}</td>
+              <td>{{ evt.actor }}</td>
+              <td>{{ evt.tenant }}</td>
+              <td>{{ evt.action }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted compact-note">No audit events yet.</p>
+    {% endif %}
+    <div class="control-row">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">View global audit log</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Export audit log</button>
+    </div>
+  </section>
+
+  {# Admin users (placeholder) #}
+  <section class="panel" aria-label="Admin users">
+    <div class="panel-header">
+      <h2>Admin users</h2>
+      <span class="status-chip status-unknown">Not wired yet</span>
+    </div>
+    <p class="muted compact-note">Owner / Admin / Operator roles for the internal control panel.</p>
+    <table class="admin-users-table">
+      <thead>
+        <tr><th>Name</th><th>Email</th><th>Role</th><th>Last login</th><th>2FA</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for u in admin_users %}
+          <tr>
+            <td>{{ u.name }}</td>
+            <td>{{ u.email }}</td>
+            <td>{{ u.role }}</td>
+            <td>{{ u.last_login }}</td>
+            <td>{{ u.two_factor }}</td>
+            <td><span class="status-chip status-ok">{{ u.status }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="control-row">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Invite admin</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Change role</button>
+      <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Disable user</button>
+      <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Rotate admin password</button>
+    </div>
+  </section>
 {% endblock %}

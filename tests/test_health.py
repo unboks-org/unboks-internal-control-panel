@@ -131,6 +131,17 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert settings_page.status_code == 200
     assert "tenant-selector" in settings_page.text
     assert "sidebar-nav" in settings_page.text
+    # Global ICP audit log
+    assert "Global ICP audit log" in settings_page.text
+    assert "No audit events yet." in settings_page.text
+    for action in ("View global audit log", "Export audit log"):
+        assert action in settings_page.text
+    # Admin users
+    assert "Admin users" in settings_page.text
+    for label in ("Name", "Email", "Role", "Last login", "2FA", "Status"):
+        assert label in settings_page.text
+    for action in ("Invite admin", "Change role", "Disable user", "Rotate admin password"):
+        assert action in settings_page.text
 
 
 def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path) -> None:
@@ -255,6 +266,49 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
                       "billing-section", "access-section", "onboarding-section",
                       "escalations-section", "tenant-header-anchor"):
         assert 'id="' + anchor_id + '"' in workspace.text
+    # Contract / plan card
+    assert "contract-card" in workspace.text
+    assert "Contract / plan" in workspace.text
+    for label in ("Plan", "Trial start", "Trial end", "Monthly price", "Setup fee", "Payment status"):
+        assert label in workspace.text
+    for action in ("Edit plan", "Extend trial", "Mark paid", "Pause contract", "Cancel tenant"):
+        assert action in workspace.text
+    # Feature toggles
+    assert "features-card" in workspace.text
+    assert "Feature toggles" in workspace.text
+    for feature in (
+        "WhatsApp inbox", "Email inbox", "Instagram / Facebook", "Telegram alerts",
+        "AI auto-reply", "Soft escalations", "Hard escalations / human takeover",
+        "Learning from operator answers", "Source of Truth sync",
+        "Appointment / order handling", "Analytics",
+    ):
+        assert feature in workspace.text
+    # Must not use 'Soft mode'/'Hard mode'
+    assert "Soft mode" not in workspace.text
+    assert "Hard mode" not in workspace.text
+    # Runtime status card
+    assert "runtime-card" in workspace.text
+    assert "Runtime status" in workspace.text
+    for label in ("Dashboard", "Agent", "API", "Channel webhooks", "Last sync", "Last error", "Uptime", "Environment"):
+        assert label in workspace.text
+    for action in ("Check status", "Restart sync", "View logs", "Open dashboard"):
+        assert action in workspace.text
+    # Backup / export
+    assert "backup-card" in workspace.text
+    assert "Backup / export" in workspace.text
+    for action in ("Export config", "Export SOT", "Download setup summary", "Create backup"):
+        assert action in workspace.text
+    # Communication log
+    assert "comms-card" in workspace.text
+    assert "Communication log" in workspace.text
+    for label in ("Last email sent", "Last onboarding link sent", "Last operator note", "Last client reply"):
+        assert label in workspace.text
+    for action in ("View communication log", "Send internal email", "Copy onboarding link"):
+        assert action in workspace.text
+    # Invoice history
+    assert "invoices-card" in workspace.text
+    assert "Invoice history" in workspace.text
+    assert "No invoices yet." in workspace.text
     # Tenant notes / internal CRM
     assert "notes-panel" in workspace.text
     assert "Tenant notes" in workspace.text
