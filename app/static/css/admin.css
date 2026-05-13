@@ -149,10 +149,10 @@ h3 {
   border: 0;
   color: var(--color-text);
   cursor: pointer;
-  display: grid;
+  display: flex;
   font: inherit;
-  gap: 2px;
-  grid-template-columns: 1fr auto;
+  gap: 8px;
+  justify-content: space-between;
   min-height: 0;
   padding: 8px 10px;
   text-align: left;
@@ -164,31 +164,15 @@ h3 {
   border-radius: 6px;
 }
 
-.tenant-selector-eyebrow {
-  color: var(--color-muted);
-  font-size: 10px;
-  font-weight: 700;
-  grid-column: 1;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.tenant-selector-current {
+.tenant-selector-label {
   color: var(--color-text);
   font-size: 13px;
   font-weight: 700;
-  grid-column: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tenant-selector-caret {
   color: var(--color-muted);
   font-size: 10px;
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: center;
 }
 
 .tenant-selector-list {

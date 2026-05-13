@@ -95,6 +95,9 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert home.status_code == 200
     assert "app-shell" in home.text
     assert "tenant-selector" in home.text
+    # Tenants button label must be exactly "Tenants" — no "Select tenant" placeholder
+    assert "tenant-selector-label" in home.text
+    assert "Select tenant" not in home.text
     assert "Unboks Demo" in home.text
     assert "Consulta Despertares" in home.text
     assert "BlueFinn Charters" in home.text

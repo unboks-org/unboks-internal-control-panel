@@ -32,14 +32,7 @@
           aria-expanded="{% if active == 'tenants' %}true{% else %}false{% endif %}"
           aria-controls="tenant-selector-list"
         >
-          <span class="tenant-selector-eyebrow">Tenants</span>
-          <span class="tenant-selector-current">
-            {% if active_tenant %}
-              {{ active_tenant.name }}
-            {% else %}
-              Select tenant
-            {% endif %}
-          </span>
+          <span class="tenant-selector-label">Tenants</span>
           <span class="tenant-selector-caret" aria-hidden="true">&#9662;</span>
         </button>
         <ul
