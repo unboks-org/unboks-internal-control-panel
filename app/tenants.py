@@ -117,6 +117,22 @@ def activity_type_label(value: str) -> str:
 
 
 @dataclass(frozen=True)
+class TenantOperator:
+    name: str
+    email: str
+    role: str             # owner | admin | operator
+    invite_state: str     # active | needs_invite | disabled
+    alert_recipient: bool = False
+    last_login: str = "—"
+
+
+@dataclass(frozen=True)
+class TenantAccess:
+    status: str = "active"   # active | needs_invite | disabled
+    operators: tuple[TenantOperator, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
 class TenantPushState:
     status: str = "clean"            # clean | pending | failed
     pending_count: int = 0
@@ -147,6 +163,7 @@ class Tenant:
     channels: tuple[TenantChannel, ...] = field(default_factory=tuple)
     billing: TenantBilling = field(default_factory=TenantBilling)
     push: TenantPushState = field(default_factory=TenantPushState)
+    access: TenantAccess = field(default_factory=TenantAccess)
     activity: tuple[TenantActivityEntry, ...] = field(default_factory=tuple)
 
 
@@ -212,6 +229,35 @@ _TENANTS: tuple[Tenant, ...] = (
             last_pushed_at="—",
             last_pushed_by="—",
         ),
+        access=TenantAccess(
+            status="active",
+            operators=(
+                TenantOperator(
+                    name="Demo Owner",
+                    email="owner@unboks.demo",
+                    role="owner",
+                    invite_state="active",
+                    alert_recipient=True,
+                    last_login="—",
+                ),
+                TenantOperator(
+                    name="Demo Admin",
+                    email="admin@unboks.demo",
+                    role="admin",
+                    invite_state="active",
+                    alert_recipient=True,
+                    last_login="—",
+                ),
+                TenantOperator(
+                    name="Demo Operator",
+                    email="ops@unboks.demo",
+                    role="operator",
+                    invite_state="active",
+                    alert_recipient=False,
+                    last_login="—",
+                ),
+            ),
+        ),
         activity=(),
     ),
     Tenant(
@@ -228,6 +274,7 @@ _TENANTS: tuple[Tenant, ...] = (
             next_billing_date="—",
             payment_status="—",
         ),
+        access=TenantAccess(status="needs_invite", operators=()),
     ),
     Tenant(
         id="bluefinn-charters",
@@ -243,6 +290,7 @@ _TENANTS: tuple[Tenant, ...] = (
             next_billing_date="—",
             payment_status="—",
         ),
+        access=TenantAccess(status="needs_invite", operators=()),
     ),
 )
 

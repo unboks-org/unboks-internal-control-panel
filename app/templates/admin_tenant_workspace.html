@@ -351,6 +351,89 @@
     </div>
   </section>
 
+  {# 4g. Operators / Access #}
+  {% set access_class = {'active': 'ok', 'needs_invite': 'warn', 'disabled': 'down'}.get(tenant.access.status, 'unknown') %}
+  {% set access_label = {'active': 'Active', 'needs_invite': 'Needs invite', 'disabled': 'Disabled'}.get(tenant.access.status, tenant.access.status) %}
+  {% set role_labels = {'owner': 'Owner', 'admin': 'Admin', 'operator': 'Operator'} %}
+  {% set owners = tenant.access.operators | selectattr('role', 'equalto', 'owner') | list %}
+  {% set admins = tenant.access.operators | selectattr('role', 'equalto', 'admin') | list %}
+  {% set normals = tenant.access.operators | selectattr('role', 'equalto', 'operator') | list %}
+  {% set alert_recipients = tenant.access.operators | selectattr('alert_recipient') | list %}
+  <section class="access-panel" aria-label="Operators and access">
+    <header class="access-panel-header">
+      <div>
+        <h3>Operators &amp; access</h3>
+        <p class="muted compact-note">Who can operate this tenant account.</p>
+      </div>
+      <span class="status-chip status-{{ access_class }}">{{ access_label }}</span>
+    </header>
+
+    <div class="access-summary">
+      <div class="data-stat">
+        <span class="data-stat-label">Owner</span>
+        <span class="data-stat-value">{{ owners[0].name if owners else '—' }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Admins</span>
+        <span class="data-stat-value">{{ admins | length }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Operators</span>
+        <span class="data-stat-value">{{ normals | length }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Alert recipients</span>
+        <span class="data-stat-value">{{ alert_recipients | length }}</span>
+      </div>
+    </div>
+
+    {% if tenant.access.operators %}
+      <table class="access-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Alerts</th>
+            <th>Last login</th>
+            <th>State</th>
+            <th class="access-table-actions-col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for op in tenant.access.operators %}
+            {% set state_class = {'active': 'ok', 'needs_invite': 'warn', 'disabled': 'down'}.get(op.invite_state, 'unknown') %}
+            {% set state_label = {'active': 'Active', 'needs_invite': 'Needs invite', 'disabled': 'Disabled'}.get(op.invite_state, op.invite_state) %}
+            <tr>
+              <td>{{ op.name }}</td>
+              <td class="muted">{{ op.email }}</td>
+              <td><span class="status-chip status-neutral">{{ role_labels.get(op.role, op.role) }}</span></td>
+              <td>{{ 'Yes' if op.alert_recipient else '—' }}</td>
+              <td>{{ op.last_login }}</td>
+              <td><span class="status-chip status-{{ state_class }}">{{ state_label }}</span></td>
+              <td class="access-row-actions">
+                <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Change role</button>
+                {% if op.invite_state == 'needs_invite' %}
+                  <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Resend invite</button>
+                {% endif %}
+                <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Remove operator</button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted compact-note">No operators yet.</p>
+    {% endif %}
+
+    <div class="access-actions">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Invite operator</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Resend invite</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Change role</button>
+      <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Remove operator</button>
+    </div>
+  </section>
+
   {# 5. Activity log / audit trail #}
   <section class="activity-panel" aria-label="Activity log">
     <header class="activity-panel-header">

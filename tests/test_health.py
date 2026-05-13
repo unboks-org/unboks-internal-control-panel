@@ -180,6 +180,13 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Disconnect" in workspace.text
     assert "Not connected" in workspace.text  # at least one channel is not connected
     assert "Last message" in workspace.text
+    # Operators / access panel
+    assert "access-panel" in workspace.text
+    assert "Operators &amp; access" in workspace.text
+    for stat in ("Owner", "Admins", "Operators", "Alert recipients"):
+        assert stat in workspace.text
+    for action in ("Invite operator", "Remove operator", "Change role", "Resend invite"):
+        assert action in workspace.text
     # Push changes panel
     assert "push-panel" in workspace.text
     assert "Push changes" in workspace.text
