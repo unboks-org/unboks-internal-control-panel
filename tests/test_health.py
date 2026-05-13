@@ -365,6 +365,24 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "anomaly-monitor" not in workspace.text
     assert 'class="attention-list"' not in workspace.text
     assert 'class="anomaly-list"' not in workspace.text
+    # And no global section headings inside the workspace main pane
+    import re as _re2
+    main_match = _re2.search(
+        r'<main class="page-content"[^>]*>(.*?)</main>', workspace.text, _re2.DOTALL
+    )
+    assert main_match is not None
+    main_body = main_match.group(1)
+    assert "Needs attention" not in main_body
+    assert "Anomaly monitor" not in main_body
+    # Sidebar dropdown wiring (toggle + panel + caret + JS handler)
+    assert 'data-tenant-toggle' in workspace.text
+    assert 'data-tenant-panel' in workspace.text
+    assert 'aria-controls="tenant-selector-list"' in workspace.text
+    assert 'tenant-selector-caret' in workspace.text
+    assert '/static/js/admin.js' in workspace.text
+    # Sidebar global links present (not in main pane)
+    assert 'href="/admin/attention"' in workspace.text
+    assert 'href="/admin/anomalies"' in workspace.text
     # Tenant notes / internal CRM
     assert "notes-panel" in workspace.text
     assert "Tenant notes" in workspace.text
