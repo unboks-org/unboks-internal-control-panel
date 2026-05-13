@@ -334,7 +334,7 @@ code {
 .detail-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 14px 0 0;
 }
 
@@ -368,6 +368,18 @@ code {
   margin-top: 12px;
   min-height: 360px;
   width: 100%;
+}
+
+.review-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.review-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .onboarding-panel {
@@ -418,6 +430,10 @@ code {
 
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .review-actions {
+    flex-direction: column;
   }
 
   .lead-form {

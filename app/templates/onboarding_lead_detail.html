@@ -48,6 +48,14 @@
         <dt>Updated</dt>
         <dd>{{ lead.updated_at }}</dd>
       </div>
+      <div>
+        <dt>Review</dt>
+        <dd>{{ lead.review_status or "Not reviewed" }}</dd>
+      </div>
+      <div>
+        <dt>Reviewed at</dt>
+        <dd>{{ lead.reviewed_at or "Not reviewed" }}</dd>
+      </div>
     </dl>
 
     {% if lead.notes %}
@@ -56,6 +64,34 @@
         <p>{{ lead.notes }}</p>
       </div>
     {% endif %}
+
+    {% if lead.review_notes %}
+      <div class="review-answer">
+        <h3>Review notes</h3>
+        <p>{{ lead.review_notes }}</p>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Review decision</h2>
+      <span class="status-chip status-neutral">internal only</span>
+    </div>
+    <p class="muted">This records Calvin's internal review decision only. It does not create a tenant or update production.</p>
+    {% if error %}
+      <div class="alert alert-error" role="alert">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/admin/onboarding/leads/{{ lead.id }}/review" class="review-form">
+      <div class="field field-wide">
+        <label for="review-notes">Review notes</label>
+        <textarea id="review-notes" name="review_notes" rows="4" placeholder="What needs to change, or what is approved?">{{ review_notes_value }}</textarea>
+      </div>
+      <div class="review-actions">
+        <button class="button-secondary" type="submit" name="decision" value="needs_changes">Needs changes</button>
+        <button type="submit" name="decision" value="approved">Approve review</button>
+      </div>
+    </form>
   </section>
 
   <section class="panel">

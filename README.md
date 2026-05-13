@@ -13,6 +13,7 @@ This repository is for Nr 3 only: the private Unboks.org internal control panel.
 - welcome email sending or manual-send preview when SMTP is not configured
 - token-gated one-question-at-a-time onboarding intake
 - protected admin review of intake answers and text setup summary export
+- internal review decision states for approved / needs changes
 - Docker service shape for `wtyj-admin` on port `8010`
 - nginx IP allowlist template
 
@@ -36,6 +37,8 @@ Email sending uses SMTP only when all SMTP environment variables are configured.
 The public onboarding link stores intake answers locally in SQLite. It is a controlled intake capture only; it does not create tenants, write Nr 2 configuration, or send data into production systems.
 
 Admins can review submitted answers from `/admin/onboarding/leads/{lead_id}` and download a plain-text setup summary from `/admin/onboarding/leads/{lead_id}/setup-summary.txt`.
+
+Review decisions are internal-only status markers. They do not create tenants, edit Nr 2, or write production configuration.
 
 ## Run
 

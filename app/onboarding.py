@@ -16,7 +16,14 @@ LEAD_STATUSES = {
     "email_sent",
     "form_started",
     "form_submitted",
+    "review_needs_changes",
+    "review_approved",
     "tenant_ready",
+}
+
+REVIEW_DECISIONS = {
+    "needs_changes": "review_needs_changes",
+    "approved": "review_approved",
 }
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -123,6 +130,9 @@ class OnboardingLead:
     token_expires_at: Optional[str]
     email_sent_at: Optional[str]
     email_last_error: Optional[str]
+    review_status: Optional[str]
+    review_notes: Optional[str]
+    reviewed_at: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -173,6 +183,8 @@ def init_db() -> None:
                         'email_sent',
                         'form_started',
                         'form_submitted',
+                        'review_needs_changes',
+                        'review_approved',
                         'tenant_ready'
                     )
                 )
@@ -189,6 +201,9 @@ def init_db() -> None:
             "token_expires_at": "ALTER TABLE onboarding_leads ADD COLUMN token_expires_at TEXT",
             "email_sent_at": "ALTER TABLE onboarding_leads ADD COLUMN email_sent_at TEXT",
             "email_last_error": "ALTER TABLE onboarding_leads ADD COLUMN email_last_error TEXT",
+            "review_status": "ALTER TABLE onboarding_leads ADD COLUMN review_status TEXT",
+            "review_notes": "ALTER TABLE onboarding_leads ADD COLUMN review_notes TEXT",
+            "reviewed_at": "ALTER TABLE onboarding_leads ADD COLUMN reviewed_at TEXT",
         }
         for column, statement in migrations.items():
             if column not in existing:
@@ -431,11 +446,14 @@ def build_setup_summary(lead_id: int) -> str:
         f"Contact name: {lead.contact_name or 'Unknown'}",
         f"Language: {lead.language or 'Unknown'}",
         f"Status: {lead.status}",
+        f"Review status: {lead.review_status or 'Not reviewed'}",
         f"Created: {lead.created_at}",
         f"Updated: {lead.updated_at}",
     ]
     if lead.notes:
         lines.extend(["", "Internal notes:", lead.notes])
+    if lead.review_notes:
+        lines.extend(["", "Review notes:", lead.review_notes])
     lines.append("")
     lines.append("Intake answers:")
     for question in INTAKE_QUESTIONS:
@@ -444,6 +462,34 @@ def build_setup_summary(lead_id: int) -> str:
         lines.append(question.label)
         lines.append(answer.answer if answer else "Not answered.")
     return "\n".join(lines) + "\n"
+
+
+def set_review_decision(lead_id: int, decision: str, notes: str) -> OnboardingLead:
+    if decision not in REVIEW_DECISIONS:
+        raise LeadValidationError("Invalid review decision.")
+    clean_notes = notes.strip() or None
+    now = utc_now()
+    status = REVIEW_DECISIONS[decision]
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE onboarding_leads
+            SET status = ?,
+                review_status = ?,
+                review_notes = ?,
+                reviewed_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (status, decision, clean_notes, now, now, lead_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM onboarding_leads WHERE id = ?",
+            (lead_id,),
+        ).fetchone()
+    if row is None:
+        raise LeadNotFoundError("Onboarding lead not found.")
+    return row_to_lead(row)
 
 
 def save_intake_answer(token: str, question_key: str, answer: str) -> IntakeProgress:
@@ -528,6 +574,9 @@ def row_to_lead(row: sqlite3.Row) -> OnboardingLead:
         token_expires_at=row["token_expires_at"],
         email_sent_at=row["email_sent_at"],
         email_last_error=row["email_last_error"],
+        review_status=row["review_status"],
+        review_notes=row["review_notes"],
+        reviewed_at=row["reviewed_at"],
     )
 
 

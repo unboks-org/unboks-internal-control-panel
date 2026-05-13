@@ -17,6 +17,7 @@ from app.onboarding import (
     list_intake_answers,
     list_intake_answer_counts,
     list_leads,
+    set_review_decision,
 )
 from app.security import (
     clear_session_cookie,
@@ -176,19 +177,38 @@ def onboarding_lead_detail(request: Request, lead_id: int) -> Response:
             error="Onboarding lead not found.",
             status_code=404,
         )
-    answers = list_intake_answers(lead_id)
-    return templates.TemplateResponse(
-        request,
-        "onboarding_lead_detail.html",
-        {
-            "lead": lead,
-            "answers": answers,
-            "questions": INTAKE_QUESTIONS,
-            "answer_count": len(answers),
-            "intake_total": len(INTAKE_QUESTIONS),
-            "setup_summary": build_setup_summary(lead_id),
-        },
-    )
+    return render_lead_detail(request, lead)
+
+
+@router.post("/admin/onboarding/leads/{lead_id}/review", response_class=HTMLResponse)
+def onboarding_lead_review_decision(
+    request: Request,
+    lead_id: int,
+    decision: str = Form(default=""),
+    review_notes: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        set_review_decision(lead_id, decision, review_notes)
+    except LeadNotFoundError:
+        return render_admin(
+            request,
+            error="Onboarding lead not found.",
+            status_code=404,
+        )
+    except LeadValidationError as exc:
+        lead = get_lead(lead_id)
+        return render_lead_detail(
+            request,
+            lead,
+            error=str(exc),
+            review_notes=review_notes,
+            status_code=400,
+        )
+    return RedirectResponse(url=f"/admin/onboarding/leads/{lead_id}", status_code=303)
 
 
 @router.get("/admin/onboarding/leads/{lead_id}/setup-summary.txt")
@@ -236,6 +256,33 @@ def render_admin(
             "leads": list_leads(),
             "intake_answer_counts": list_intake_answer_counts(),
             "intake_total": len(INTAKE_QUESTIONS),
+        },
+        status_code=status_code,
+    )
+
+
+def render_lead_detail(
+    request: Request,
+    lead,
+    error: Optional[str] = None,
+    review_notes: Optional[str] = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    answers = list_intake_answers(lead.id)
+    return templates.TemplateResponse(
+        request,
+        "onboarding_lead_detail.html",
+        {
+            "error": error,
+            "lead": lead,
+            "answers": answers,
+            "questions": INTAKE_QUESTIONS,
+            "answer_count": len(answers),
+            "intake_total": len(INTAKE_QUESTIONS),
+            "setup_summary": build_setup_summary(lead.id),
+            "review_notes_value": (
+                review_notes if review_notes is not None else lead.review_notes or ""
+            ),
         },
         status_code=status_code,
     )

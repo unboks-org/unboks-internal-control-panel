@@ -279,3 +279,80 @@ def test_admin_can_review_and_export_setup_summary(monkeypatch, tmp_path) -> Non
     assert "Unboks onboarding setup summary" in export.text
     assert "Review Business" in export.text
     assert "Answer for escalation_rules" in export.text
+
+
+def test_admin_can_mark_review_needs_changes_and_approved(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    lead = create_lead(
+        LeadInput(
+            email="decision@example.com",
+            business_name="Decision Business",
+            contact_name=None,
+            language=None,
+            notes=None,
+        )
+    )
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    needs_changes = client.post(
+        f"/admin/onboarding/leads/{lead.id}/review",
+        data={
+            "decision": "needs_changes",
+            "review_notes": "Need better pricing details.",
+        },
+        follow_redirects=False,
+    )
+    assert needs_changes.status_code == 303
+    updated = get_lead(lead.id)
+    assert updated.status == "review_needs_changes"
+    assert updated.review_status == "needs_changes"
+    assert updated.review_notes == "Need better pricing details."
+    assert updated.reviewed_at is not None
+
+    approved = client.post(
+        f"/admin/onboarding/leads/{lead.id}/review",
+        data={"decision": "approved", "review_notes": "Ready for setup."},
+        follow_redirects=False,
+    )
+    assert approved.status_code == 303
+    approved_lead = get_lead(lead.id)
+    assert approved_lead.status == "review_approved"
+    assert approved_lead.review_status == "approved"
+    assert approved_lead.review_notes == "Ready for setup."
+
+    detail = client.get(f"/admin/onboarding/leads/{lead.id}")
+    assert detail.status_code == 200
+    assert "Ready for setup." in detail.text
+
+    export = client.get(f"/admin/onboarding/leads/{lead.id}/setup-summary.txt")
+    assert "Review status: approved" in export.text
+    assert "Ready for setup." in export.text
+
+
+def test_admin_review_rejects_invalid_decision(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    lead = create_lead(
+        LeadInput(
+            email="invalid-review@example.com",
+            business_name=None,
+            contact_name=None,
+            language=None,
+            notes=None,
+        )
+    )
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    response = client.post(
+        f"/admin/onboarding/leads/{lead.id}/review",
+        data={"decision": "tenant_ready", "review_notes": "No."},
+    )
+
+    assert response.status_code == 400
+    assert "Invalid review decision" in response.text
+    assert get_lead(lead.id).status == "lead_created"
