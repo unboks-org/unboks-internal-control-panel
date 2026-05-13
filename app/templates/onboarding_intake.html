@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Onboarding | Unboks{% endblock %}
+
+{% block body %}
+  <section class="login-panel onboarding-panel">
+    <p class="eyebrow">Unboks onboarding</p>
+    {% if progress.complete %}
+      <h1>Onboarding received</h1>
+      <p class="muted">Thank you. We received your answers and will prepare your setup.</p>
+      {% if progress.lead.business_name %}
+        <p class="placeholder-detail">{{ progress.lead.business_name }}</p>
+      {% endif %}
+    {% else %}
+      <h1>Business intake</h1>
+      <p class="muted">Answer one question at a time. Your progress is saved after each step.</p>
+
+      <div class="progress-line" aria-label="Onboarding progress">
+        <span>Step {{ progress.current_index + 1 }} of {{ progress.total_questions }}</span>
+        <span>{{ progress.answered_count }} saved</span>
+      </div>
+
+      {% if error %}
+        <div class="alert alert-error" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/onboarding/{{ token }}" class="form-stack intake-form">
+        <input type="hidden" name="question_key" value="{{ progress.current_question.key }}">
+        <div class="field">
+          <label for="answer">{{ progress.current_question.label }}</label>
+          <p class="muted">{{ progress.current_question.help_text }}</p>
+          <textarea
+            id="answer"
+            name="answer"
+            rows="8"
+            required
+            autofocus
+          >{{ answer or "" }}</textarea>
+        </div>
+        <div class="field-actions">
+          <button type="submit">Save and continue</button>
+        </div>
+      </form>
+    {% endif %}
+  </section>
+{% endblock %}

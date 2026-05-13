@@ -23,6 +23,91 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @dataclass(frozen=True)
+class IntakeQuestion:
+    key: str
+    label: str
+    help_text: str
+    input_type: str = "textarea"
+    required: bool = True
+
+
+@dataclass(frozen=True)
+class IntakeAnswer:
+    question_key: str
+    answer: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class IntakeProgress:
+    lead: "OnboardingLead"
+    answers: dict[str, IntakeAnswer]
+    current_index: int
+    complete: bool
+
+    @property
+    def total_questions(self) -> int:
+        return len(INTAKE_QUESTIONS)
+
+    @property
+    def answered_count(self) -> int:
+        return len(self.answers)
+
+    @property
+    def current_question(self) -> Optional[IntakeQuestion]:
+        if self.complete:
+            return None
+        return INTAKE_QUESTIONS[self.current_index]
+
+
+INTAKE_QUESTIONS = [
+    IntakeQuestion(
+        key="business_summary",
+        label="What does your business do?",
+        help_text="Give a plain-language description of the business and the customers you serve.",
+    ),
+    IntakeQuestion(
+        key="services",
+        label="Which services or products should the Agent know about?",
+        help_text="List the main services, products, packages, or booking types.",
+    ),
+    IntakeQuestion(
+        key="prices",
+        label="What prices, rates, or quote rules should the Agent use?",
+        help_text="Use 'unknown' if pricing depends on the situation.",
+    ),
+    IntakeQuestion(
+        key="opening_hours",
+        label="What are your opening hours and availability rules?",
+        help_text="Include holidays, emergency availability, and appointment rules if relevant.",
+    ),
+    IntakeQuestion(
+        key="policies",
+        label="What policies should customers know before booking or buying?",
+        help_text="Cancellations, deposits, refunds, travel fees, guarantees, or restrictions.",
+    ),
+    IntakeQuestion(
+        key="faqs",
+        label="What questions do customers ask most often?",
+        help_text="Add common questions and the answers the Agent should give.",
+    ),
+    IntakeQuestion(
+        key="tone",
+        label="What tone of voice should the Agent use?",
+        help_text="Examples: short and direct, friendly, formal, Dutch first, Spanish allowed.",
+    ),
+    IntakeQuestion(
+        key="escalation_rules",
+        label="When should the Agent escalate to a human?",
+        help_text="List topics, customer types, risks, or situations that need human follow-up.",
+    ),
+]
+
+INTAKE_QUESTION_KEYS = {question.key for question in INTAKE_QUESTIONS}
+
+
+@dataclass(frozen=True)
 class OnboardingLead:
     id: int
     email: str
@@ -108,6 +193,20 @@ def init_db() -> None:
         for column, statement in migrations.items():
             if column not in existing:
                 conn.execute(statement)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS onboarding_intake_answers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lead_id INTEGER NOT NULL,
+                question_key TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (lead_id, question_key),
+                FOREIGN KEY (lead_id) REFERENCES onboarding_leads(id)
+            )
+            """
+        )
 
 
 def normalize_email(email: str) -> str:
@@ -272,6 +371,112 @@ def find_lead_by_token(token: str) -> Optional[OnboardingLead]:
     return lead
 
 
+def get_intake_progress(token: str) -> Optional[IntakeProgress]:
+    lead = find_lead_by_token(token)
+    if lead is None:
+        return None
+    answers = list_intake_answers(lead.id)
+    current_index = 0
+    for index, question in enumerate(INTAKE_QUESTIONS):
+        if question.key not in answers:
+            current_index = index
+            break
+    else:
+        current_index = len(INTAKE_QUESTIONS)
+    return IntakeProgress(
+        lead=lead,
+        answers=answers,
+        current_index=current_index,
+        complete=current_index >= len(INTAKE_QUESTIONS),
+    )
+
+
+def list_intake_answers(lead_id: int) -> dict[str, IntakeAnswer]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT question_key, answer, created_at, updated_at
+            FROM onboarding_intake_answers
+            WHERE lead_id = ?
+            ORDER BY id ASC
+            """,
+            (lead_id,),
+        ).fetchall()
+    return {str(row["question_key"]): row_to_answer(row) for row in rows}
+
+
+def list_intake_answer_counts() -> dict[int, int]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT lead_id, COUNT(*) AS answer_count
+            FROM onboarding_intake_answers
+            GROUP BY lead_id
+            """
+        ).fetchall()
+    return {int(row["lead_id"]): int(row["answer_count"]) for row in rows}
+
+
+def save_intake_answer(token: str, question_key: str, answer: str) -> IntakeProgress:
+    progress = get_intake_progress(token)
+    if progress is None:
+        raise LeadNotFoundError("Onboarding link is invalid or expired.")
+    if question_key not in INTAKE_QUESTION_KEYS:
+        raise LeadValidationError("Invalid onboarding question.")
+    current_question = progress.current_question
+    if current_question is None:
+        return progress
+    if question_key != current_question.key:
+        raise LeadValidationError("Please answer the current onboarding question.")
+    cleaned_answer = answer.strip()
+    if current_question.required and not cleaned_answer:
+        raise LeadValidationError("Answer is required.")
+
+    now = utc_now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO onboarding_intake_answers (
+                lead_id,
+                question_key,
+                answer,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (lead_id, question_key)
+            DO UPDATE SET answer = excluded.answer,
+                          updated_at = excluded.updated_at
+            """,
+            (progress.lead.id, question_key, cleaned_answer, now, now),
+        )
+        answers = conn.execute(
+            """
+            SELECT COUNT(*) AS answer_count
+            FROM onboarding_intake_answers
+            WHERE lead_id = ?
+            """,
+            (progress.lead.id,),
+        ).fetchone()
+        answer_count = int(answers["answer_count"])
+        status = "form_submitted" if answer_count >= len(INTAKE_QUESTIONS) else "form_started"
+        conn.execute(
+            """
+            UPDATE onboarding_leads
+            SET status = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (status, now, progress.lead.id),
+        )
+    updated_progress = get_intake_progress(token)
+    if updated_progress is None:
+        raise LeadNotFoundError("Onboarding link is invalid or expired.")
+    return updated_progress
+
+
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -296,4 +501,13 @@ def row_to_lead(row: sqlite3.Row) -> OnboardingLead:
         token_expires_at=row["token_expires_at"],
         email_sent_at=row["email_sent_at"],
         email_last_error=row["email_last_error"],
+    )
+
+
+def row_to_answer(row: sqlite3.Row) -> IntakeAnswer:
+    return IntakeAnswer(
+        question_key=str(row["question_key"]),
+        answer=str(row["answer"]),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
     )

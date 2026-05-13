@@ -11,10 +11,11 @@ This repository is for Nr 3 only: the private Unboks.org internal control panel.
 - local onboarding lead creation/status list
 - secure onboarding link generation
 - welcome email sending or manual-send preview when SMTP is not configured
+- token-gated one-question-at-a-time onboarding intake
 - Docker service shape for `wtyj-admin` on port `8010`
 - nginx IP allowlist template
 
-No tenant data access, email sending, production actions, React, Vite, or xyflow are included.
+No tenant data access, production actions, React, Vite, or xyflow are included.
 
 ## Local Setup
 
@@ -30,6 +31,8 @@ Set `NR3_ADMIN_PASSWORD` and `NR3_SESSION_SECRET` in `.env`.
 Onboarding leads are stored in SQLite at `data/nr3.db` by default. The database file is local runtime state and is not committed.
 
 Email sending uses SMTP only when all SMTP environment variables are configured. Without SMTP, the admin screen generates a secure link and shows a manual-send preview without marking the email as sent.
+
+The public onboarding link stores intake answers locally in SQLite. It is a controlled intake capture only; it does not create tenants, write Nr 2 configuration, or send data into production systems.
 
 ## Run
 

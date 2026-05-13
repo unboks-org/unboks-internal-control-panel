@@ -18,7 +18,7 @@
       <h2>New onboarding lead</h2>
       <span class="status-chip status-ok">Internal only</span>
     </div>
-    <p class="muted">Create a prospective tenant record. Email sending is not wired yet.</p>
+    <p class="muted">Create a prospective tenant record. Email sends by SMTP when configured, otherwise a manual preview is shown.</p>
 
     {% if error %}
       <div class="alert alert-error" role="alert">{{ error }}</div>
@@ -116,6 +116,7 @@
               <th>Business</th>
               <th>Contact</th>
               <th>Status</th>
+              <th>Intake</th>
               <th>Email</th>
               <th>Created</th>
               <th>Updated</th>
@@ -135,6 +136,16 @@
                 <td data-label="Contact">{{ lead.contact_name or "—" }}</td>
                 <td data-label="Status">
                   <span class="status-chip status-lead">{{ lead.status }}</span>
+                </td>
+                <td data-label="Intake">
+                  {% set answer_count = intake_answer_counts.get(lead.id, 0) %}
+                  {% if answer_count >= intake_total %}
+                    <span class="status-chip status-ok">complete</span>
+                  {% elif answer_count > 0 %}
+                    <span class="status-chip status-unknown">{{ answer_count }}/{{ intake_total }}</span>
+                  {% else %}
+                    <span class="status-chip status-neutral">not started</span>
+                  {% endif %}
                 </td>
                 <td data-label="Email">
                   {% if lead.email_sent_at %}
@@ -161,7 +172,7 @@
               </tr>
               {% if lead.notes %}
                 <tr class="notes-row">
-                  <td colspan="8">
+                  <td colspan="9">
                     <span class="cell-note">Notes:</span> {{ lead.notes }}
                   </td>
                 </tr>

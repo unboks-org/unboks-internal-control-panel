@@ -2,11 +2,13 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.onboarding import (
+    INTAKE_QUESTIONS,
     LeadInput,
     create_lead,
     create_or_refresh_token,
     get_lead,
     hash_token,
+    list_intake_answers,
 )
 
 
@@ -116,8 +118,8 @@ def test_token_generation_and_public_onboarding_placeholder(monkeypatch, tmp_pat
     client = TestClient(app)
     valid = client.get(f"/onboarding/{token}")
     assert valid.status_code == 200
-    assert "Your secure link is valid" in valid.text
-    assert "Token Business" in valid.text
+    assert "Business intake" in valid.text
+    assert "Step 1 of" in valid.text
 
     invalid = client.get("/onboarding/not-a-valid-token")
     assert invalid.status_code == 404
@@ -152,3 +154,76 @@ def test_missing_smtp_generates_preview_without_fake_success(monkeypatch, tmp_pa
     assert lead.status == "email_pending"
     assert lead.email_sent_at is None
     assert lead.email_last_error == "Email not configured."
+
+
+def test_public_onboarding_saves_one_question_at_a_time(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    lead = create_lead(
+        LeadInput(
+            email="intake@example.com",
+            business_name="Intake Business",
+            contact_name=None,
+            language=None,
+            notes=None,
+        )
+    )
+    _, token = create_or_refresh_token(lead.id)
+    client = TestClient(app)
+
+    blank = client.post(
+        f"/onboarding/{token}",
+        data={"question_key": INTAKE_QUESTIONS[0].key, "answer": "  "},
+    )
+    assert blank.status_code == 400
+    assert "Answer is required" in blank.text
+
+    first = client.post(
+        f"/onboarding/{token}",
+        data={
+            "question_key": INTAKE_QUESTIONS[0].key,
+            "answer": "We repair air conditioners.",
+        },
+        follow_redirects=False,
+    )
+    assert first.status_code == 303
+    assert first.headers["location"] == f"/onboarding/{token}"
+
+    page = client.get(f"/onboarding/{token}")
+    assert page.status_code == 200
+    assert "Step 2 of" in page.text
+
+    answers = list_intake_answers(lead.id)
+    assert answers[INTAKE_QUESTIONS[0].key].answer == "We repair air conditioners."
+    assert get_lead(lead.id).status == "form_started"
+
+
+def test_public_onboarding_completion_updates_status(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    lead = create_lead(
+        LeadInput(
+            email="complete@example.com",
+            business_name=None,
+            contact_name=None,
+            language=None,
+            notes=None,
+        )
+    )
+    _, token = create_or_refresh_token(lead.id)
+    client = TestClient(app)
+
+    for question in INTAKE_QUESTIONS:
+        response = client.post(
+            f"/onboarding/{token}",
+            data={"question_key": question.key, "answer": f"Answer for {question.key}"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    complete = client.get(f"/onboarding/{token}")
+    assert complete.status_code == 200
+    assert "Onboarding received" in complete.text
+    assert get_lead(lead.id).status == "form_submitted"

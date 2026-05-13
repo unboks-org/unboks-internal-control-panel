@@ -6,11 +6,13 @@ from typing import Optional
 from app.config import get_settings
 from app.emailer import EmailSendResult, prepare_or_send_onboarding_email
 from app.onboarding import (
+    INTAKE_QUESTIONS,
     LeadInput,
     LeadNotFoundError,
     LeadValidationError,
     clean_optional,
     create_lead,
+    list_intake_answer_counts,
     list_leads,
 )
 from app.security import (
@@ -181,6 +183,8 @@ def render_admin(
             "email_result": email_result,
             "form": form or {},
             "leads": list_leads(),
+            "intake_answer_counts": list_intake_answer_counts(),
+            "intake_total": len(INTAKE_QUESTIONS),
         },
         status_code=status_code,
     )
