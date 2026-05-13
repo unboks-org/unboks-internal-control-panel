@@ -97,6 +97,23 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert "tenant-selector" in shell.text
     assert "tenant-selector-label" in shell.text
     assert "Select tenant" not in shell.text
+    # Quick switcher: search input + filter chips + count
+    assert "data-tenant-search" in shell.text
+    assert 'placeholder="Search tenants"' in shell.text
+    assert "data-tenant-count" in shell.text
+    for f in ("All", "Active", "Trial", "Paused", "Problem"):
+        assert 'data-tenant-filter="' + f.lower() + '"' in shell.text
+        assert ">" + f + "<" in shell.text
+    # Each tenant row carries filter metadata
+    assert "data-tenant-item" in shell.text
+    assert "data-tenant-name" in shell.text
+    assert "data-tenant-tags" in shell.text
+    # Problem tag must NOT be applied to clean tenants (all seed tenants are clean today)
+    import re
+    tag_values = re.findall(r'data-tenant-tags="([^"]*)"', shell.text)
+    assert tag_values, "expected at least one tenant row with data-tenant-tags"
+    for tags in tag_values:
+        assert "problem" not in tags.split(), f"unexpected problem tag in {tags!r}"
     assert "Unboks Demo" in shell.text
     assert "Consulta Despertares" in shell.text
     assert "BlueFinn Charters" in shell.text

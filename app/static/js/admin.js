@@ -59,21 +59,73 @@
       return;
     }
     var toggle = selector.querySelector("[data-tenant-toggle]");
-    var list = selector.querySelector(".tenant-selector-list");
-    if (!toggle || !list) {
+    var panel = selector.querySelector("[data-tenant-panel]");
+    if (!toggle || !panel) {
       return;
     }
     toggle.addEventListener("click", function () {
-      var isHidden = list.hasAttribute("hidden");
+      var isHidden = panel.hasAttribute("hidden");
       if (isHidden) {
-        list.removeAttribute("hidden");
+        panel.removeAttribute("hidden");
         toggle.setAttribute("aria-expanded", "true");
         selector.classList.add("is-open");
       } else {
-        list.setAttribute("hidden", "");
+        panel.setAttribute("hidden", "");
         toggle.setAttribute("aria-expanded", "false");
         selector.classList.remove("is-open");
       }
+    });
+
+    var searchInput = selector.querySelector("[data-tenant-search]");
+    var filterButtons = selector.querySelectorAll("[data-tenant-filter]");
+    var items = selector.querySelectorAll("[data-tenant-item]");
+    var emptyNote = selector.querySelector("[data-tenant-empty]");
+    var countEl = selector.querySelector("[data-tenant-count]");
+    var totalCount = items.length;
+    var activeFilter = "all";
+
+    function applyFilter() {
+      var query = (searchInput && searchInput.value || "").trim().toLowerCase();
+      var visible = 0;
+      items.forEach(function (item) {
+        var name = item.getAttribute("data-tenant-name") || "";
+        var tags = (item.getAttribute("data-tenant-tags") || "").split(" ");
+        var matchesQuery = !query || name.indexOf(query) !== -1;
+        var matchesFilter = activeFilter === "all" || tags.indexOf(activeFilter) !== -1;
+        if (matchesQuery && matchesFilter) {
+          item.removeAttribute("hidden");
+          visible += 1;
+        } else {
+          item.setAttribute("hidden", "");
+        }
+      });
+      if (emptyNote) {
+        if (visible === 0) {
+          emptyNote.removeAttribute("hidden");
+        } else {
+          emptyNote.setAttribute("hidden", "");
+        }
+      }
+      if (countEl) {
+        if (activeFilter === "all" && !query) {
+          countEl.textContent = String(totalCount);
+        } else {
+          countEl.textContent = visible + "/" + totalCount;
+        }
+      }
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener("input", applyFilter);
+    }
+    filterButtons.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        activeFilter = btn.getAttribute("data-tenant-filter") || "all";
+        filterButtons.forEach(function (other) {
+          other.classList.toggle("is-active", other === btn);
+        });
+        applyFilter();
+      });
     });
   }
 

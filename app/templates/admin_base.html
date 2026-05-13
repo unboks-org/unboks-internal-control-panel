@@ -33,26 +33,69 @@
           aria-controls="tenant-selector-list"
         >
           <span class="tenant-selector-label">Tenants</span>
+          <span class="tenant-selector-count" data-tenant-count>{{ tenants | length }}</span>
           <span class="tenant-selector-caret" aria-hidden="true">&#9662;</span>
         </button>
-        <ul
-          id="tenant-selector-list"
-          class="tenant-selector-list"
+
+        <div
+          class="tenant-selector-panel"
           {% if active != 'tenants' %}hidden{% endif %}
+          data-tenant-panel
         >
-          {% for tenant in tenants %}
-            <li>
-              <a
-                href="/admin/tenants/{{ tenant.id }}"
-                class="tenant-selector-item {% if active_tenant and active_tenant.id == tenant.id %}active{% endif %}"
-                {% if active_tenant and active_tenant.id == tenant.id %}aria-current="page"{% endif %}
+          <label class="tenant-search">
+            <span class="tenant-search-icon" aria-hidden="true">&#9906;</span>
+            <input
+              type="search"
+              class="tenant-search-input"
+              placeholder="Search tenants"
+              aria-label="Search tenants"
+              data-tenant-search
+              autocomplete="off"
+            />
+          </label>
+
+          <div class="tenant-filter-chips" role="group" aria-label="Filter tenants">
+            <button type="button" class="tenant-filter-chip is-active" data-tenant-filter="all">All</button>
+            <button type="button" class="tenant-filter-chip" data-tenant-filter="active">Active</button>
+            <button type="button" class="tenant-filter-chip" data-tenant-filter="trial">Trial</button>
+            <button type="button" class="tenant-filter-chip" data-tenant-filter="paused">Paused</button>
+            <button type="button" class="tenant-filter-chip" data-tenant-filter="problem">Problem</button>
+          </div>
+
+          <ul
+            id="tenant-selector-list"
+            class="tenant-selector-list"
+            data-tenant-list
+          >
+            {% for tenant in tenants %}
+              {% set tags = [] %}
+              {% if tenant.status == 'active' %}{% set _ = tags.append('active') %}{% endif %}
+              {% if tenant.status == 'paused' %}{% set _ = tags.append('paused') %}{% endif %}
+              {% if tenant.plan == 'trial' %}{% set _ = tags.append('trial') %}{% endif %}
+              {% set health_states = [tenant.health.inbox, tenant.health.ai_agent, tenant.health.channels, tenant.health.sot, tenant.health.escalations, tenant.health.billing] %}
+              {% set has_bad_health = health_states | select('in', ['warn', 'down']) | list | length > 0 %}
+              {% if has_bad_health or tenant.billing.status in ('overdue', 'cancelled') or tenant.escalations.hard_count > 0 %}
+                {% set _ = tags.append('problem') %}
+              {% endif %}
+              <li
+                data-tenant-item
+                data-tenant-name="{{ tenant.name | lower }}"
+                data-tenant-tags="{{ ' '.join(tags) }}"
               >
-                <span class="tenant-selector-dot tenant-status-{{ tenant.status }}" aria-hidden="true"></span>
-                <span>{{ tenant.name }}</span>
-              </a>
-            </li>
-          {% endfor %}
-        </ul>
+                <a
+                  href="/admin/tenants/{{ tenant.id }}"
+                  class="tenant-selector-item {% if active_tenant and active_tenant.id == tenant.id %}active{% endif %}"
+                  {% if active_tenant and active_tenant.id == tenant.id %}aria-current="page"{% endif %}
+                >
+                  <span class="tenant-selector-dot tenant-status-{{ tenant.status }}" aria-hidden="true"></span>
+                  <span>{{ tenant.name }}</span>
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+
+          <p class="tenant-empty-note" data-tenant-empty hidden>No tenants match.</p>
+        </div>
       </div>
 
       <nav class="sidebar-nav" aria-label="Sections">
