@@ -434,6 +434,73 @@
     </div>
   </section>
 
+  {# 4h. Escalations #}
+  {% set esc = tenant.escalations %}
+  {% set esc_state_class = 'down' if esc.hard_count > 0 else ('warn' if esc.open_count > 0 or esc.soft_count > 0 else 'ok') %}
+  {% set esc_state_label = 'Action needed' if esc.hard_count > 0 else ('Open' if esc.open_count > 0 or esc.soft_count > 0 else 'Clear') %}
+  <section class="escalations-panel" aria-label="Escalations">
+    <header class="escalations-panel-header">
+      <div>
+        <h3>Escalations</h3>
+        <p class="muted compact-note">Tenant escalation status and rules.</p>
+      </div>
+      <span class="status-chip status-{{ esc_state_class }}">{{ esc_state_label }}</span>
+    </header>
+
+    <div class="escalations-stats">
+      <div class="data-stat">
+        <span class="data-stat-label">Open</span>
+        <span class="data-stat-value">
+          {{ esc.open_count }}
+          {% if esc.open_count > 0 %}<span class="status-chip status-warn">open</span>{% endif %}
+        </span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Soft escalations</span>
+        <span class="data-stat-value">{{ esc.soft_count }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Hard escalations</span>
+        <span class="data-stat-value">
+          {{ esc.hard_count }}
+          {% if esc.hard_count > 0 %}<span class="status-chip status-down">hard</span>{% endif %}
+        </span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Avg response time</span>
+        <span class="data-stat-value">{{ esc.avg_response_time }}</span>
+      </div>
+    </div>
+
+    <div class="escalations-meta">
+      <div class="escalations-rules">
+        <span class="data-stat-label">Escalation rules</span>
+        <p class="escalations-rules-text">{{ esc.rules_summary }}</p>
+      </div>
+      <div class="escalations-side">
+        <div class="data-stat">
+          <span class="data-stat-label">Alert channels</span>
+          <span class="data-stat-value escalations-channels">
+            <span class="status-chip status-{{ 'ok' if esc.alert_whatsapp else 'unknown' }}">WhatsApp</span>
+            <span class="status-chip status-{{ 'ok' if esc.alert_email else 'unknown' }}">Email</span>
+            <span class="status-chip status-{{ 'ok' if esc.alert_telegram else 'unknown' }}">Telegram</span>
+          </span>
+        </div>
+        <div class="data-stat">
+          <span class="data-stat-label">Operator on duty</span>
+          <span class="data-stat-value">{{ esc.operator_on_duty }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="escalations-actions">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">View escalations</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Edit escalation rules</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Test escalation alert</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Assign operator</button>
+    </div>
+  </section>
+
   {# 5. Activity log / audit trail #}
   <section class="activity-panel" aria-label="Activity log">
     <header class="activity-panel-header">

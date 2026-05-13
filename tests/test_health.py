@@ -180,6 +180,17 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Disconnect" in workspace.text
     assert "Not connected" in workspace.text  # at least one channel is not connected
     assert "Last message" in workspace.text
+    # Escalations panel
+    assert "escalations-panel" in workspace.text
+    for label in ("Open", "Soft escalations", "Hard escalations", "Avg response time",
+                  "Escalation rules", "Alert channels", "Operator on duty"):
+        assert label in workspace.text
+    for action in ("View escalations", "Edit escalation rules",
+                   "Test escalation alert", "Assign operator"):
+        assert action in workspace.text
+    # Must use Soft escalation / Hard escalation terminology, not Soft mode / Hard mode
+    assert "Soft mode" not in workspace.text
+    assert "Hard mode" not in workspace.text
     # Operators / access panel
     assert "access-panel" in workspace.text
     assert "Operators &amp; access" in workspace.text

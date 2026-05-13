@@ -117,6 +117,19 @@ def activity_type_label(value: str) -> str:
 
 
 @dataclass(frozen=True)
+class TenantEscalations:
+    open_count: int = 0
+    soft_count: int = 0
+    hard_count: int = 0
+    avg_response_time: str = "—"
+    rules_summary: str = "No rules configured."
+    alert_whatsapp: bool = False
+    alert_email: bool = False
+    alert_telegram: bool = False
+    operator_on_duty: str = "—"
+
+
+@dataclass(frozen=True)
 class TenantOperator:
     name: str
     email: str
@@ -164,6 +177,7 @@ class Tenant:
     billing: TenantBilling = field(default_factory=TenantBilling)
     push: TenantPushState = field(default_factory=TenantPushState)
     access: TenantAccess = field(default_factory=TenantAccess)
+    escalations: TenantEscalations = field(default_factory=TenantEscalations)
     activity: tuple[TenantActivityEntry, ...] = field(default_factory=tuple)
 
 
@@ -228,6 +242,20 @@ _TENANTS: tuple[Tenant, ...] = (
             pending_count=0,
             last_pushed_at="—",
             last_pushed_by="—",
+        ),
+        escalations=TenantEscalations(
+            open_count=0,
+            soft_count=0,
+            hard_count=0,
+            avg_response_time="—",
+            rules_summary=(
+                "Soft escalation on refund or complaint intent. "
+                "Hard escalation on explicit human request or repeated unresolved replies."
+            ),
+            alert_whatsapp=False,
+            alert_email=True,
+            alert_telegram=False,
+            operator_on_duty="—",
         ),
         access=TenantAccess(
             status="active",
