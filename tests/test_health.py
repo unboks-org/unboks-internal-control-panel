@@ -173,6 +173,12 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         assert action in workspace.text
     # Cancel tenant must be visually separated in a danger zone
     assert "billing-danger" in workspace.text
+    # Activity log / audit trail
+    assert "activity-panel" in workspace.text
+    assert "View full activity log" in workspace.text
+    assert "Export log" in workspace.text
+    # No fake events: empty tenants must show "No activity yet"
+    assert "No activity yet" in workspace.text
     # Source of Truth / Data Room
     assert "data-room" in workspace.text
     assert "Knowledge items" in workspace.text

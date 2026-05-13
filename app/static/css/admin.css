@@ -1136,6 +1136,77 @@ button.button-disabled,
   margin-bottom: 14px;
 }
 
+.activity-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  padding: 16px 18px;
+}
+
+.activity-panel-header {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.activity-panel-header h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+
+.activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.activity-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.activity-table th,
+.activity-table td {
+  border-bottom: 1px solid var(--color-border);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.activity-table th {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.activity-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 720px) {
+  .activity-table thead { display: none; }
+  .activity-table, .activity-table tbody, .activity-table tr, .activity-table td {
+    display: block;
+    width: 100%;
+  }
+  .activity-table tr {
+    border-bottom: 1px solid var(--color-border);
+    padding: 6px 0;
+  }
+  .activity-table td {
+    border: 0;
+    padding: 2px 0;
+  }
+}
+
 /* AI Agent control panel */
 .agent-panel {
   background: var(--color-surface);

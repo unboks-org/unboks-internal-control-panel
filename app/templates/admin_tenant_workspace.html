@@ -287,17 +287,39 @@
     </div>
   </section>
 
-  {# 5. Activity log #}
-  <section class="op-card activity-card" aria-label="Activity log">
-    <header>
-      <h3>Activity</h3>
+  {# 5. Activity log / audit trail #}
+  <section class="activity-panel" aria-label="Activity log">
+    <header class="activity-panel-header">
+      <div>
+        <h3>Activity</h3>
+        <p class="muted compact-note">Audit trail of changes inside this tenant account.</p>
+      </div>
+      <div class="activity-actions">
+        <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">View full activity log</button>
+        <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Export log</button>
+      </div>
     </header>
     {% if tenant.activity %}
-      <ul class="activity-list">
-        {% for entry in tenant.activity %}
-          <li>{{ entry }}</li>
-        {% endfor %}
-      </ul>
+      <table class="activity-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Summary</th>
+            <th>Changed by</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in tenant.activity %}
+            <tr>
+              <td><span class="status-chip status-neutral">{{ activity_type_labels.get(entry.type, entry.type) }}</span></td>
+              <td>{{ entry.summary }}</td>
+              <td>{{ entry.actor }}</td>
+              <td>{{ entry.when }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     {% else %}
       <p class="muted compact-note">No activity yet.</p>
     {% endif %}

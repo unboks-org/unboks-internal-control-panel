@@ -78,6 +78,33 @@ class TenantChannel:
 
 
 @dataclass(frozen=True)
+class TenantActivityEntry:
+    type: str       # one of ACTIVITY_TYPES values
+    summary: str
+    actor: str
+    when: str       # human-readable timestamp
+
+
+ACTIVITY_TYPES: tuple[tuple[str, str], ...] = (
+    ("tenant_created", "Tenant created"),
+    ("sot_updated", "SOT updated"),
+    ("agent_setting_changed", "Agent setting changed"),
+    ("channel_connected", "Channel connected"),
+    ("onboarding_sent", "Onboarding sent"),
+    ("review_approved", "Review approved"),
+    ("tenant_paused", "Tenant paused"),
+    ("changes_pushed", "Changes pushed"),
+)
+
+
+_ACTIVITY_TYPE_LABELS = dict(ACTIVITY_TYPES)
+
+
+def activity_type_label(value: str) -> str:
+    return _ACTIVITY_TYPE_LABELS.get(value, value)
+
+
+@dataclass(frozen=True)
 class TenantBilling:
     status: str = "trial"            # trial | active | overdue | paused | cancelled
     trial_days_left: Optional[int] = None
@@ -98,7 +125,7 @@ class Tenant:
     agent: TenantAgent = field(default_factory=TenantAgent)
     channels: tuple[TenantChannel, ...] = field(default_factory=tuple)
     billing: TenantBilling = field(default_factory=TenantBilling)
-    activity: tuple[str, ...] = field(default_factory=tuple)
+    activity: tuple[TenantActivityEntry, ...] = field(default_factory=tuple)
 
 
 _TENANTS: tuple[Tenant, ...] = (

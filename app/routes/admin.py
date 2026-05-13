@@ -27,6 +27,7 @@ from app.security import (
     verify_admin_password,
 )
 from app.tenants import (
+    ACTIVITY_TYPES,
     CLOUD_PROVIDERS,
     ESCALATION_MODES,
     UPLOAD_CATEGORIES,
@@ -152,6 +153,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "cloud_providers": CLOUD_PROVIDERS,
             "upload_categories": UPLOAD_CATEGORIES,
             "escalation_modes": ESCALATION_MODES,
+            "activity_type_labels": dict(ACTIVITY_TYPES),
         },
     )
 
