@@ -103,30 +103,48 @@
       <span class="status-chip status-{{ 'ok' if tenant.health.channels == 'ok' else 'unknown' }}">{{ tenant.health.channels }}</span>
     </header>
 
-    <div class="channels-grid">
-      {% for ch in tenant.channels %}
-        {% set ch_class = {'connected': 'ok', 'disconnected': 'unknown', 'error': 'down'}.get(ch.state, 'unknown') %}
-        <article class="channel-card">
-          <header class="channel-card-header">
-            <h4>{{ ch.name }}</h4>
-            <span class="status-chip status-{{ ch_class }}">
-              {% if ch.state == 'connected' %}Connected
-              {% elif ch.state == 'error' %}Error
-              {% else %}Not connected
-              {% endif %}
-            </span>
-          </header>
-          <dl class="channel-kv">
-            <dt>Last message</dt><dd>{{ ch.last_message }}</dd>
-            <dt>Last sync</dt><dd>{{ ch.last_sync }}</dd>
-          </dl>
-          <div class="channel-card-actions">
-            <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Configure</button>
-            <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Disconnect</button>
-          </div>
-        </article>
-      {% endfor %}
-    </div>
+    <table class="channels-table">
+      <thead>
+        <tr>
+          <th class="ch-col-name">Channel</th>
+          <th class="ch-col-status">Status</th>
+          <th class="ch-col-toggle">On / Off</th>
+          <th class="ch-col-sync">Last sync</th>
+          <th class="ch-col-msg">Last message</th>
+          <th class="ch-col-actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ch in tenant.channels %}
+          {% set is_on = ch.state == 'connected' %}
+          {% set status_label = 'Active' if is_on else 'Inactive' %}
+          {% set status_class = 'ok' if is_on else 'unknown' %}
+          <tr class="channel-row {% if is_on %}is-on{% else %}is-off{% endif %}">
+            <td class="ch-name">{{ ch.name }}</td>
+            <td><span class="status-chip status-{{ status_class }}">{{ status_label }}</span></td>
+            <td>
+              <span
+                class="channel-toggle {% if is_on %}is-on{% endif %}"
+                role="switch"
+                aria-checked="{{ 'true' if is_on else 'false' }}"
+                aria-disabled="true"
+                title="Not wired yet"
+                tabindex="0"
+              >
+                <span class="channel-toggle-knob" aria-hidden="true"></span>
+                <span class="sr-only">{{ ch.name }} {{ 'on' if is_on else 'off' }}</span>
+              </span>
+            </td>
+            <td class="ch-meta muted">{{ ch.last_sync or '—' }}</td>
+            <td class="ch-meta muted">{{ ch.last_message or '—' }}</td>
+            <td class="ch-actions">
+              <button type="button" class="link-btn" disabled aria-disabled="true" title="Not wired yet">Configure</button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted compact-note channels-foot">Toggle ON to add a channel, OFF to remove. Not wired yet.</p>
   </section>
 
   {# 4c. AI Agent control panel #}

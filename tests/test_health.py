@@ -232,15 +232,21 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         assert action in workspace.text
     # Cancel tenant must be visually separated in a danger zone
     assert "billing-danger" in workspace.text
-    # Channels control panel
+    # Channels control panel — compact list/table
     assert "channels-panel" in workspace.text
+    assert "channels-table" in workspace.text
     for channel in ("WhatsApp", "Email", "Instagram", "Facebook", "Telegram", "Website chat"):
         assert channel in workspace.text
-    # Per-channel actions
+    # Compact controls: toggle + Configure link, no big Disconnect button
+    assert "channel-toggle" in workspace.text
+    assert 'role="switch"' in workspace.text
     assert "Configure" in workspace.text
-    assert "Disconnect" in workspace.text
-    assert "Not connected" in workspace.text  # at least one channel is not connected
+    assert "Disconnect" not in workspace.text
+    # Active / Inactive labels (replace 'Connected'/'Not connected')
+    assert "Active" in workspace.text
+    assert "Inactive" in workspace.text
     assert "Last message" in workspace.text
+    assert "Last sync" in workspace.text
     # Attention center and anomaly monitor moved to global views (see test_admin_settings_renders)
     # Setup checklist
     assert "setup-checklist" in workspace.text
