@@ -5,6 +5,7 @@ later milestone; for now we expose a small, hard-coded list so the UI can be
 wired end-to-end without faking storage.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -538,12 +539,90 @@ def sorted_notes(notes: tuple[TenantNote, ...]) -> tuple[TenantNote, ...]:
     return tuple(sorted(notes, key=lambda n: (0 if n.pinned else 1,)))
 
 
+_DEFAULT_TENANTS_CLIENT_DIR = "/opt/wtyj/clients"
+_ALLOWED_STATUSES = ("active", "paused", "suspended")
+
+
+def _load_tenants_from_disk(client_dir: str) -> tuple[Tenant, ...]:
+    """J3-BE-01: discover tenants by globbing {client_dir}/*/config/client.json.
+
+    Mapping (only id/name/status/plan are pulled from disk for now; all other
+    Tenant fields keep their placeholder defaults until subsequent J3 briefs
+    wire them up):
+      tenant.id     = business.slug, fallback to the parent directory name
+      tenant.name   = business.name, fallback to tenant.id
+      tenant.status = business.status if in {active, paused, suspended}, else 'active'
+      tenant.plan   = business.plan, fallback to 'trial'
+
+    Read-only: never writes to client.json. Invalid JSON, missing files, or
+    files without a usable id are skipped without raising. Returns alphabetically
+    sorted by tenant.id."""
+    import glob
+    import json
+
+    pattern = os.path.join(client_dir, "*", "config", "client.json")
+    discovered: list[Tenant] = []
+    for path in glob.glob(pattern):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        business = data.get("business")
+        if not isinstance(business, dict):
+            business = {}
+        # Parent directory name (e.g. "unboks" from /opt/wtyj/clients/unboks/config/client.json)
+        directory_name = os.path.basename(os.path.dirname(os.path.dirname(path))).strip()
+        slug = business.get("slug")
+        if isinstance(slug, str):
+            slug = slug.strip()
+        else:
+            slug = ""
+        tenant_id = slug or directory_name
+        if not tenant_id:
+            continue
+        raw_name = business.get("name")
+        if isinstance(raw_name, str) and raw_name.strip():
+            name = raw_name.strip()
+        else:
+            name = tenant_id
+        raw_status = business.get("status")
+        if isinstance(raw_status, str):
+            normalized = raw_status.strip().lower()
+            status = normalized if normalized in _ALLOWED_STATUSES else "active"
+        else:
+            status = "active"
+        raw_plan = business.get("plan")
+        if isinstance(raw_plan, str) and raw_plan.strip():
+            plan = raw_plan.strip()
+        else:
+            plan = "trial"
+        discovered.append(Tenant(
+            id=tenant_id,
+            name=name,
+            status=status,
+            plan=plan,
+        ))
+    discovered.sort(key=lambda t: t.id)
+    return tuple(discovered)
+
+
 def list_tenants() -> tuple[Tenant, ...]:
+    """Return real tenants from disk when NR3_TENANTS_CLIENT_DIR is set AND
+    the directory contains at least one parseable client.json; otherwise
+    fall back to the hard-coded placeholder list."""
+    client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    if client_dir and os.path.isdir(client_dir):
+        loaded = _load_tenants_from_disk(client_dir)
+        if loaded:
+            return loaded
     return _TENANTS
 
 
 def get_tenant(tenant_id: str) -> Optional[Tenant]:
-    for tenant in _TENANTS:
+    for tenant in list_tenants():
         if tenant.id == tenant_id:
             return tenant
     return None
