@@ -1,0 +1,18 @@
+# Include this file inside the protected internal-control-panel location/server.
+# Replace the sample IP ranges with Calvin/VPN/office egress IPs.
+#
+# Example:
+#   location / {
+#     include /etc/nginx/includes/ip-allowlist.conf;
+#     proxy_pass http://wtyj-admin:8010;
+#   }
+
+allow 127.0.0.1/32;
+# allow 203.0.113.10/32;
+# allow 198.51.100.0/24;
+deny all;
+
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;

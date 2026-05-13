@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Admin | Unboks Internal{% endblock %}
+
+{% block body %}
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Unboks.org</p>
+      <h1>Internal control panel</h1>
+    </div>
+    <form method="post" action="/logout">
+      <button class="button-secondary" type="submit">Sign out</button>
+    </form>
+  </header>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Nr 3 placeholder</h2>
+      <span class="status-chip status-unknown">Not wired</span>
+    </div>
+    <p class="muted">
+      Internal control panel placeholder. Tenant data is not wired yet.
+    </p>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Current scope</h2>
+      <span class="status-chip status-ok">Protected</span>
+    </div>
+    <table>
+      <tbody>
+        <tr>
+          <th>Health route</th>
+          <td><code>/healthz</code></td>
+        </tr>
+        <tr>
+          <th>Tenant data</th>
+          <td>Not connected</td>
+        </tr>
+        <tr>
+          <th>Onboarding</th>
+          <td>Not implemented</td>
+        </tr>
+        <tr>
+          <th>Emergency controls</th>
+          <td>Disabled until backend endpoints exist</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+{% endblock %}
