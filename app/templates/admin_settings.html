@@ -1,0 +1,40 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Settings | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Configuration{% endblock %}
+{% block page_title %}Settings{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Internal configuration controls. More options will appear here over time.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <div class="panel-header">
+      <h2>General</h2>
+      <span class="status-chip status-neutral">Placeholder</span>
+    </div>
+    <dl class="detail-grid">
+      <div>
+        <dt>Service</dt>
+        <dd>Unboks internal control panel</dd>
+      </div>
+      <div>
+        <dt>Environment</dt>
+        <dd>Internal</dd>
+      </div>
+      <div>
+        <dt>Data store</dt>
+        <dd>SQLite (local)</dd>
+      </div>
+    </dl>
+    <p class="muted settings-note">No editable settings here yet. Future controls (SMTP, branding, retention) will land in this section.</p>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Account</h2>
+      <span class="status-chip status-neutral">Session</span>
+    </div>
+    <p class="muted">You are signed in as the internal admin. Sign out from the sidebar when finished.</p>
+  </section>
+{% endblock %}

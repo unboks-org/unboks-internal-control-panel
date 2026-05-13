@@ -1,0 +1,105 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Reviews | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Quality control{% endblock %}
+{% block page_title %}Reviews{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Submitted intakes ready for Calvin to review and approve.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Awaiting review</h2>
+      <span class="status-chip status-unknown">{{ awaiting|length }}</span>
+    </div>
+    {% if awaiting %}
+      <div class="table-wrap">
+        <table class="lead-table">
+          <thead>
+            <tr>
+              <th>Business</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Intake</th>
+              <th>Updated</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for lead in awaiting %}
+              <tr>
+                <td data-label="Business">
+                  <span class="primary-cell">{{ lead.business_name or "—" }}</span>
+                </td>
+                <td data-label="Email">{{ lead.email }}</td>
+                <td data-label="Status">
+                  <span class="status-chip status-lead">{{ lead.status }}</span>
+                </td>
+                <td data-label="Intake">
+                  {% set answer_count = intake_answer_counts.get(lead.id, 0) %}
+                  {% if answer_count >= intake_total %}
+                    <span class="status-chip status-ok">complete</span>
+                  {% else %}
+                    <span class="status-chip status-unknown">{{ answer_count }}/{{ intake_total }}</span>
+                  {% endif %}
+                </td>
+                <td data-label="Updated">{{ lead.updated_at }}</td>
+                <td data-label="Action">
+                  <a class="button-link" href="/admin/onboarding/leads/{{ lead.id }}">Open review</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">No submitted intakes are waiting on review right now.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Decided</h2>
+      <span class="status-chip status-neutral">{{ decided|length }}</span>
+    </div>
+    {% if decided %}
+      <div class="table-wrap">
+        <table class="lead-table">
+          <thead>
+            <tr>
+              <th>Business</th>
+              <th>Email</th>
+              <th>Decision</th>
+              <th>Reviewed</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for lead in decided %}
+              <tr>
+                <td data-label="Business">
+                  <span class="primary-cell">{{ lead.business_name or "—" }}</span>
+                </td>
+                <td data-label="Email">{{ lead.email }}</td>
+                <td data-label="Decision">
+                  {% if lead.review_status == "approved" %}
+                    <span class="status-chip status-ok">approved</span>
+                  {% else %}
+                    <span class="status-chip status-unknown">needs changes</span>
+                  {% endif %}
+                </td>
+                <td data-label="Reviewed">{{ lead.reviewed_at or "—" }}</td>
+                <td data-label="Action">
+                  <a class="button-link" href="/admin/onboarding/leads/{{ lead.id }}">Open</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">No reviewed leads yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

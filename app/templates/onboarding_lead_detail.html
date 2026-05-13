@@ -1,21 +1,16 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 
 {% block title %}Onboarding Review | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Reviews{% endblock %}
+{% block page_title %}Onboarding review{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">{{ lead.business_name or lead.email }} &middot; {{ lead.email }}</p>
+{% endblock %}
+{% block page_actions %}
+  <a class="button-link" href="/admin/reviews">Back to reviews</a>
+{% endblock %}
 
-{% block body %}
-  <header class="topbar">
-    <div>
-      <p class="eyebrow">Unboks.org</p>
-      <h1>Onboarding review</h1>
-    </div>
-    <div class="topbar-actions">
-      <a class="button-link" href="/admin">Back</a>
-      <form method="post" action="/logout">
-        <button class="button-secondary" type="submit">Sign out</button>
-      </form>
-    </div>
-  </header>
-
+{% block content %}
   <section class="panel">
     <div class="panel-header">
       <div>

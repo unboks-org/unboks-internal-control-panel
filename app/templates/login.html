@@ -1,21 +1,24 @@
 {% extends "base.html" %}
 
 {% block title %}Login | Unboks Internal{% endblock %}
+{% block body_class %}auth-body{% endblock %}
 
 {% block body %}
-  <section class="login-panel" aria-labelledby="login-title">
-    <p class="eyebrow">Unboks.org internal</p>
-    <h1 id="login-title">Admin access</h1>
-    <p class="muted">Restricted control panel placeholder.</p>
+  <main class="nr3-shell">
+    <section class="login-panel" aria-labelledby="login-title">
+      <p class="eyebrow">Unboks.org internal</p>
+      <h1 id="login-title">Admin access</h1>
+      <p class="muted">Restricted control panel. Sign in to continue.</p>
 
-    {% if error %}
-      <div class="alert alert-error" role="alert">{{ error }}</div>
-    {% endif %}
+      {% if error %}
+        <div class="alert alert-error" role="alert">{{ error }}</div>
+      {% endif %}
 
-    <form method="post" action="/login" class="form-stack">
-      <label for="password">Internal password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
-      <button type="submit">Sign in</button>
-    </form>
-  </section>
+      <form method="post" action="/login" class="form-stack">
+        <label for="password">Internal password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+  </main>
 {% endblock %}

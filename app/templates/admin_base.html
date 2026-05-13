@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block body_class %}admin-body{% endblock %}
+
+{% block body %}
+  <div class="app-shell" data-shell>
+    <button
+      type="button"
+      class="sidebar-scrim"
+      data-sidebar-close
+      aria-label="Close navigation"
+      hidden
+    ></button>
+
+    <aside class="sidebar" data-sidebar aria-label="Primary navigation">
+      <div class="sidebar-brand">
+        <span class="brand-mark" aria-hidden="true">U</span>
+        <div class="brand-text">
+          <span class="brand-name">Unboks</span>
+          <span class="brand-sub">Internal control panel</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a
+          href="/admin"
+          class="nav-item {% if active == 'home' %}active{% endif %}"
+          {% if active == 'home' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Home</span>
+        </a>
+        <a
+          href="/admin/onboarding"
+          class="nav-item {% if active == 'onboarding' %}active{% endif %}"
+          {% if active == 'onboarding' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Onboarding / Leads</span>
+        </a>
+        <a
+          href="/admin/reviews"
+          class="nav-item {% if active == 'reviews' %}active{% endif %}"
+          {% if active == 'reviews' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Reviews</span>
+        </a>
+        <a
+          href="/admin/settings"
+          class="nav-item {% if active == 'settings' %}active{% endif %}"
+          {% if active == 'settings' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Settings</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <form method="post" action="/logout">
+          <button class="button-secondary button-block" type="submit">Sign out</button>
+        </form>
+      </div>
+    </aside>
+
+    <div class="main-area">
+      <header class="page-header">
+        <button
+          type="button"
+          class="menu-toggle"
+          data-sidebar-open
+          aria-label="Open navigation"
+          aria-expanded="false"
+        >
+          <span></span><span></span><span></span>
+        </button>
+        <div class="page-header-text">
+          <p class="eyebrow">{% block section_eyebrow %}Unboks internal{% endblock %}</p>
+          <h1>{% block page_title %}Admin{% endblock %}</h1>
+          {% block page_subtitle %}{% endblock %}
+        </div>
+        <div class="page-header-actions">
+          {% block page_actions %}{% endblock %}
+        </div>
+      </header>
+
+      <main class="page-content" id="content">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+{% endblock %}

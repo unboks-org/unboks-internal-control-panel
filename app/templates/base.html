@@ -7,10 +7,8 @@
     <link rel="stylesheet" href="/static/css/tokens.css">
     <link rel="stylesheet" href="/static/css/admin.css">
   </head>
-  <body>
-    <main class="nr3-shell">
-      {% block body %}{% endblock %}
-    </main>
+  <body class="{% block body_class %}{% endblock %}">
+    {% block body %}{% endblock %}
     <script src="/static/js/admin.js"></script>
   </body>
 </html>

@@ -1,0 +1,86 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Home | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Overview{% endblock %}
+{% block page_title %}Home{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Quick view of what is in flight across onboarding and review.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="kpi-grid" aria-label="Pipeline summary">
+    <div class="kpi-card">
+      <span class="kpi-label">Total leads</span>
+      <span class="kpi-value">{{ totals.total }}</span>
+      <a class="kpi-link" href="/admin/onboarding">View all leads &rsaquo;</a>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Awaiting email</span>
+      <span class="kpi-value">{{ totals.awaiting_email }}</span>
+      <span class="kpi-help">New leads with no onboarding email sent.</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">In intake</span>
+      <span class="kpi-value">{{ totals.in_intake }}</span>
+      <span class="kpi-help">Email sent or form started, not submitted.</span>
+    </div>
+    <div class="kpi-card kpi-accent">
+      <span class="kpi-label">Awaiting review</span>
+      <span class="kpi-value">{{ totals.awaiting_review }}</span>
+      <a class="kpi-link" href="/admin/reviews">Open review queue &rsaquo;</a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Next actions</h2>
+      <span class="status-chip status-neutral">Internal only</span>
+    </div>
+    <ul class="next-actions">
+      <li>
+        <div>
+          <strong>Add a new lead</strong>
+          <span class="muted">Create a tenant prospect and send the onboarding email.</span>
+        </div>
+        <a class="button-link" href="/admin/onboarding">Go to onboarding</a>
+      </li>
+      <li>
+        <div>
+          <strong>Review submitted intakes</strong>
+          <span class="muted">{{ totals.awaiting_review }} lead(s) waiting on Calvin's decision.</span>
+        </div>
+        <a class="button-link" href="/admin/reviews">Open reviews</a>
+      </li>
+      <li>
+        <div>
+          <strong>Adjust internal settings</strong>
+          <span class="muted">Settings panel placeholder for upcoming controls.</span>
+        </div>
+        <a class="button-link" href="/admin/settings">Open settings</a>
+      </li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Recent leads</h2>
+      <a class="button-link" href="/admin/onboarding">All leads</a>
+    </div>
+    {% if recent_leads %}
+      <ul class="recent-list">
+        {% for lead in recent_leads %}
+          <li>
+            <div class="recent-main">
+              <a href="/admin/onboarding/leads/{{ lead.id }}">{{ lead.business_name or lead.email }}</a>
+              <span class="cell-note">{{ lead.email }}</span>
+            </div>
+            <span class="status-chip status-lead">{{ lead.status }}</span>
+            <span class="cell-note">{{ lead.updated_at }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No onboarding leads yet. Create the first one from the Onboarding panel.</p>
+    {% endif %}
+  </section>
+{% endblock %}

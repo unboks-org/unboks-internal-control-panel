@@ -1,59 +1,62 @@
 {% extends "base.html" %}
 
 {% block title %}Onboarding | Unboks{% endblock %}
+{% block body_class %}public-body{% endblock %}
 
 {% block body %}
-  <section class="login-panel onboarding-panel">
-    <p class="eyebrow">Unboks onboarding</p>
-    {% if progress.complete %}
-      <h1>Onboarding received</h1>
-      <p class="muted">Thank you. Your answers were saved successfully.</p>
-      {% if progress.lead.business_name %}
-        <p class="placeholder-detail">{{ progress.lead.business_name }}</p>
-      {% endif %}
-      <div class="confirmation-block" role="status">
-        <h2>You are done</h2>
-        <p>Our team will review your answers, prepare your setup, and contact you with the next step.</p>
-        <p class="muted">You can close this tab now.</p>
-      </div>
-      <div class="next-steps">
-        <h2>What happens next</h2>
-        <ol>
-          <li>Unboks reviews your business details.</li>
-          <li>We prepare your AI inbox setup.</li>
-          <li>You receive dashboard access when setup is ready.</li>
-        </ol>
-      </div>
-    {% else %}
-      <h1>Business intake</h1>
-      <p class="muted">Answer one question at a time. Your progress is saved after each step.</p>
-
-      <div class="progress-line" aria-label="Onboarding progress">
-        <span>Step {{ progress.current_index + 1 }} of {{ progress.total_questions }}</span>
-        <span>{{ progress.answered_count }} saved</span>
-      </div>
-
-      {% if error %}
-        <div class="alert alert-error" role="alert">{{ error }}</div>
-      {% endif %}
-
-      <form method="post" action="/onboarding/{{ token }}" class="form-stack intake-form">
-        <input type="hidden" name="question_key" value="{{ progress.current_question.key }}">
-        <div class="field">
-          <label for="answer">{{ progress.current_question.label }}</label>
-          <p class="muted">{{ progress.current_question.help_text }}</p>
-          <textarea
-            id="answer"
-            name="answer"
-            rows="8"
-            required
-            autofocus
-          >{{ answer or "" }}</textarea>
+  <main class="nr3-shell">
+    <section class="login-panel onboarding-panel">
+      <p class="eyebrow">Unboks onboarding</p>
+      {% if progress.complete %}
+        <h1>Onboarding received</h1>
+        <p class="muted">Thank you. Your answers were saved successfully.</p>
+        {% if progress.lead.business_name %}
+          <p class="placeholder-detail">{{ progress.lead.business_name }}</p>
+        {% endif %}
+        <div class="confirmation-block" role="status">
+          <h2>You are done</h2>
+          <p>Our team will review your answers, prepare your setup, and contact you with the next step.</p>
+          <p class="muted">You can close this tab now.</p>
         </div>
-        <div class="field-actions">
-          <button type="submit">Save and continue</button>
+        <div class="next-steps">
+          <h2>What happens next</h2>
+          <ol>
+            <li>Unboks reviews your business details.</li>
+            <li>We prepare your AI inbox setup.</li>
+            <li>You receive dashboard access when setup is ready.</li>
+          </ol>
         </div>
-      </form>
-    {% endif %}
-  </section>
+      {% else %}
+        <h1>Business intake</h1>
+        <p class="muted">Answer one question at a time. Your progress is saved after each step.</p>
+
+        <div class="progress-line" aria-label="Onboarding progress">
+          <span>Step {{ progress.current_index + 1 }} of {{ progress.total_questions }}</span>
+          <span>{{ progress.answered_count }} saved</span>
+        </div>
+
+        {% if error %}
+          <div class="alert alert-error" role="alert">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="/onboarding/{{ token }}" class="form-stack intake-form">
+          <input type="hidden" name="question_key" value="{{ progress.current_question.key }}">
+          <div class="field">
+            <label for="answer">{{ progress.current_question.label }}</label>
+            <p class="muted">{{ progress.current_question.help_text }}</p>
+            <textarea
+              id="answer"
+              name="answer"
+              rows="8"
+              required
+              autofocus
+            >{{ answer or "" }}</textarea>
+          </div>
+          <div class="field-actions">
+            <button type="submit">Save and continue</button>
+          </div>
+        </form>
+      {% endif %}
+    </section>
+  </main>
 {% endblock %}

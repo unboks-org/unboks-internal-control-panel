@@ -31,30 +31,13 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 
+REVIEW_AWAITING_STATUSES = {"form_submitted"}
+REVIEW_DECIDED_STATUSES = {"review_needs_changes", "review_approved", "tenant_ready"}
+
+
 @router.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
     return RedirectResponse(url="/admin", status_code=303)
-
-
-@router.post("/admin/onboarding/leads/{lead_id}/send-email", response_class=HTMLResponse)
-def send_onboarding_email(request: Request, lead_id: int) -> Response:
-    settings = get_settings()
-    redirect = require_admin(request, settings)
-    if redirect:
-        return redirect
-    try:
-        result = prepare_or_send_onboarding_email(lead_id)
-    except LeadNotFoundError:
-        return render_admin(
-            request,
-            error="Onboarding lead not found.",
-            status_code=404,
-        )
-    return render_admin(
-        request,
-        email_result=result,
-        sent_notice="Onboarding email sent." if result.sent else None,
-    )
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -91,13 +74,61 @@ def login_submit(request: Request, password: str = Form(default="")) -> Response
     return response
 
 
+@router.post("/logout")
+def logout() -> RedirectResponse:
+    response = RedirectResponse(url="/login", status_code=303)
+    clear_session_cookie(response)
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Admin shell pages
+# ---------------------------------------------------------------------------
+
+
 @router.get("/admin", response_class=HTMLResponse)
-def admin_page(request: Request) -> Response:
+def admin_home(request: Request) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
-    return render_admin(request)
+    return render_home(request)
+
+
+@router.get("/admin/onboarding", response_class=HTMLResponse)
+def admin_onboarding(request: Request) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    return render_onboarding(request)
+
+
+@router.get("/admin/reviews", response_class=HTMLResponse)
+def admin_reviews(request: Request) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    return render_reviews(request)
+
+
+@router.get("/admin/settings", response_class=HTMLResponse)
+def admin_settings(request: Request) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(
+        request,
+        "admin_settings.html",
+        {"active": "settings"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Onboarding lead actions (live under /admin/onboarding)
+# ---------------------------------------------------------------------------
 
 
 @router.post("/admin/onboarding/leads", response_class=HTMLResponse)
@@ -124,7 +155,7 @@ def create_onboarding_lead(
     try:
         create_lead(lead_input)
     except LeadValidationError as exc:
-        return render_admin(
+        return render_onboarding(
             request,
             error=str(exc),
             form={
@@ -136,7 +167,28 @@ def create_onboarding_lead(
             },
             status_code=400,
         )
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/onboarding", status_code=303)
+
+
+@router.post("/admin/onboarding/leads/{lead_id}/send-email", response_class=HTMLResponse)
+def send_onboarding_email(request: Request, lead_id: int) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        result = prepare_or_send_onboarding_email(lead_id)
+    except LeadNotFoundError:
+        return render_onboarding(
+            request,
+            error="Onboarding lead not found.",
+            status_code=404,
+        )
+    return render_onboarding(
+        request,
+        email_result=result,
+        sent_notice="Onboarding email sent." if result.sent else None,
+    )
 
 
 @router.get("/admin/api/onboarding/leads")
@@ -172,7 +224,7 @@ def onboarding_lead_detail(request: Request, lead_id: int) -> Response:
     try:
         lead = get_lead(lead_id)
     except LeadNotFoundError:
-        return render_admin(
+        return render_onboarding(
             request,
             error="Onboarding lead not found.",
             status_code=404,
@@ -194,7 +246,7 @@ def onboarding_lead_review_decision(
     try:
         set_review_decision(lead_id, decision, review_notes)
     except LeadNotFoundError:
-        return render_admin(
+        return render_onboarding(
             request,
             error="Onboarding lead not found.",
             status_code=404,
@@ -230,14 +282,45 @@ def onboarding_lead_setup_summary(request: Request, lead_id: int) -> Response:
     )
 
 
-@router.post("/logout")
-def logout() -> RedirectResponse:
-    response = RedirectResponse(url="/login", status_code=303)
-    clear_session_cookie(response)
-    return response
+# ---------------------------------------------------------------------------
+# Render helpers
+# ---------------------------------------------------------------------------
 
 
-def render_admin(
+def _pipeline_totals(leads) -> dict[str, int]:
+    awaiting_email = 0
+    in_intake = 0
+    awaiting_review = 0
+    for lead in leads:
+        if lead.status in {"lead_created", "email_pending"}:
+            awaiting_email += 1
+        elif lead.status in {"email_sent", "form_started"}:
+            in_intake += 1
+        elif lead.status == "form_submitted":
+            awaiting_review += 1
+    return {
+        "total": len(leads),
+        "awaiting_email": awaiting_email,
+        "in_intake": in_intake,
+        "awaiting_review": awaiting_review,
+    }
+
+
+def render_home(request: Request) -> HTMLResponse:
+    leads = list_leads()
+    totals = _pipeline_totals(leads)
+    return templates.TemplateResponse(
+        request,
+        "admin_home.html",
+        {
+            "active": "home",
+            "totals": totals,
+            "recent_leads": leads[:5],
+        },
+    )
+
+
+def render_onboarding(
     request: Request,
     error: Optional[str] = None,
     form: Optional[dict[str, str]] = None,
@@ -247,8 +330,9 @@ def render_admin(
 ) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
-        "admin.html",
+        "admin_onboarding.html",
         {
+            "active": "onboarding",
             "error": error,
             "sent_notice": sent_notice,
             "email_result": email_result,
@@ -258,6 +342,23 @@ def render_admin(
             "intake_total": len(INTAKE_QUESTIONS),
         },
         status_code=status_code,
+    )
+
+
+def render_reviews(request: Request) -> HTMLResponse:
+    leads = list_leads()
+    awaiting = [lead for lead in leads if lead.status in REVIEW_AWAITING_STATUSES]
+    decided = [lead for lead in leads if lead.status in REVIEW_DECIDED_STATUSES]
+    return templates.TemplateResponse(
+        request,
+        "admin_reviews.html",
+        {
+            "active": "reviews",
+            "awaiting": awaiting,
+            "decided": decided,
+            "intake_answer_counts": list_intake_answer_counts(),
+            "intake_total": len(INTAKE_QUESTIONS),
+        },
     )
 
 
@@ -273,6 +374,7 @@ def render_lead_detail(
         request,
         "onboarding_lead_detail.html",
         {
+            "active": "reviews",
             "error": error,
             "lead": lead,
             "answers": answers,

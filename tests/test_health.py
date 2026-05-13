@@ -57,13 +57,17 @@ def test_create_onboarding_lead_persists_and_rejects_duplicate(monkeypatch, tmp_
         follow_redirects=False,
     )
     assert created.status_code == 303
-    assert created.headers["location"] == "/admin"
+    assert created.headers["location"] == "/admin/onboarding"
 
-    admin = client.get("/admin")
-    assert admin.status_code == 200
-    assert "test@example.com" in admin.text
-    assert "Test Business" in admin.text
-    assert "lead_created" in admin.text
+    onboarding = client.get("/admin/onboarding")
+    assert onboarding.status_code == 200
+    assert "test@example.com" in onboarding.text
+    assert "Test Business" in onboarding.text
+    assert "lead_created" in onboarding.text
+
+    home = client.get("/admin")
+    assert home.status_code == 200
+    assert "test@example.com" in home.text
 
     duplicate = client.post(
         "/admin/onboarding/leads",
@@ -74,9 +78,72 @@ def test_create_onboarding_lead_persists_and_rejects_duplicate(monkeypatch, tmp_
 
     refreshed = TestClient(app)
     refreshed.cookies.update(client.cookies)
-    persisted = refreshed.get("/admin")
+    persisted = refreshed.get("/admin/onboarding")
     assert persisted.status_code == 200
     assert "test@example.com" in persisted.text
+
+
+def test_admin_shell_renders_sidebar_and_active_state(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    home = client.get("/admin")
+    assert home.status_code == 200
+    assert 'class="app-shell"' in home.text or "app-shell" in home.text
+    assert "sidebar-nav" in home.text
+    assert "Onboarding / Leads" in home.text
+    assert "Reviews" in home.text
+    assert "Settings" in home.text
+    assert 'aria-current="page"' in home.text
+
+    onboarding = client.get("/admin/onboarding")
+    assert onboarding.status_code == 200
+    assert "sidebar-nav" in onboarding.text
+    assert 'href="/admin/onboarding"' in onboarding.text
+    assert 'aria-current="page"' in onboarding.text
+
+    reviews = client.get("/admin/reviews")
+    assert reviews.status_code == 200
+    assert "Awaiting review" in reviews.text
+    assert "sidebar-nav" in reviews.text
+
+    settings_page = client.get("/admin/settings")
+    assert settings_page.status_code == 200
+    assert "sidebar-nav" in settings_page.text
+    assert "Settings" in settings_page.text
+
+
+def test_public_onboarding_does_not_render_admin_shell(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    lead = create_lead(
+        LeadInput(
+            email="public@example.com",
+            business_name=None,
+            contact_name=None,
+            language=None,
+            notes=None,
+        )
+    )
+    _, token = create_or_refresh_token(lead.id)
+    client = TestClient(app)
+
+    page = client.get(f"/onboarding/{token}")
+    assert page.status_code == 200
+    assert "sidebar-nav" not in page.text
+    assert "app-shell" not in page.text
+
+    invalid = client.get("/onboarding/not-a-valid-token")
+    assert invalid.status_code == 404
+    assert "sidebar-nav" not in invalid.text
+
+    login = client.get("/login")
+    assert login.status_code == 200
+    assert "sidebar-nav" not in login.text
 
 
 def test_admin_send_email_route_requires_auth(monkeypatch, tmp_path) -> None:

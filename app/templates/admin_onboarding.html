@@ -1,0 +1,184 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Onboarding | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Pipeline{% endblock %}
+{% block page_title %}Onboarding / Leads{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Create new tenant prospects and manage their onboarding email.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <div class="panel-header">
+      <h2>New onboarding lead</h2>
+      <span class="status-chip status-neutral">Internal only</span>
+    </div>
+    <p class="muted">Create a prospective tenant record. Email sends by SMTP when configured, otherwise a manual preview is shown.</p>
+
+    {% if error %}
+      <div class="alert alert-error" role="alert">{{ error }}</div>
+    {% endif %}
+    {% if sent_notice %}
+      <div class="alert alert-success" role="status">{{ sent_notice }}</div>
+    {% endif %}
+    {% if email_result and not email_result.sent %}
+      <div class="manual-email-block" role="status">
+        <div class="panel-header compact-header">
+          <div>
+            <h3>{{ email_result.error or "Email pending" }}</h3>
+            <p class="muted">Copy this welcome email and send it manually. The secure link is shown only in this preview.</p>
+          </div>
+          <span class="status-chip status-unknown">email_pending</span>
+        </div>
+        <label for="manual-onboarding-link">Onboarding link</label>
+        <input id="manual-onboarding-link" type="text" readonly value="{{ email_result.draft.onboarding_link }}">
+        <label for="manual-email-subject">Subject</label>
+        <input id="manual-email-subject" type="text" readonly value="{{ email_result.draft.subject }}">
+        <label for="manual-email-body">Email body</label>
+        <textarea id="manual-email-body" rows="12" readonly>{{ email_result.draft.body }}</textarea>
+      </div>
+    {% endif %}
+
+    <form method="post" action="/admin/onboarding/leads" class="lead-form">
+      <div class="field field-required">
+        <label for="lead-email">Email</label>
+        <input
+          id="lead-email"
+          name="email"
+          type="email"
+          autocomplete="email"
+          required
+          value="{{ form.get('email', '') }}"
+          placeholder="client@example.com"
+        >
+      </div>
+      <div class="field">
+        <label for="business-name">Business name</label>
+        <input
+          id="business-name"
+          name="business_name"
+          type="text"
+          value="{{ form.get('business_name', '') }}"
+          placeholder="Business name"
+        >
+      </div>
+      <div class="field">
+        <label for="contact-name">Contact name</label>
+        <input
+          id="contact-name"
+          name="contact_name"
+          type="text"
+          value="{{ form.get('contact_name', '') }}"
+          placeholder="Contact name"
+        >
+      </div>
+      <div class="field">
+        <label for="language">Language</label>
+        <input
+          id="language"
+          name="language"
+          type="text"
+          value="{{ form.get('language', '') }}"
+          placeholder="English, Dutch, Spanish"
+        >
+      </div>
+      <div class="field field-wide">
+        <label for="notes">Notes</label>
+        <textarea
+          id="notes"
+          name="notes"
+          rows="3"
+          placeholder="Short internal note"
+        >{{ form.get('notes', '') }}</textarea>
+      </div>
+      <div class="field-actions">
+        <button type="submit">Create lead</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Onboarding leads</h2>
+      <span class="status-chip status-unknown">{{ leads|length }} total</span>
+    </div>
+    {% if leads %}
+      <div class="table-wrap">
+        <table class="lead-table">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Business</th>
+              <th>Contact</th>
+              <th>Status</th>
+              <th>Intake</th>
+              <th>Email</th>
+              <th>Created</th>
+              <th>Updated</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for lead in leads %}
+              <tr>
+                <td data-label="Email">
+                  <span class="primary-cell">{{ lead.email }}</span>
+                  {% if lead.language %}
+                    <span class="cell-note">{{ lead.language }}</span>
+                  {% endif %}
+                </td>
+                <td data-label="Business">{{ lead.business_name or "—" }}</td>
+                <td data-label="Contact">{{ lead.contact_name or "—" }}</td>
+                <td data-label="Status">
+                  <span class="status-chip status-lead">{{ lead.status }}</span>
+                </td>
+                <td data-label="Intake">
+                  {% set answer_count = intake_answer_counts.get(lead.id, 0) %}
+                  {% if answer_count >= intake_total %}
+                    <span class="status-chip status-ok">complete</span>
+                  {% elif answer_count > 0 %}
+                    <span class="status-chip status-unknown">{{ answer_count }}/{{ intake_total }}</span>
+                  {% else %}
+                    <span class="status-chip status-neutral">not started</span>
+                  {% endif %}
+                </td>
+                <td data-label="Email">
+                  {% if lead.email_sent_at %}
+                    <span class="status-chip status-ok">sent</span>
+                    <span class="cell-note">{{ lead.email_sent_at }}</span>
+                  {% elif lead.email_last_error %}
+                    <span class="status-chip status-unknown">pending</span>
+                    <span class="cell-note">{{ lead.email_last_error }}</span>
+                  {% else %}
+                    <span class="status-chip status-neutral">not sent</span>
+                  {% endif %}
+                </td>
+                <td data-label="Created">{{ lead.created_at }}</td>
+                <td data-label="Updated">{{ lead.updated_at }}</td>
+                <td data-label="Action">
+                  <a class="button-link" href="/admin/onboarding/leads/{{ lead.id }}">Review</a>
+                  {% if lead.status != "email_sent" %}
+                    <form method="post" action="/admin/onboarding/leads/{{ lead.id }}/send-email">
+                      <button class="button-small" type="submit">Send onboarding email</button>
+                    </form>
+                  {% else %}
+                    <span class="cell-note">Email sent</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% if lead.notes %}
+                <tr class="notes-row">
+                  <td colspan="9">
+                    <span class="cell-note">Notes:</span> {{ lead.notes }}
+                  </td>
+                </tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">No onboarding leads yet. Create the first one above.</p>
+    {% endif %}
+  </section>
+{% endblock %}
