@@ -1888,6 +1888,47 @@ button.button-disabled,
   margin: 0;
 }
 
+/* Soft section tones — restrained, enterprise-friendly tints.
+   Backgrounds are very light so text and borders remain readable. */
+.ws-tone-blue-gray { background: #f3f6fa; border-color: #e1e7ef; }
+.ws-tone-cyan      { background: #f0f7fa; border-color: #dceaf0; }
+.ws-tone-violet    { background: #f5f3fb; border-color: #e6e1ef; }
+.ws-tone-mint      { background: #f1f8f4; border-color: #dceae1; }
+.ws-tone-amber     { background: #faf6ee; border-color: #ece4d1; }
+.ws-tone-yellow    { background: #fbf9ef; border-color: #ece8d4; }
+.ws-tone-slate     { background: #f3f5f8; border-color: #dfe4ec; }
+.ws-tone-lavender  { background: #f6f4fb; border-color: #e7e2f0; }
+.ws-tone-peach     { background: #fbf3ef; border-color: #efddd2; }
+.ws-tone-gray      { background: #f6f6f7; border-color: #e6e6e9; }
+.ws-tone-beige     { background: #f9f6f1; border-color: #ebe4d8; }
+.ws-tone-blue      { background: #f1f5fb; border-color: #dde6f1; }
+.ws-tone-gray-blue { background: #f3f5f8; border-color: #e1e6ee; }
+.ws-tone-mint2     { background: #f2f8f5; border-color: #dde9e1; }
+.ws-tone-gray2     { background: #f6f6f7; border-color: #e7e7ea; }
+.ws-tone-cream     { background: #faf7f1; border-color: #ece6d6; }
+.ws-tone-gray3     { background: #f5f5f6; border-color: #e6e6e9; }
+.ws-tone-danger    { background: #fbf3f4; border-color: #efd7da; }
+
+/* Slightly deeper hover on summary so the tint stays visible but reacts */
+.ws-tone-blue-gray .ws-summary:hover { background: #ebf0f7; }
+.ws-tone-cyan      .ws-summary:hover { background: #e6f1f6; }
+.ws-tone-violet    .ws-summary:hover { background: #ede9f6; }
+.ws-tone-mint      .ws-summary:hover { background: #e7f2ec; }
+.ws-tone-amber     .ws-summary:hover { background: #f4ede0; }
+.ws-tone-yellow    .ws-summary:hover { background: #f5f1de; }
+.ws-tone-slate     .ws-summary:hover { background: #ebeff5; }
+.ws-tone-lavender  .ws-summary:hover { background: #efeaf6; }
+.ws-tone-peach     .ws-summary:hover { background: #f5e7df; }
+.ws-tone-gray      .ws-summary:hover { background: #eeeef0; }
+.ws-tone-beige     .ws-summary:hover { background: #f3ede1; }
+.ws-tone-blue      .ws-summary:hover { background: #e7eef7; }
+.ws-tone-gray-blue .ws-summary:hover { background: #ebeff5; }
+.ws-tone-mint2     .ws-summary:hover { background: #e8f1eb; }
+.ws-tone-gray2     .ws-summary:hover { background: #eeeef0; }
+.ws-tone-cream     .ws-summary:hover { background: #f4ede0; }
+.ws-tone-gray3     .ws-summary:hover { background: #ededef; }
+.ws-tone-danger    .ws-summary:hover { background: #f5e6e8; }
+
 /* Generic compact card layout (contract/features/runtime/backup/comms/invoices) */
 .contract-card,
 .features-card,

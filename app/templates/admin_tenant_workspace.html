@@ -59,7 +59,7 @@
   {% set sc_next = setup_checklist['next_action'] %}
   {% set sc_entries = setup_checklist['items'] %}
   {% set percent_class = 'down' if sc_percent < 40 else ('warn' if sc_percent < 100 else 'ok') %}
-  <details class="ws-section" open>
+  <details class="ws-section ws-tone-blue-gray" open>
     <summary class="ws-summary">
       <span class="ws-title">Setup checklist</span>
       <span class="ws-desc muted">Track what is missing before this tenant is ready.</span>
@@ -102,7 +102,7 @@
   </details>
 
   {# 4. Channels control #}
-  <details class="ws-section" open>
+  <details class="ws-section ws-tone-cyan" open>
     <summary class="ws-summary">
       <span class="ws-title">Channels</span>
       <span class="ws-desc muted">Manage active customer channels for this tenant.</span>
@@ -164,7 +164,7 @@
   </details>
 
   {# 4c. AI Agent control panel #}
-  <details class="ws-section" open>
+  <details class="ws-section ws-tone-violet" open>
     <summary class="ws-summary">
       <span class="ws-title">AI Agent</span>
       <span class="ws-desc muted">Control replies, learning, escalation behavior, and tone.</span>
@@ -251,7 +251,7 @@
   </details>
 
   {# 4b. Source of Truth / Data Room #}
-  <details class="ws-section" open>
+  <details class="ws-section ws-tone-mint" open>
     <summary class="ws-summary">
       <span class="ws-title">Source of Truth / Data Room</span>
       <span class="ws-desc muted">Manage files, knowledge, uploads, and cloud sources.</span>
@@ -339,7 +339,7 @@
     'trial': 'warn', 'active': 'ok', 'overdue': 'down',
     'paused': 'warn', 'cancelled': 'down'
   }.get(tenant.billing.status, 'unknown') %}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-amber">
     <summary class="ws-summary">
       <span class="ws-title">Billing / Trial</span>
       <span class="ws-desc muted">View trial, plan, payment, and billing state.</span>
@@ -407,7 +407,7 @@
 
   {# 4e. Push changes #}
   {% set push_state_class = {'clean': 'ok', 'pending': 'warn', 'failed': 'down'}.get(tenant.push.status, 'unknown') %}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-yellow">
     <summary class="ws-summary">
       <span class="ws-title">Push changes</span>
       <span class="ws-desc muted">Preview and push ICP changes to the tenant dashboard.</span>
@@ -468,7 +468,7 @@
   {% set admins = tenant.access.operators | selectattr('role', 'equalto', 'admin') | list %}
   {% set normals = tenant.access.operators | selectattr('role', 'equalto', 'operator') | list %}
   {% set alert_recipients = tenant.access.operators | selectattr('alert_recipient') | list %}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-slate">
     <summary class="ws-summary">
       <span class="ws-title">Operators & access</span>
       <span class="ws-desc muted">Manage who can operate this tenant.</span>
@@ -572,7 +572,7 @@
     }.get(ob.status, ob.status) %}
   {% set ob_link_class = {'not_generated': 'unknown', 'active': 'ok', 'expired': 'down'}.get(ob.intake_link_status, 'unknown') %}
   {% set ob_link_label = {'not_generated': 'Not generated', 'active': 'Active', 'expired': 'Expired'}.get(ob.intake_link_status, ob.intake_link_status) %}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-lavender">
     <summary class="ws-summary">
       <span class="ws-title">Onboarding</span>
       <span class="ws-desc muted">Send intake links and review onboarding progress.</span>
@@ -633,7 +633,7 @@
   {% set esc = tenant.escalations %}
   {% set esc_state_class = 'down' if esc.hard_count > 0 else ('warn' if esc.open_count > 0 or esc.soft_count > 0 else 'ok') %}
   {% set esc_state_label = 'Action needed' if esc.hard_count > 0 else ('Open' if esc.open_count > 0 or esc.soft_count > 0 else 'Clear') %}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-peach">
     <summary class="ws-summary">
       <span class="ws-title">Escalations</span>
       <span class="ws-desc muted">View escalation rules, open escalations, and alert routing.</span>
@@ -705,7 +705,7 @@
   </details>
 
   {# 4j. Tenant notes / internal CRM (not visible to tenant) #}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-gray">
     <summary class="ws-summary">
       <span class="ws-title">Tenant notes</span>
       <span class="ws-desc muted">Keep private internal notes for the Unboks team.</span>
@@ -769,7 +769,7 @@
   </details>
 
   {# 4k. Contract / plan #}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-beige">
     <summary class="ws-summary">
       <span class="ws-title">Contract / plan</span>
       <span class="ws-desc muted">View commercial plan and contract state.</span>
@@ -805,7 +805,7 @@
   </details>
 
   {# 4l. Feature toggles #}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-blue">
     <summary class="ws-summary">
       <span class="ws-title">Feature toggles</span>
       <span class="ws-desc muted">See which tenant features are enabled.</span>
@@ -833,7 +833,7 @@
   </details>
 
   {# 4m. Runtime status #}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-gray-blue">
     <summary class="ws-summary">
       <span class="ws-title">Runtime status</span>
       <span class="ws-desc muted">Check dashboard, agent, API, and webhook health.</span>
@@ -868,7 +868,7 @@
   </details>
 
   {# 4n. Backup / export #}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-mint2">
     <summary class="ws-summary">
       <span class="ws-title">Backup / export</span>
       <span class="ws-desc muted">Export tenant setup, SOT, and activity data.</span>
@@ -897,7 +897,7 @@
   </details>
 
   {# 4o. Communication log #}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-gray2">
     <summary class="ws-summary">
       <span class="ws-title">Communication log</span>
       <span class="ws-desc muted">View communication history with this tenant.</span>
@@ -926,7 +926,7 @@
   </details>
 
   {# 4p. Invoice history #}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-cream">
     <summary class="ws-summary">
       <span class="ws-title">Invoice history</span>
       <span class="ws-desc muted">Track invoices, amounts, and payment status.</span>
@@ -967,7 +967,7 @@
   </details>
 
   {# 5. Activity log / audit trail #}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-gray3">
     <summary class="ws-summary">
       <span class="ws-title">Activity</span>
       <span class="ws-desc muted">Review tenant-level audit events.</span>
@@ -1013,7 +1013,7 @@
   </details>
 
   {# 6. Danger zone #}
-  <details class="ws-section">
+  <details class="ws-section ws-tone-danger">
     <summary class="ws-summary">
       <span class="ws-title">Danger zone</span>
       <span class="ws-desc muted">Suspend or cut off tenant access.</span>

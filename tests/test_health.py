@@ -237,8 +237,20 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "ws-summary" in workspace.text
     assert "ws-chevron" in workspace.text
     # First four sections open by default; danger zone closed
-    assert workspace.text.count('<details class="ws-section" open>') >= 4
-    assert '<details class="ws-section">' in workspace.text  # closed-by-default
+    import re as _re
+    open_count = len(_re.findall(r'<details class="ws-section [^"]+" open>', workspace.text))
+    closed_count = len(_re.findall(r'<details class="ws-section [^"]+">', workspace.text))
+    assert open_count >= 4
+    assert closed_count >= 1
+    # Soft section tones applied — all 18 must be present
+    for tone in (
+        "ws-tone-blue-gray", "ws-tone-cyan", "ws-tone-violet", "ws-tone-mint",
+        "ws-tone-amber", "ws-tone-yellow", "ws-tone-slate", "ws-tone-lavender",
+        "ws-tone-peach", "ws-tone-gray", "ws-tone-beige", "ws-tone-blue",
+        "ws-tone-gray-blue", "ws-tone-mint2", "ws-tone-gray2", "ws-tone-cream",
+        "ws-tone-gray3", "ws-tone-danger",
+    ):
+        assert tone in workspace.text
     # One-line descriptions present
     for desc in (
         "Track what is missing before this tenant is ready.",
