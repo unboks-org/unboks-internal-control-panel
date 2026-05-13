@@ -7,10 +7,23 @@
     <p class="eyebrow">Unboks onboarding</p>
     {% if progress.complete %}
       <h1>Onboarding received</h1>
-      <p class="muted">Thank you. We received your answers and will prepare your setup.</p>
+      <p class="muted">Thank you. Your answers were saved successfully.</p>
       {% if progress.lead.business_name %}
         <p class="placeholder-detail">{{ progress.lead.business_name }}</p>
       {% endif %}
+      <div class="confirmation-block" role="status">
+        <h2>You are done</h2>
+        <p>Our team will review your answers, prepare your setup, and contact you with the next step.</p>
+        <p class="muted">You can close this tab now.</p>
+      </div>
+      <div class="next-steps">
+        <h2>What happens next</h2>
+        <ol>
+          <li>Unboks reviews your business details.</li>
+          <li>We prepare your AI inbox setup.</li>
+          <li>You receive dashboard access when setup is ready.</li>
+        </ol>
+      </div>
     {% else %}
       <h1>Business intake</h1>
       <p class="muted">Answer one question at a time. Your progress is saved after each step.</p>

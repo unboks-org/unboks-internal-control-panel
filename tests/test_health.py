@@ -238,6 +238,9 @@ def test_public_onboarding_completion_updates_status(monkeypatch, tmp_path) -> N
     complete = client.get(f"/onboarding/{token}")
     assert complete.status_code == 200
     assert "Onboarding received" in complete.text
+    assert "Your answers were saved successfully." in complete.text
+    assert "You can close this tab now." in complete.text
+    assert "What happens next" in complete.text
     assert get_lead(lead.id).status == "form_submitted"
 
 
