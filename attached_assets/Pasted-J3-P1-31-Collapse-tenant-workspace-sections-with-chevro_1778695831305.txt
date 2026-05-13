@@ -1,0 +1,67 @@
+J3-P1-31 — Collapse tenant workspace sections with chevrons
+
+Goal:
+Tenant workspace is too long. Each section must become collapsible with a chevron.
+
+Apply to all sections:
+- Setup checklist
+- Channels
+- AI Agent
+- Source of Truth / Data Room
+- Billing / Trial
+- Push changes
+- Operators & access
+- Onboarding
+- Escalations
+- Tenant notes
+- Contract / plan
+- Feature toggles
+- Runtime status
+- Backup / export
+- Communication log
+- Invoice history
+- Activity
+- Danger zone
+
+Required UI:
+Each section header must show:
+- Section title
+- Chevron icon/arrow
+- One-line description only
+
+Examples:
+- Setup checklist — Track what is missing before this tenant is ready. ˅
+- Channels — Manage active customer channels for this tenant. ˅
+- AI Agent — Control replies, learning, escalation behavior, and tone. ˅
+- Source of Truth / Data Room — Manage files, knowledge, uploads, and cloud sources. ˅
+- Billing / Trial — View trial, plan, payment, and billing state. ˅
+- Push changes — Preview and push ICP changes to the tenant dashboard. ˅
+- Operators & access — Manage who can operate this tenant. ˅
+- Onboarding — Send intake links and review onboarding progress. ˅
+- Escalations — View escalation rules, open escalations, and alert routing. ˅
+- Tenant notes — Keep private internal notes for the Unboks team. ˅
+- Contract / plan — View commercial plan and contract state. ˅
+- Feature toggles — See which tenant features are enabled. ˅
+- Runtime status — Check dashboard, agent, API, and webhook health. ˅
+- Backup / export — Export tenant setup, SOT, and activity data. ˅
+- Communication log — View communication history with this tenant. ˅
+- Invoice history — Track invoices, amounts, and payment status. ˅
+- Activity — Review tenant-level audit events. ˅
+- Danger zone — Suspend or cut off tenant access. ˅
+
+Behavior:
+- Clicking header expands/collapses section.
+- Chevron changes direction when open/closed.
+- Keep first important sections open by default if needed:
+  - Setup checklist
+  - Channels
+  - AI Agent
+  - Source of Truth / Data Room
+- Less-used sections closed by default.
+- Danger zone closed by default.
+- Must work without React.
+- Use HTML details/summary if cleanest.
+- Keep layout spartan and compact.
+- No section description longer than one line.
+- Tests pass.
+- Commit and push.

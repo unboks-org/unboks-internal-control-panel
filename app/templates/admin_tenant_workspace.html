@@ -59,6 +59,13 @@
   {% set sc_next = setup_checklist['next_action'] %}
   {% set sc_entries = setup_checklist['items'] %}
   {% set percent_class = 'down' if sc_percent < 40 else ('warn' if sc_percent < 100 else 'ok') %}
+  <details class="ws-section" open>
+    <summary class="ws-summary">
+      <span class="ws-title">Setup checklist</span>
+      <span class="ws-desc muted">Track what is missing before this tenant is ready.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="setup-checklist" aria-label="Tenant setup checklist">
     <header class="setup-checklist-header">
       <div>
@@ -92,8 +99,16 @@
       {% endfor %}
     </ul>
   </section>
+  </details>
 
   {# 4. Channels control #}
+  <details class="ws-section" open>
+    <summary class="ws-summary">
+      <span class="ws-title">Channels</span>
+      <span class="ws-desc muted">Manage active customer channels for this tenant.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section id="channels-section" class="channels-panel" aria-label="Channels">
     <header class="channels-panel-header">
       <div>
@@ -146,8 +161,16 @@
     </table>
     <p class="muted compact-note channels-foot">Toggle ON to add a channel, OFF to remove. Not wired yet.</p>
   </section>
+  </details>
 
   {# 4c. AI Agent control panel #}
+  <details class="ws-section" open>
+    <summary class="ws-summary">
+      <span class="ws-title">AI Agent</span>
+      <span class="ws-desc muted">Control replies, learning, escalation behavior, and tone.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section id="agent-section" class="agent-panel" aria-label="AI Agent">
     <header class="agent-panel-header">
       <div>
@@ -225,8 +248,16 @@
       {% endif %}
     </div>
   </section>
+  </details>
 
   {# 4b. Source of Truth / Data Room #}
+  <details class="ws-section" open>
+    <summary class="ws-summary">
+      <span class="ws-title">Source of Truth / Data Room</span>
+      <span class="ws-desc muted">Manage files, knowledge, uploads, and cloud sources.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section id="sot-section" class="data-room" aria-label="Source of Truth / Data Room">
     <header class="data-room-header">
       <div>
@@ -300,6 +331,7 @@
       </div>
     </div>
   </section>
+  </details>
 
   {# 4d. Billing / Trial #}
   <span id="billing-section"></span>
@@ -307,6 +339,13 @@
     'trial': 'warn', 'active': 'ok', 'overdue': 'down',
     'paused': 'warn', 'cancelled': 'down'
   }.get(tenant.billing.status, 'unknown') %}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Billing / Trial</span>
+      <span class="ws-desc muted">View trial, plan, payment, and billing state.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="billing-panel" aria-label="Billing / Trial">
     <header class="billing-panel-header">
       <div>
@@ -364,9 +403,17 @@
       <button type="button" class="danger-btn" disabled aria-disabled="true" title="Not wired yet">Cancel tenant</button>
     </div>
   </section>
+  </details>
 
   {# 4e. Push changes #}
   {% set push_state_class = {'clean': 'ok', 'pending': 'warn', 'failed': 'down'}.get(tenant.push.status, 'unknown') %}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Push changes</span>
+      <span class="ws-desc muted">Preview and push ICP changes to the tenant dashboard.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="push-panel" aria-label="Push changes">
     <header class="push-panel-header">
       <div>
@@ -410,6 +457,7 @@
       <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Revert pending changes</button>
     </div>
   </section>
+  </details>
 
   {# 4g. Operators / Access #}
   <span id="access-section"></span>
@@ -420,6 +468,13 @@
   {% set admins = tenant.access.operators | selectattr('role', 'equalto', 'admin') | list %}
   {% set normals = tenant.access.operators | selectattr('role', 'equalto', 'operator') | list %}
   {% set alert_recipients = tenant.access.operators | selectattr('alert_recipient') | list %}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Operators & access</span>
+      <span class="ws-desc muted">Manage who can operate this tenant.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="access-panel" aria-label="Operators and access">
     <header class="access-panel-header">
       <div>
@@ -494,6 +549,7 @@
       <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Remove operator</button>
     </div>
   </section>
+  </details>
 
   {# 4i. Onboarding control #}
   <span id="onboarding-section"></span>
@@ -516,6 +572,13 @@
     }.get(ob.status, ob.status) %}
   {% set ob_link_class = {'not_generated': 'unknown', 'active': 'ok', 'expired': 'down'}.get(ob.intake_link_status, 'unknown') %}
   {% set ob_link_label = {'not_generated': 'Not generated', 'active': 'Active', 'expired': 'Expired'}.get(ob.intake_link_status, ob.intake_link_status) %}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Onboarding</span>
+      <span class="ws-desc muted">Send intake links and review onboarding progress.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="onboarding-panel" aria-label="Onboarding">
     <header class="onboarding-panel-header">
       <div>
@@ -563,12 +626,20 @@
       <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Reset onboarding</button>
     </div>
   </section>
+  </details>
 
   {# 4h. Escalations #}
   <span id="escalations-section"></span>
   {% set esc = tenant.escalations %}
   {% set esc_state_class = 'down' if esc.hard_count > 0 else ('warn' if esc.open_count > 0 or esc.soft_count > 0 else 'ok') %}
   {% set esc_state_label = 'Action needed' if esc.hard_count > 0 else ('Open' if esc.open_count > 0 or esc.soft_count > 0 else 'Clear') %}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Escalations</span>
+      <span class="ws-desc muted">View escalation rules, open escalations, and alert routing.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="escalations-panel" aria-label="Escalations">
     <header class="escalations-panel-header">
       <div>
@@ -631,8 +702,16 @@
       <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Assign operator</button>
     </div>
   </section>
+  </details>
 
   {# 4j. Tenant notes / internal CRM (not visible to tenant) #}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Tenant notes</span>
+      <span class="ws-desc muted">Keep private internal notes for the Unboks team.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="notes-panel" aria-label="Tenant notes">
     <header class="notes-panel-header">
       <div>
@@ -687,8 +766,16 @@
       <p class="muted compact-note notes-empty">No internal notes yet.</p>
     {% endif %}
   </section>
+  </details>
 
   {# 4k. Contract / plan #}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Contract / plan</span>
+      <span class="ws-desc muted">View commercial plan and contract state.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="contract-card" aria-label="Contract and plan">
     <header class="card-header">
       <div>
@@ -715,8 +802,16 @@
       <button type="button" class="danger-btn" disabled aria-disabled="true" title="Not wired yet">Cancel tenant</button>
     </div>
   </section>
+  </details>
 
   {# 4l. Feature toggles #}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Feature toggles</span>
+      <span class="ws-desc muted">See which tenant features are enabled.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="features-card" aria-label="Feature toggles">
     <header class="card-header">
       <div>
@@ -735,8 +830,16 @@
       {% endfor %}
     </ul>
   </section>
+  </details>
 
   {# 4m. Runtime status #}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Runtime status</span>
+      <span class="ws-desc muted">Check dashboard, agent, API, and webhook health.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="runtime-card" aria-label="Runtime status">
     <header class="card-header">
       <div>
@@ -762,8 +865,16 @@
       <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Open dashboard</button>
     </div>
   </section>
+  </details>
 
   {# 4n. Backup / export #}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Backup / export</span>
+      <span class="ws-desc muted">Export tenant setup, SOT, and activity data.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="backup-card" aria-label="Backup and export">
     <header class="card-header">
       <div>
@@ -783,8 +894,16 @@
       <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Create backup</button>
     </div>
   </section>
+  </details>
 
   {# 4o. Communication log #}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Communication log</span>
+      <span class="ws-desc muted">View communication history with this tenant.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="comms-card" aria-label="Communication log">
     <header class="card-header">
       <div>
@@ -804,8 +923,16 @@
       <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Copy onboarding link</button>
     </div>
   </section>
+  </details>
 
   {# 4p. Invoice history #}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Invoice history</span>
+      <span class="ws-desc muted">Track invoices, amounts, and payment status.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="invoices-card" aria-label="Invoice history">
     <header class="card-header">
       <div>
@@ -837,8 +964,16 @@
       <p class="muted compact-note">No invoices yet.</p>
     {% endif %}
   </section>
+  </details>
 
   {# 5. Activity log / audit trail #}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Activity</span>
+      <span class="ws-desc muted">Review tenant-level audit events.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="activity-panel" aria-label="Activity log">
     <header class="activity-panel-header">
       <div>
@@ -875,8 +1010,16 @@
       <p class="muted compact-note">No activity yet.</p>
     {% endif %}
   </section>
+  </details>
 
   {# 6. Danger zone #}
+  <details class="ws-section">
+    <summary class="ws-summary">
+      <span class="ws-title">Danger zone</span>
+      <span class="ws-desc muted">Suspend or cut off tenant access.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
   <section class="danger-zone" aria-label="Danger zone">
     <div>
       <h3>Danger zone</h3>
@@ -884,4 +1027,5 @@
     </div>
     <button type="button" class="danger-btn" disabled aria-disabled="true" title="Not wired yet">Suspend / cut off tenant</button>
   </section>
+  </details>
 {% endblock %}

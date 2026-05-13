@@ -1816,6 +1816,78 @@ button.button-disabled,
   }
 }
 
+/* Collapsible workspace sections (details/summary) */
+.ws-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.ws-section + .ws-section {
+  margin-top: 0;
+}
+
+.ws-summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  list-style: none;
+  padding: 10px 14px;
+  user-select: none;
+}
+
+.ws-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ws-summary::marker {
+  content: "";
+}
+
+.ws-summary:hover {
+  background: #f6f8fb;
+}
+
+.ws-section[open] > .ws-summary {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ws-title {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ws-desc {
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-chevron {
+  color: var(--color-muted);
+  display: inline-block;
+  font-size: 12px;
+  transition: transform 0.15s;
+}
+
+.ws-section[open] > .ws-summary .ws-chevron {
+  transform: rotate(180deg);
+}
+
+/* Inside details, the legacy section's own bg/border is redundant */
+.ws-section > section {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+
 /* Generic compact card layout (contract/features/runtime/backup/comms/invoices) */
 .contract-card,
 .features-card,

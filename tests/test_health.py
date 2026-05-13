@@ -232,6 +232,35 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         assert action in workspace.text
     # Cancel tenant must be visually separated in a danger zone
     assert "billing-danger" in workspace.text
+    # Collapsible workspace sections — chevron + one-line desc on each
+    assert "ws-section" in workspace.text
+    assert "ws-summary" in workspace.text
+    assert "ws-chevron" in workspace.text
+    # First four sections open by default; danger zone closed
+    assert workspace.text.count('<details class="ws-section" open>') >= 4
+    assert '<details class="ws-section">' in workspace.text  # closed-by-default
+    # One-line descriptions present
+    for desc in (
+        "Track what is missing before this tenant is ready.",
+        "Manage active customer channels for this tenant.",
+        "Control replies, learning, escalation behavior, and tone.",
+        "Manage files, knowledge, uploads, and cloud sources.",
+        "View trial, plan, payment, and billing state.",
+        "Preview and push ICP changes to the tenant dashboard.",
+        "Manage who can operate this tenant.",
+        "Send intake links and review onboarding progress.",
+        "View escalation rules, open escalations, and alert routing.",
+        "Keep private internal notes for the Unboks team.",
+        "View commercial plan and contract state.",
+        "See which tenant features are enabled.",
+        "Check dashboard, agent, API, and webhook health.",
+        "Export tenant setup, SOT, and activity data.",
+        "View communication history with this tenant.",
+        "Track invoices, amounts, and payment status.",
+        "Review tenant-level audit events.",
+        "Suspend or cut off tenant access.",
+    ):
+        assert desc in workspace.text
     # Channels control panel — compact list/table
     assert "channels-panel" in workspace.text
     assert "channels-table" in workspace.text
