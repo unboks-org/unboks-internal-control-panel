@@ -81,7 +81,7 @@
   </section>
 
   {# 1. Soft colored tenant header #}
-  <header class="tenant-header tenant-header-{{ tenant.status }}" aria-label="Tenant header">
+  <header id="tenant-header-anchor" class="tenant-header tenant-header-{{ tenant.status }}" aria-label="Tenant header">
     <div>
       <h2 class="tenant-header-name">{{ tenant.name }}</h2>
       <p class="tenant-header-meta">
@@ -122,8 +122,49 @@
     <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Pause tenant</button>
   </section>
 
+  {# 3b. Setup checklist #}
+  {% set sc_percent = setup_checklist['percent'] %}
+  {% set sc_done = setup_checklist['done_count'] %}
+  {% set sc_total = setup_checklist['total'] %}
+  {% set sc_next = setup_checklist['next_action'] %}
+  {% set sc_entries = setup_checklist['items'] %}
+  {% set percent_class = 'down' if sc_percent < 40 else ('warn' if sc_percent < 100 else 'ok') %}
+  <section class="setup-checklist" aria-label="Tenant setup checklist">
+    <header class="setup-checklist-header">
+      <div>
+        <h3>Setup checklist</h3>
+        <p class="muted compact-note">
+          {{ sc_done }} / {{ sc_total }} complete
+          {% if sc_next %}
+            &middot; Next:
+            <strong>{{ sc_next['label'] }}</strong>
+            <span class="muted">({{ sc_next['status_label'] }})</span>
+          {% else %}
+            &middot; All items complete.
+          {% endif %}
+        </p>
+      </div>
+      <span class="status-chip status-{{ percent_class }} setup-percent">
+        {{ sc_percent }}%
+      </span>
+    </header>
+    <div class="setup-progress" aria-hidden="true">
+      <div class="setup-progress-bar setup-progress-{{ percent_class }}" style="width: {{ sc_percent }}%"></div>
+    </div>
+    <ul class="setup-list">
+      {% for item in sc_entries %}
+        {% set chip_class = {'done': 'ok', 'needs_review': 'warn', 'missing': 'down'}.get(item['status'], 'unknown') %}
+        <li class="setup-row setup-row-{{ item['status'] }}">
+          <span class="status-chip status-{{ chip_class }} setup-chip">{{ item['status_label'] }}</span>
+          <span class="setup-label">{{ item['label'] }}</span>
+          <a class="setup-action" href="#{{ item['anchor'] }}">Open section</a>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+
   {# 4. Channels control #}
-  <section class="channels-panel" aria-label="Channels">
+  <section id="channels-section" class="channels-panel" aria-label="Channels">
     <header class="channels-panel-header">
       <div>
         <h3>Channels</h3>
@@ -159,7 +200,7 @@
   </section>
 
   {# 4c. AI Agent control panel #}
-  <section class="agent-panel" aria-label="AI Agent">
+  <section id="agent-section" class="agent-panel" aria-label="AI Agent">
     <header class="agent-panel-header">
       <div>
         <h3>AI Agent</h3>
@@ -238,7 +279,7 @@
   </section>
 
   {# 4b. Source of Truth / Data Room #}
-  <section class="data-room" aria-label="Source of Truth / Data Room">
+  <section id="sot-section" class="data-room" aria-label="Source of Truth / Data Room">
     <header class="data-room-header">
       <div>
         <h3>Source of Truth <span class="muted">/ Data Room</span></h3>
@@ -313,6 +354,7 @@
   </section>
 
   {# 4d. Billing / Trial #}
+  <span id="billing-section"></span>
   {% set billing_state_class = {
     'trial': 'warn', 'active': 'ok', 'overdue': 'down',
     'paused': 'warn', 'cancelled': 'down'
@@ -422,6 +464,7 @@
   </section>
 
   {# 4g. Operators / Access #}
+  <span id="access-section"></span>
   {% set access_class = {'active': 'ok', 'needs_invite': 'warn', 'disabled': 'down'}.get(tenant.access.status, 'unknown') %}
   {% set access_label = {'active': 'Active', 'needs_invite': 'Needs invite', 'disabled': 'Disabled'}.get(tenant.access.status, tenant.access.status) %}
   {% set role_labels = {'owner': 'Owner', 'admin': 'Admin', 'operator': 'Operator'} %}
@@ -505,6 +548,7 @@
   </section>
 
   {# 4i. Onboarding control #}
+  <span id="onboarding-section"></span>
   {% set ob = tenant.onboarding %}
   {% set ob_status_class = {
       'not_started': 'unknown',
@@ -573,6 +617,7 @@
   </section>
 
   {# 4h. Escalations #}
+  <span id="escalations-section"></span>
   {% set esc = tenant.escalations %}
   {% set esc_state_class = 'down' if esc.hard_count > 0 else ('warn' if esc.open_count > 0 or esc.soft_count > 0 else 'ok') %}
   {% set esc_state_label = 'Action needed' if esc.hard_count > 0 else ('Open' if esc.open_count > 0 or esc.soft_count > 0 else 'Clear') %}

@@ -1727,6 +1727,109 @@ button.button-disabled,
   }
 }
 
+/* Setup checklist */
+.setup-checklist {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  padding: 14px 16px;
+}
+
+.setup-checklist-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.setup-checklist-header h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+
+.setup-percent {
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-progress {
+  background: #eef0f2;
+  border-radius: 999px;
+  height: 6px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.setup-progress-bar {
+  height: 100%;
+  transition: width 200ms ease;
+}
+
+.setup-progress-ok { background: #2f9e44; }
+.setup-progress-warn { background: #d9a400; }
+.setup-progress-down { background: #c92a2a; }
+
+.setup-list {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  list-style: none;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.setup-row {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: grid;
+  font-size: 12px;
+  gap: 10px;
+  grid-template-columns: 110px minmax(0, 1fr) auto;
+  padding: 7px 10px;
+}
+
+.setup-row:last-child {
+  border-bottom: none;
+}
+
+.setup-chip {
+  justify-self: start;
+}
+
+.setup-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-action {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  text-decoration: none;
+}
+
+.setup-action:hover {
+  background: #f5f6f7;
+}
+
+@media (max-width: 720px) {
+  .setup-row {
+    grid-template-columns: 110px 1fr;
+  }
+  .setup-action {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
 /* Tenant notes / internal CRM */
 .notes-panel {
   background: var(--color-surface);

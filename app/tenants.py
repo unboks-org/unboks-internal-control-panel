@@ -392,6 +392,147 @@ _TENANTS: tuple[Tenant, ...] = (
 )
 
 
+SETUP_CHECKLIST_STATUSES: tuple[str, ...] = ("done", "needs_review", "missing")
+_SETUP_STATUS_LABELS: dict[str, str] = {
+    "done": "Done",
+    "needs_review": "Needs review",
+    "missing": "Missing",
+}
+
+
+def compute_setup_checklist(tenant: "Tenant") -> dict:
+    """Derive setup checklist from real tenant fields. Never invents 'done'."""
+    items: list[dict] = []
+
+    # 1. Tenant profile completed
+    profile_done = bool(tenant.id and tenant.name and tenant.status and tenant.plan)
+    items.append({
+        "key": "profile",
+        "label": "Tenant profile completed",
+        "status": "done" if profile_done else "needs_review",
+        "anchor": "tenant-header-anchor",
+    })
+
+    # 2. Onboarding form completed
+    ob_status = tenant.onboarding.status
+    if ob_status in ("submitted", "reviewed", "ready"):
+        ob_state = "done"
+    elif ob_status in ("started",):
+        ob_state = "needs_review"
+    else:
+        ob_state = "missing"
+    items.append({
+        "key": "onboarding",
+        "label": "Onboarding form completed",
+        "status": ob_state,
+        "anchor": "onboarding-section",
+    })
+
+    # 3. Source of Truth uploaded
+    sot_state = "done" if tenant.sot.files_count > 0 else "missing"
+    items.append({
+        "key": "sot",
+        "label": "Source of Truth uploaded",
+        "status": sot_state,
+        "anchor": "sot-section",
+    })
+
+    # 4. Channels connected
+    has_connected = any(ch.state == "connected" for ch in tenant.channels)
+    items.append({
+        "key": "channels",
+        "label": "Channels connected",
+        "status": "done" if has_connected else "missing",
+        "anchor": "channels-section",
+    })
+
+    # 5. AI Agent configured
+    tone_set = tenant.agent.tone_summary != "Not configured"
+    rules_set = tenant.agent.escalation_rules_summary != "Not configured"
+    if tone_set and rules_set:
+        agent_state = "done"
+    elif tone_set or rules_set:
+        agent_state = "needs_review"
+    else:
+        agent_state = "missing"
+    items.append({
+        "key": "agent",
+        "label": "AI Agent configured",
+        "status": agent_state,
+        "anchor": "agent-section",
+    })
+
+    # 6. Escalation rules configured (derived from the Escalations subsystem)
+    esc_rules = (tenant.escalations.rules_summary or "").strip()
+    esc_rules_set = esc_rules not in ("", "No rules configured.", "Not configured")
+    items.append({
+        "key": "escalations",
+        "label": "Escalation rules configured",
+        "status": "done" if esc_rules_set else "missing",
+        "anchor": "escalations-section",
+    })
+
+    # 7. Operators invited
+    if tenant.access.operators:
+        op_state = "done"
+    elif tenant.access.status == "needs_invite":
+        op_state = "missing"
+    else:
+        op_state = "needs_review"
+    items.append({
+        "key": "operators",
+        "label": "Operators invited",
+        "status": op_state,
+        "anchor": "access-section",
+    })
+
+    # 8. Dashboard ready
+    items.append({
+        "key": "dashboard",
+        "label": "Dashboard ready",
+        "status": "done" if ob_status == "ready" else "missing",
+        "anchor": "onboarding-section",
+    })
+
+    # 9. Trial / payment configured
+    bs = tenant.billing.status
+    ps = tenant.billing.payment_status
+    if bs == "active" and ps == "ok":
+        bill_state = "done"
+    elif bs == "trial":
+        bill_state = "needs_review"
+    elif bs in ("overdue", "cancelled", "paused"):
+        bill_state = "needs_review"
+    else:
+        bill_state = "missing"
+    items.append({
+        "key": "billing",
+        "label": "Trial / payment configured",
+        "status": bill_state,
+        "anchor": "billing-section",
+    })
+
+    for item in items:
+        item["status_label"] = _SETUP_STATUS_LABELS[item["status"]]
+
+    total = len(items)
+    done = sum(1 for i in items if i["status"] == "done")
+    percent = int(round(100 * done / total)) if total else 0
+
+    next_required = next(
+        (i for i in items if i["status"] in ("missing", "needs_review")),
+        None,
+    )
+
+    return {
+        "items": items,
+        "percent": percent,
+        "done_count": done,
+        "total": total,
+        "next_action": next_required,
+    }
+
+
 def sorted_notes(notes: tuple[TenantNote, ...]) -> tuple[TenantNote, ...]:
     """Pinned first, then in original order (newest-first is the caller's job)."""
     return tuple(sorted(notes, key=lambda n: (0 if n.pinned else 1,)))

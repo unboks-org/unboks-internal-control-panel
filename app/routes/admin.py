@@ -35,6 +35,7 @@ from app.tenants import (
     NOTE_PRIORITIES,
     UPLOAD_CATEGORIES,
     Tenant,
+    compute_setup_checklist,
     get_tenant,
     list_anomalies,
     list_tenants,
@@ -155,6 +156,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "anomaly_statuses": dict(ANOMALY_STATUSES),
             "notes": sorted_notes(tenant.notes),
             "note_priorities": NOTE_PRIORITIES,
+            "setup_checklist": compute_setup_checklist(tenant),
         },
     )
 

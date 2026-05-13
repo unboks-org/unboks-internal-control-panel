@@ -228,6 +228,33 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert anomaly_section is not None
     for banned in ("emergency", "EMERGENCY", "URGENT", "CRITICAL ALERT"):
         assert banned not in anomaly_section.group(0)
+    # Setup checklist
+    assert "setup-checklist" in workspace.text
+    assert "Setup checklist" in workspace.text
+    for label in (
+        "Tenant profile completed",
+        "Onboarding form completed",
+        "Source of Truth uploaded",
+        "Channels connected",
+        "AI Agent configured",
+        "Escalation rules configured",
+        "Operators invited",
+        "Dashboard ready",
+        "Trial / payment configured",
+    ):
+        assert label in workspace.text
+    # Status labels and percent badge
+    for s in ("Done", "Missing", "Needs review"):
+        # at least one of these is present given seed data
+        pass
+    assert "Done" in workspace.text  # demo tenant has several done items
+    assert "%</span>" in workspace.text or "% " in workspace.text or "%\n" in workspace.text
+    assert "Open section" in workspace.text
+    # Anchor targets exist for the per-item links
+    for anchor_id in ("channels-section", "agent-section", "sot-section",
+                      "billing-section", "access-section", "onboarding-section",
+                      "escalations-section", "tenant-header-anchor"):
+        assert 'id="' + anchor_id + '"' in workspace.text
     # Tenant notes / internal CRM
     assert "notes-panel" in workspace.text
     assert "Tenant notes" in workspace.text
