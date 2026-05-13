@@ -1,0 +1,39 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Needs attention | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Global view{% endblock %}
+{% block page_title %}Needs attention{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Tenants flagged across the panel.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="attention-center" aria-label="Attention center">
+    <header class="attention-center-header">
+      <div>
+        <h3>Needs attention</h3>
+        <p class="muted compact-note">Items grouped by severity. Click to open the tenant.</p>
+      </div>
+      {% set worst_sev = attention_items[0].severity if attention_items else None %}
+      {% set header_chip = {'P0': 'down', 'P1': 'warn', 'P2': 'ok'}.get(worst_sev, 'ok') %}
+      <span class="status-chip status-{{ header_chip }}">
+        {{ attention_items | length }}
+      </span>
+    </header>
+    {% if attention_items %}
+      <ul class="attention-list">
+        {% for item in attention_items %}
+          {% set sev_class = {'P0': 'down', 'P1': 'warn', 'P2': 'unknown'}.get(item.severity, 'unknown') %}
+          <li class="attention-row">
+            <span class="status-chip status-{{ sev_class }} attention-sev">{{ item.severity }}</span>
+            <span class="attention-tenant">{{ item.tenant_name }}</span>
+            <span class="attention-issue muted">{{ item.label }}</span>
+            <a class="attention-action" href="/admin/tenants/{{ item.tenant_id }}">Open tenant</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted compact-note">No tenants need attention.</p>
+    {% endif %}
+  </section>
+{% endblock %}

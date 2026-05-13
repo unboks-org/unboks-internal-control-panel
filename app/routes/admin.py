@@ -150,10 +150,6 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "upload_categories": UPLOAD_CATEGORIES,
             "escalation_modes": ESCALATION_MODES,
             "activity_type_labels": dict(ACTIVITY_TYPES),
-            "attention_items": _compute_attention_items(list_tenants()),
-            "anomalies": list_anomalies(),
-            "anomaly_signals": ANOMALY_SIGNALS,
-            "anomaly_statuses": dict(ANOMALY_STATUSES),
             "notes": sorted_notes(tenant.notes),
             "note_priorities": NOTE_PRIORITIES,
             "setup_checklist": compute_setup_checklist(tenant),
@@ -313,6 +309,40 @@ def admin_reviews(request: Request) -> Response:
     if redirect:
         return redirect
     return render_reviews(request)
+
+
+@router.get("/admin/attention", response_class=HTMLResponse)
+def admin_attention(request: Request) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(
+        request,
+        "admin_attention.html",
+        {
+            **_shell_context("attention"),
+            "attention_items": _compute_attention_items(list_tenants()),
+        },
+    )
+
+
+@router.get("/admin/anomalies", response_class=HTMLResponse)
+def admin_anomalies(request: Request) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(
+        request,
+        "admin_anomalies.html",
+        {
+            **_shell_context("anomalies"),
+            "anomalies": list_anomalies(),
+            "anomaly_signals": ANOMALY_SIGNALS,
+            "anomaly_statuses": dict(ANOMALY_STATUSES),
+        },
+    )
 
 
 @router.get("/admin/settings", response_class=HTMLResponse)

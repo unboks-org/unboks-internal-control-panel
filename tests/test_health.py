@@ -131,6 +131,43 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert settings_page.status_code == 200
     assert "tenant-selector" in settings_page.text
     assert "sidebar-nav" in settings_page.text
+    # Sidebar shows the two global tenant views
+    assert 'href="/admin/attention"' in settings_page.text
+    assert 'href="/admin/anomalies"' in settings_page.text
+    # Dropdown CSS fix is present (panel actually hides when [hidden] attribute is set)
+    assert ".tenant-selector-panel[hidden]" in client.get("/static/css/admin.css").text
+
+    # Global Needs attention page
+    attention_page = client.get("/admin/attention")
+    assert attention_page.status_code == 200
+    assert "attention-center" in attention_page.text
+    assert "Needs attention" in attention_page.text
+    assert "tenant-selector" in attention_page.text
+
+    # Global Needs attention page renders cross-tenant items
+    assert "Trial ending soon" in attention_page.text or "Setup incomplete" in attention_page.text
+    assert "Open tenant" in attention_page.text
+
+    # Global Anomaly monitor page
+    anomalies_page = client.get("/admin/anomalies")
+    assert anomalies_page.status_code == 200
+    assert "anomaly-monitor" in anomalies_page.text
+    assert "Anomaly monitor" in anomalies_page.text
+    assert "tenant-selector" in anomalies_page.text
+    assert "No unusual activity detected." in anomalies_page.text
+    for label in (
+        "Message volume spike", "Escalation spike", "Agent reply failure",
+        "Channel disconnected", "Repeated customer complaint", "SOT missing / stale",
+        "Long unanswered conversation", "Unusual booking/order pattern", "Error rate spike",
+    ):
+        assert label in anomalies_page.text
+    import re as _re
+    anomaly_section = _re.search(
+        r'<section class="anomaly-monitor".*?</section>', anomalies_page.text, _re.DOTALL
+    )
+    assert anomaly_section is not None
+    for banned in ("emergency", "EMERGENCY", "URGENT", "CRITICAL ALERT"):
+        assert banned not in anomaly_section.group(0)
     # Global ICP audit log
     assert "Global ICP audit log" in settings_page.text
     assert "No audit events yet." in settings_page.text
@@ -204,41 +241,7 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Disconnect" in workspace.text
     assert "Not connected" in workspace.text  # at least one channel is not connected
     assert "Last message" in workspace.text
-    # Attention center (cross-tenant)
-    assert "attention-center" in workspace.text
-    assert "Needs attention" in workspace.text
-    # With current seed data the trial tenants trigger setup/trial/channels/SOT/agent flags
-    assert "Trial ending soon" in workspace.text
-    assert "Setup incomplete" in workspace.text
-    assert "Channels disconnected" in workspace.text
-    assert "Open tenant" in workspace.text
-    # Severity chips: at least P1 must appear given seed data
-    assert ">P1<" in workspace.text
-    assert "attention-sev" in workspace.text
-    # Anomaly monitor (UI-only, currently empty -> placeholder + watch list)
-    assert "anomaly-monitor" in workspace.text
-    assert "Anomaly monitor" in workspace.text
-    assert "No unusual activity detected." in workspace.text
-    for label in (
-        "Message volume spike",
-        "Escalation spike",
-        "Agent reply failure",
-        "Channel disconnected",
-        "Repeated customer complaint",
-        "SOT missing / stale",
-        "Long unanswered conversation",
-        "Unusual booking/order pattern",
-        "Error rate spike",
-    ):
-        assert label in workspace.text
-    # Calm language in the anomaly monitor section — no alarmist words
-    import re as _re
-    anomaly_section = _re.search(
-        r'<section class="anomaly-monitor".*?</section>', workspace.text, _re.DOTALL
-    )
-    assert anomaly_section is not None
-    for banned in ("emergency", "EMERGENCY", "URGENT", "CRITICAL ALERT"):
-        assert banned not in anomaly_section.group(0)
+    # Attention center and anomaly monitor moved to global views (see test_admin_settings_renders)
     # Setup checklist
     assert "setup-checklist" in workspace.text
     assert "Setup checklist" in workspace.text
@@ -309,6 +312,12 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "invoices-card" in workspace.text
     assert "Invoice history" in workspace.text
     assert "No invoices yet." in workspace.text
+    # Global view sections must NOT render inside tenant workspace main pane
+    # (sidebar links to those views are allowed — they live in admin_base)
+    assert "attention-center" not in workspace.text
+    assert "anomaly-monitor" not in workspace.text
+    assert 'class="attention-list"' not in workspace.text
+    assert 'class="anomaly-list"' not in workspace.text
     # Tenant notes / internal CRM
     assert "notes-panel" in workspace.text
     assert "Tenant notes" in workspace.text

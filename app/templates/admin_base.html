@@ -21,15 +21,16 @@
         </div>
       </div>
 
+      {% set tenants_open = active in ('tenants', 'attention', 'anomalies') %}
       <div
-        class="tenant-selector {% if active == 'tenants' %}is-active{% endif %}"
+        class="tenant-selector {% if tenants_open %}is-active{% endif %}"
         data-tenant-selector
       >
         <button
           type="button"
           class="tenant-selector-button"
           data-tenant-toggle
-          aria-expanded="{% if active == 'tenants' %}true{% else %}false{% endif %}"
+          aria-expanded="{% if tenants_open %}true{% else %}false{% endif %}"
           aria-controls="tenant-selector-list"
         >
           <span class="tenant-selector-label">Tenants</span>
@@ -39,7 +40,7 @@
 
         <div
           class="tenant-selector-panel"
-          {% if active != 'tenants' %}hidden{% endif %}
+          {% if not tenants_open %}hidden{% endif %}
           data-tenant-panel
         >
           <label class="tenant-search">
@@ -95,6 +96,25 @@
           </ul>
 
           <p class="tenant-empty-note" data-tenant-empty hidden>No tenants match.</p>
+
+          <div class="tenant-global-links" role="group" aria-label="Global tenant views">
+            <a
+              href="/admin/attention"
+              class="tenant-global-link {% if active == 'attention' %}active{% endif %}"
+              {% if active == 'attention' %}aria-current="page"{% endif %}
+            >
+              <span class="tenant-global-dot" aria-hidden="true"></span>
+              <span>Needs attention</span>
+            </a>
+            <a
+              href="/admin/anomalies"
+              class="tenant-global-link {% if active == 'anomalies' %}active{% endif %}"
+              {% if active == 'anomalies' %}aria-current="page"{% endif %}
+            >
+              <span class="tenant-global-dot" aria-hidden="true"></span>
+              <span>Anomaly monitor</span>
+            </a>
+          </div>
         </div>
       </div>
 

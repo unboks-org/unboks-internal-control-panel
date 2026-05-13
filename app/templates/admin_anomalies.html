@@ -1,0 +1,49 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Anomaly monitor | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Global view{% endblock %}
+{% block page_title %}Anomaly monitor{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Unusual activity across tenants. Detection backend not yet wired.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="anomaly-monitor" aria-label="Anomaly monitor">
+    <header class="anomaly-monitor-header">
+      <div>
+        <h3>Anomaly monitor</h3>
+        <p class="muted compact-note">Cross-tenant signals.</p>
+      </div>
+      <span class="status-chip status-{{ 'ok' if not anomalies else 'warn' }}">
+        {{ anomalies | length }}
+      </span>
+    </header>
+    {% if anomalies %}
+      <ul class="anomaly-list">
+        {% for flag in anomalies %}
+          {% set sev_class = {'P0': 'down', 'P1': 'warn', 'P2': 'unknown'}.get(flag.severity, 'unknown') %}
+          {% set status_label = anomaly_statuses.get(flag.status, flag.status) %}
+          <li class="anomaly-row">
+            <span class="status-chip status-{{ sev_class }} anomaly-sev">{{ flag.severity }}</span>
+            <span class="anomaly-tenant">{{ flag.tenant_name }}</span>
+            <span class="anomaly-signal muted">{{ flag.signal_label }}</span>
+            <span class="anomaly-detected muted">First detected: {{ flag.first_detected }}</span>
+            <span class="anomaly-status status-chip status-unknown">{{ status_label }}</span>
+            <span class="anomaly-actions">
+              <a class="anomaly-action" href="/admin/tenants/{{ flag.tenant_id }}">Open tenant</a>
+              <button type="button" class="anomaly-action" aria-disabled="true" title="Not wired yet" disabled>
+                Mark reviewed
+              </button>
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted compact-note anomaly-empty">No unusual activity detected.</p>
+    {% endif %}
+    <p class="muted anomaly-watching">
+      Watching:
+      {% for key, label in anomaly_signals %}{{ label }}{% if not loop.last %} &middot; {% endif %}{% endfor %}
+    </p>
+  </section>
+{% endblock %}
