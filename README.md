@@ -7,11 +7,12 @@ This repository is for Nr 3 only: the private Unboks.org internal control panel.
 - FastAPI backend
 - Vanilla HTML/CSS/JS frontend
 - `/healthz`
-- password-protected `/admin` placeholder
+- password-protected `/admin`
+- local onboarding lead creation/status list
 - Docker service shape for `wtyj-admin` on port `8010`
 - nginx IP allowlist template
 
-No tenant data access, onboarding logic, production actions, React, Vite, or xyflow are included.
+No tenant data access, email sending, production actions, React, Vite, or xyflow are included.
 
 ## Local Setup
 
@@ -23,6 +24,8 @@ cp .env.example .env
 ```
 
 Set `NR3_ADMIN_PASSWORD` and `NR3_SESSION_SECRET` in `.env`.
+
+Onboarding leads are stored in SQLite at `data/nr3.db` by default. The database file is local runtime state and is not committed.
 
 ## Run
 

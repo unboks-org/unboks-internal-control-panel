@@ -47,6 +47,12 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 
+# Local Nr 3 persistence
+data/*.db
+data/*.db-*
+data/*.sqlite
+data/*.sqlite-*
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
