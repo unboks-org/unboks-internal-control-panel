@@ -458,6 +458,12 @@ button:hover {
   color: var(--color-green);
 }
 
+.alert-warn {
+  background: var(--color-yellow-soft);
+  border: 1px solid #f4e3a8;
+  color: var(--color-yellow);
+}
+
 .status-chip {
   border-radius: 999px;
   display: inline-flex;
@@ -1352,6 +1358,58 @@ button.button-disabled,
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .agent-toggle {
+    border-top: 1px solid var(--color-border);
+  }
+}
+
+/* Push changes */
+.push-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  padding: 16px 18px;
+}
+
+.push-panel-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.push-panel-header h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+
+.push-stats {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.push-warning {
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+
+.push-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .push-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .push-stats .data-stat {
     border-top: 1px solid var(--color-border);
   }
 }

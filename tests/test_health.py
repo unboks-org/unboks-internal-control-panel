@@ -173,6 +173,15 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         assert action in workspace.text
     # Cancel tenant must be visually separated in a danger zone
     assert "billing-danger" in workspace.text
+    # Push changes panel
+    assert "push-panel" in workspace.text
+    assert "Push changes" in workspace.text
+    assert "Pending changes" in workspace.text
+    assert "Last pushed" in workspace.text
+    assert "Tenant dashboard" in workspace.text
+    for action in ("Preview changes", "Revert pending changes"):
+        assert action in workspace.text
+    assert "Push changes will update this tenant" in workspace.text
     # Activity log / audit trail
     assert "activity-panel" in workspace.text
     assert "View full activity log" in workspace.text

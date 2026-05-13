@@ -105,6 +105,15 @@ def activity_type_label(value: str) -> str:
 
 
 @dataclass(frozen=True)
+class TenantPushState:
+    status: str = "clean"            # clean | pending | failed
+    pending_count: int = 0
+    last_pushed_at: str = "—"
+    last_pushed_by: str = "—"
+    target: str = "Tenant dashboard"
+
+
+@dataclass(frozen=True)
 class TenantBilling:
     status: str = "trial"            # trial | active | overdue | paused | cancelled
     trial_days_left: Optional[int] = None
@@ -125,6 +134,7 @@ class Tenant:
     agent: TenantAgent = field(default_factory=TenantAgent)
     channels: tuple[TenantChannel, ...] = field(default_factory=tuple)
     billing: TenantBilling = field(default_factory=TenantBilling)
+    push: TenantPushState = field(default_factory=TenantPushState)
     activity: tuple[TenantActivityEntry, ...] = field(default_factory=tuple)
 
 
@@ -180,6 +190,12 @@ _TENANTS: tuple[Tenant, ...] = (
             monthly_price="—",
             next_billing_date="—",
             payment_status="—",
+        ),
+        push=TenantPushState(
+            status="clean",
+            pending_count=0,
+            last_pushed_at="—",
+            last_pushed_by="—",
         ),
         activity=(),
     ),

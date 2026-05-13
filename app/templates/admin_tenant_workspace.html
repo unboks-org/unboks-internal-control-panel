@@ -287,6 +287,52 @@
     </div>
   </section>
 
+  {# 4e. Push changes #}
+  {% set push_state_class = {'clean': 'ok', 'pending': 'warn', 'failed': 'down'}.get(tenant.push.status, 'unknown') %}
+  <section class="push-panel" aria-label="Push changes">
+    <header class="push-panel-header">
+      <div>
+        <h3>Push changes</h3>
+        <p class="muted compact-note">What will be pushed from this control panel to the tenant dashboard.</p>
+      </div>
+      <span class="status-chip status-{{ push_state_class }}">{{ tenant.push.status }}</span>
+    </header>
+
+    <div class="push-stats">
+      <div class="data-stat">
+        <span class="data-stat-label">Pending changes</span>
+        <span class="data-stat-value">
+          {{ tenant.push.pending_count }}
+          {% if tenant.push.pending_count > 0 %}
+            <span class="status-chip status-warn">to push</span>
+          {% endif %}
+        </span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Last pushed</span>
+        <span class="data-stat-value">{{ tenant.push.last_pushed_at }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Last pushed by</span>
+        <span class="data-stat-value">{{ tenant.push.last_pushed_by }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Target</span>
+        <span class="data-stat-value">{{ tenant.push.target }}</span>
+      </div>
+    </div>
+
+    <div class="alert alert-warn push-warning" role="note">
+      Push changes will update this tenant's dashboard configuration.
+    </div>
+
+    <div class="push-actions">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Preview changes</button>
+      <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Push changes</button>
+      <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Revert pending changes</button>
+    </div>
+  </section>
+
   {# 5. Activity log / audit trail #}
   <section class="activity-panel" aria-label="Activity log">
     <header class="activity-panel-header">
