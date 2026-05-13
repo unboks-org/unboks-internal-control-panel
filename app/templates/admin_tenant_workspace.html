@@ -224,6 +224,69 @@
     </div>
   </section>
 
+  {# 4d. Billing / Trial #}
+  {% set billing_state_class = {
+    'trial': 'warn', 'active': 'ok', 'overdue': 'down',
+    'paused': 'warn', 'cancelled': 'down'
+  }.get(tenant.billing.status, 'unknown') %}
+  <section class="billing-panel" aria-label="Billing / Trial">
+    <header class="billing-panel-header">
+      <div>
+        <h3>Billing / Trial</h3>
+        <p class="muted compact-note">Tenant billing state. UI only — payment backend not connected.</p>
+      </div>
+      <span class="status-chip status-{{ billing_state_class }}">{{ tenant.billing.status }}</span>
+    </header>
+
+    <div class="billing-stats">
+      <div class="data-stat">
+        <span class="data-stat-label">Status</span>
+        <span class="data-stat-value">{{ tenant.billing.status }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Trial days left</span>
+        <span class="data-stat-value">
+          {% if tenant.billing.trial_days_left is not none %}
+            {{ tenant.billing.trial_days_left }}
+            {% if tenant.billing.trial_days_left <= 7 %}
+              <span class="status-chip status-warn">ending soon</span>
+            {% endif %}
+          {% else %}—{% endif %}
+        </span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Plan</span>
+        <span class="data-stat-value">{{ tenant.billing.plan }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Monthly price</span>
+        <span class="data-stat-value">{{ tenant.billing.monthly_price }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Next billing</span>
+        <span class="data-stat-value">{{ tenant.billing.next_billing_date }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Payment</span>
+        <span class="data-stat-value">{{ tenant.billing.payment_status }}</span>
+      </div>
+    </div>
+
+    <div class="billing-actions">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Extend trial</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Mark paid</button>
+      <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Pause billing</button>
+    </div>
+
+    <div class="billing-danger">
+      <div>
+        <strong>Cancel tenant</strong>
+        <p class="muted compact-note">Ends billing and access. Used for non-renewal or off-boarding.</p>
+      </div>
+      <button type="button" class="danger-btn" disabled aria-disabled="true" title="Not wired yet">Cancel tenant</button>
+    </div>
+  </section>
+
   {# 5. Activity log #}
   <section class="op-card activity-card" aria-label="Activity log">
     <header>

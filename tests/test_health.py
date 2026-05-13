@@ -163,6 +163,16 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Forbidden legacy terminology
     assert "Soft mode" not in workspace.text
     assert "Hard mode" not in workspace.text
+    # Billing / Trial panel
+    assert "billing-panel" in workspace.text
+    assert "Billing / Trial" in workspace.text
+    assert "Trial days left" in workspace.text
+    assert "Next billing" in workspace.text
+    assert "Monthly price" in workspace.text
+    for action in ("Extend trial", "Mark paid", "Pause billing", "Cancel tenant"):
+        assert action in workspace.text
+    # Cancel tenant must be visually separated in a danger zone
+    assert "billing-danger" in workspace.text
     # Source of Truth / Data Room
     assert "data-room" in workspace.text
     assert "Knowledge items" in workspace.text

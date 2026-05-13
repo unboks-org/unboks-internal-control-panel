@@ -1285,6 +1285,78 @@ button.button-disabled,
   }
 }
 
+/* Billing / Trial */
+.billing-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  padding: 16px 18px;
+}
+
+.billing-panel-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.billing-panel-header h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+
+.billing-stats {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.billing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.billing-danger {
+  align-items: center;
+  background: #fff5f5;
+  border: 1px solid #f6c6c2;
+  border-radius: var(--radius);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.billing-danger strong {
+  color: var(--color-red);
+  font-size: 12px;
+}
+
+.billing-danger p {
+  margin: 2px 0 0;
+}
+
+@media (max-width: 720px) {
+  .billing-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .billing-stats .data-stat {
+    border-top: 1px solid var(--color-border);
+  }
+  .billing-danger {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 /* Source of Truth / Data Room */
 .data-room {
   background: var(--color-surface);

@@ -78,6 +78,16 @@ class TenantChannel:
 
 
 @dataclass(frozen=True)
+class TenantBilling:
+    status: str = "trial"            # trial | active | overdue | paused | cancelled
+    trial_days_left: Optional[int] = None
+    plan: str = "—"
+    monthly_price: str = "—"
+    next_billing_date: str = "—"
+    payment_status: str = "—"        # ok | pending | failed | —
+
+
+@dataclass(frozen=True)
 class Tenant:
     id: str
     name: str
@@ -87,6 +97,7 @@ class Tenant:
     sot: TenantSourceOfTruth = field(default_factory=TenantSourceOfTruth)
     agent: TenantAgent = field(default_factory=TenantAgent)
     channels: tuple[TenantChannel, ...] = field(default_factory=tuple)
+    billing: TenantBilling = field(default_factory=TenantBilling)
     activity: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -135,6 +146,14 @@ _TENANTS: tuple[Tenant, ...] = (
             TenantChannel("WhatsApp", "disconnected"),
             TenantChannel("Email", "disconnected"),
         ),
+        billing=TenantBilling(
+            status="active",
+            trial_days_left=None,
+            plan="Demo",
+            monthly_price="—",
+            next_billing_date="—",
+            payment_status="—",
+        ),
         activity=(),
     ),
     Tenant(
@@ -147,6 +166,14 @@ _TENANTS: tuple[Tenant, ...] = (
             TenantChannel("WhatsApp", "unknown"),
             TenantChannel("Email", "unknown"),
         ),
+        billing=TenantBilling(
+            status="trial",
+            trial_days_left=12,
+            plan="Trial",
+            monthly_price="—",
+            next_billing_date="—",
+            payment_status="—",
+        ),
     ),
     Tenant(
         id="bluefinn-charters",
@@ -157,6 +184,14 @@ _TENANTS: tuple[Tenant, ...] = (
             TenantChannel("Web widget", "unknown"),
             TenantChannel("WhatsApp", "unknown"),
             TenantChannel("Email", "unknown"),
+        ),
+        billing=TenantBilling(
+            status="trial",
+            trial_days_left=5,
+            plan="Trial",
+            monthly_price="—",
+            next_billing_date="—",
+            payment_status="—",
         ),
     ),
 )
