@@ -10,8 +10,11 @@ from app.onboarding import (
     LeadInput,
     LeadNotFoundError,
     LeadValidationError,
+    build_setup_summary,
     clean_optional,
     create_lead,
+    get_lead,
+    list_intake_answers,
     list_intake_answer_counts,
     list_leads,
 )
@@ -157,6 +160,54 @@ def onboarding_leads_api(request: Request):
             for lead in list_leads()
         ]
     }
+
+
+@router.get("/admin/onboarding/leads/{lead_id}", response_class=HTMLResponse)
+def onboarding_lead_detail(request: Request, lead_id: int) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        lead = get_lead(lead_id)
+    except LeadNotFoundError:
+        return render_admin(
+            request,
+            error="Onboarding lead not found.",
+            status_code=404,
+        )
+    answers = list_intake_answers(lead_id)
+    return templates.TemplateResponse(
+        request,
+        "onboarding_lead_detail.html",
+        {
+            "lead": lead,
+            "answers": answers,
+            "questions": INTAKE_QUESTIONS,
+            "answer_count": len(answers),
+            "intake_total": len(INTAKE_QUESTIONS),
+            "setup_summary": build_setup_summary(lead_id),
+        },
+    )
+
+
+@router.get("/admin/onboarding/leads/{lead_id}/setup-summary.txt")
+def onboarding_lead_setup_summary(request: Request, lead_id: int) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        summary = build_setup_summary(lead_id)
+    except LeadNotFoundError:
+        return Response("Onboarding lead not found.\n", status_code=404, media_type="text/plain")
+    return Response(
+        summary,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="onboarding-lead-{lead_id}-setup-summary.txt"'
+        },
+    )
 
 
 @router.post("/logout")

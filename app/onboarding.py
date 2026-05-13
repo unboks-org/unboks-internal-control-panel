@@ -419,6 +419,33 @@ def list_intake_answer_counts() -> dict[int, int]:
     return {int(row["lead_id"]): int(row["answer_count"]) for row in rows}
 
 
+def build_setup_summary(lead_id: int) -> str:
+    lead = get_lead(lead_id)
+    answers = list_intake_answers(lead_id)
+    lines = [
+        "Unboks onboarding setup summary",
+        "",
+        f"Lead ID: {lead.id}",
+        f"Email: {lead.email}",
+        f"Business name: {lead.business_name or 'Unknown'}",
+        f"Contact name: {lead.contact_name or 'Unknown'}",
+        f"Language: {lead.language or 'Unknown'}",
+        f"Status: {lead.status}",
+        f"Created: {lead.created_at}",
+        f"Updated: {lead.updated_at}",
+    ]
+    if lead.notes:
+        lines.extend(["", "Internal notes:", lead.notes])
+    lines.append("")
+    lines.append("Intake answers:")
+    for question in INTAKE_QUESTIONS:
+        answer = answers.get(question.key)
+        lines.append("")
+        lines.append(question.label)
+        lines.append(answer.answer if answer else "Not answered.")
+    return "\n".join(lines) + "\n"
+
+
 def save_intake_answer(token: str, question_key: str, answer: str) -> IntakeProgress:
     progress = get_intake_progress(token)
     if progress is None:

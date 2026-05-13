@@ -161,6 +161,7 @@
                 <td data-label="Created">{{ lead.created_at }}</td>
                 <td data-label="Updated">{{ lead.updated_at }}</td>
                 <td data-label="Action">
+                  <a class="button-link" href="/admin/onboarding/leads/{{ lead.id }}">Review</a>
                   {% if lead.status != "email_sent" %}
                     <form method="post" action="/admin/onboarding/leads/{{ lead.id }}/send-email">
                       <button class="button-small" type="submit">Send onboarding email</button>

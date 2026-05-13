@@ -94,6 +94,18 @@ def test_admin_send_email_route_requires_auth(monkeypatch, tmp_path) -> None:
     assert response.headers["location"] == "/login"
 
 
+def test_admin_lead_review_requires_auth(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    client = TestClient(app)
+
+    response = client.get("/admin/onboarding/leads/1", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
 def test_token_generation_and_public_onboarding_placeholder(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
@@ -227,3 +239,43 @@ def test_public_onboarding_completion_updates_status(monkeypatch, tmp_path) -> N
     assert complete.status_code == 200
     assert "Onboarding received" in complete.text
     assert get_lead(lead.id).status == "form_submitted"
+
+
+def test_admin_can_review_and_export_setup_summary(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    lead = create_lead(
+        LeadInput(
+            email="review@example.com",
+            business_name="Review Business",
+            contact_name="Review Contact",
+            language="English",
+            notes="Needs careful setup.",
+        )
+    )
+    _, token = create_or_refresh_token(lead.id)
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    for question in INTAKE_QUESTIONS:
+        response = client.post(
+            f"/onboarding/{token}",
+            data={"question_key": question.key, "answer": f"Answer for {question.key}"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    review = client.get(f"/admin/onboarding/leads/{lead.id}")
+    assert review.status_code == 200
+    assert "Onboarding review" in review.text
+    assert "Review Business" in review.text
+    assert "Answer for business_summary" in review.text
+    assert "Setup summary" in review.text
+
+    export = client.get(f"/admin/onboarding/leads/{lead.id}/setup-summary.txt")
+    assert export.status_code == 200
+    assert export.headers["content-type"].startswith("text/plain")
+    assert "Unboks onboarding setup summary" in export.text
+    assert "Review Business" in export.text
+    assert "Answer for escalation_rules" in export.text

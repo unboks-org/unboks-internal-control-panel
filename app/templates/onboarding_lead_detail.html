@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Onboarding Review | Unboks Internal{% endblock %}
+
+{% block body %}
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Unboks.org</p>
+      <h1>Onboarding review</h1>
+    </div>
+    <div class="topbar-actions">
+      <a class="button-link" href="/admin">Back</a>
+      <form method="post" action="/logout">
+        <button class="button-secondary" type="submit">Sign out</button>
+      </form>
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <h2>{{ lead.business_name or lead.email }}</h2>
+        <p class="muted">{{ lead.email }}</p>
+      </div>
+      {% if answer_count >= intake_total %}
+        <span class="status-chip status-ok">complete</span>
+      {% elif answer_count > 0 %}
+        <span class="status-chip status-unknown">{{ answer_count }}/{{ intake_total }}</span>
+      {% else %}
+        <span class="status-chip status-neutral">not started</span>
+      {% endif %}
+    </div>
+
+    <dl class="detail-grid">
+      <div>
+        <dt>Status</dt>
+        <dd>{{ lead.status }}</dd>
+      </div>
+      <div>
+        <dt>Contact</dt>
+        <dd>{{ lead.contact_name or "Unknown" }}</dd>
+      </div>
+      <div>
+        <dt>Language</dt>
+        <dd>{{ lead.language or "Unknown" }}</dd>
+      </div>
+      <div>
+        <dt>Updated</dt>
+        <dd>{{ lead.updated_at }}</dd>
+      </div>
+    </dl>
+
+    {% if lead.notes %}
+      <div class="review-answer">
+        <h3>Internal notes</h3>
+        <p>{{ lead.notes }}</p>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Submitted answers</h2>
+      <span class="status-chip status-neutral">{{ answer_count }} saved</span>
+    </div>
+    {% for question in questions %}
+      {% set answer = answers.get(question.key) %}
+      <article class="review-answer">
+        <h3>{{ question.label }}</h3>
+        {% if answer %}
+          <p>{{ answer.answer }}</p>
+          <span class="cell-note">Updated {{ answer.updated_at }}</span>
+        {% else %}
+          <p class="muted">Not answered.</p>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Setup summary</h2>
+      <a class="button-link" href="/admin/onboarding/leads/{{ lead.id }}/setup-summary.txt">Download text</a>
+    </div>
+    <p class="muted">Copy this into the next manual setup step. This does not create a tenant or update production.</p>
+    <textarea class="summary-box" rows="18" readonly>{{ setup_summary }}</textarea>
+  </section>
+{% endblock %}
