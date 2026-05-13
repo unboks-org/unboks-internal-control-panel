@@ -8,7 +8,7 @@ args = ["sh", "-c", "python3 -m venv .venv && . .venv/bin/activate && python -m 
 PYTHONUNBUFFERED = "1"
 
 [deployment]
-run = ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+run = ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000"]
 deploymentTarget = "autoscale"
 build = ["pip", "install", "-r", "requirements.txt"]
 
