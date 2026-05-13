@@ -56,15 +56,6 @@
   <section class="op-grid" aria-label="Operational state">
     <article class="op-card">
       <header>
-        <h3>Source of Truth</h3>
-        <span class="status-chip status-{{ 'ok' if tenant.health.sot == 'ok' else 'unknown' }}">{{ tenant.health.sot }}</span>
-      </header>
-      <p class="muted">{{ tenant.sot.summary }}</p>
-      <p class="op-meta">Last edited: {{ tenant.sot.last_edited }}</p>
-    </article>
-
-    <article class="op-card">
-      <header>
         <h3>AI Agent</h3>
         <span class="status-chip status-{{ 'ok' if tenant.health.ai_agent == 'ok' else 'unknown' }}">{{ tenant.health.ai_agent }}</span>
       </header>
@@ -89,6 +80,81 @@
         {% endfor %}
       </ul>
     </article>
+  </section>
+
+  {# 4b. Source of Truth / Data Room #}
+  <section class="data-room" aria-label="Source of Truth / Data Room">
+    <header class="data-room-header">
+      <div>
+        <h3>Source of Truth <span class="muted">/ Data Room</span></h3>
+        <p class="muted compact-note">Single place where all tenant knowledge lives. The AI agent only answers from here.</p>
+      </div>
+      <span class="status-chip status-{{ 'ok' if tenant.sot.status == 'ok' else 'unknown' }}">{{ tenant.sot.status }}</span>
+    </header>
+
+    <div class="data-room-stats">
+      <div class="data-stat">
+        <span class="data-stat-label">Knowledge items</span>
+        <span class="data-stat-value">{{ tenant.sot.files_count }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Cloud connection</span>
+        <span class="data-stat-value">
+          <span class="status-chip status-{{ 'ok' if tenant.sot.cloud_status == 'connected' else 'unknown' }}">{{ tenant.sot.cloud_status }}</span>
+          {% if tenant.sot.cloud_provider %}
+            {% for value, label in cloud_providers %}
+              {% if value == tenant.sot.cloud_provider %}<span class="muted">&middot; {{ label }}</span>{% endif %}
+            {% endfor %}
+          {% endif %}
+        </span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Last sync</span>
+        <span class="data-stat-value">{{ tenant.sot.last_sync }}</span>
+      </div>
+      <div class="data-stat">
+        <span class="data-stat-label">Pending review</span>
+        <span class="data-stat-value">
+          {{ tenant.sot.pending_review }}
+          {% if tenant.sot.pending_review > 0 %}
+            <span class="status-chip status-warn">review</span>
+          {% endif %}
+        </span>
+      </div>
+    </div>
+
+    <div class="data-room-actions">
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Upload files</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Connect cloud directory</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">View knowledge items</button>
+      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Sync now</button>
+    </div>
+
+    <div class="data-room-grid">
+      <div class="data-room-block">
+        <h4>Cloud directory options</h4>
+        <ul class="cloud-list">
+          {% for value, label in cloud_providers %}
+            <li>
+              <span class="cloud-name">{{ label }}</span>
+              <span class="status-chip status-{{ 'ok' if tenant.sot.cloud_provider == value and tenant.sot.cloud_status == 'connected' else 'unknown' }}">
+                {% if tenant.sot.cloud_provider == value and tenant.sot.cloud_status == 'connected' %}connected{% else %}not connected{% endif %}
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+        <p class="muted compact-note">OAuth not wired yet.</p>
+      </div>
+
+      <div class="data-room-block">
+        <h4>Upload categories</h4>
+        <ul class="category-list">
+          {% for category in upload_categories %}
+            <li>{{ category }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
   </section>
 
   {# 5. Activity log #}

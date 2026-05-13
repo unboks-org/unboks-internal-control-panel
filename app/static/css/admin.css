@@ -472,8 +472,19 @@ button:hover {
 }
 
 .status-unknown {
+  background: #eef0f2;
+  color: var(--color-muted);
+}
+
+.status-warn {
   background: var(--color-yellow-soft);
   color: var(--color-yellow);
+}
+
+.status-down,
+.status-error {
+  background: var(--color-red-soft);
+  color: var(--color-red);
 }
 
 .status-lead {
@@ -1123,6 +1134,139 @@ button.button-disabled,
 
 .activity-card {
   margin-bottom: 14px;
+}
+
+/* Source of Truth / Data Room */
+.data-room {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  padding: 16px 18px;
+}
+
+.data-room-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.data-room-header h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+
+.data-room-stats {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.data-stat {
+  border-left: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.data-stat:first-child {
+  border-left: 0;
+}
+
+.data-stat-label {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.data-stat-value {
+  align-items: center;
+  color: var(--color-text);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 6px;
+}
+
+.data-room-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.data-room-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.data-room-block {
+  background: #fafbfc;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.data-room-block h4 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.cloud-list,
+.category-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cloud-list li {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  padding: 6px 0;
+}
+
+.cloud-list li:first-child {
+  border-top: 0;
+}
+
+.cloud-name {
+  font-weight: 600;
+}
+
+.category-list li {
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+  padding: 5px 0;
+}
+
+.category-list li:first-child {
+  border-top: 0;
+}
+
+@media (max-width: 720px) {
+  .data-room-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .data-stat {
+    border-top: 1px solid var(--color-border);
+  }
 }
 
 .activity-list {

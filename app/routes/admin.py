@@ -26,7 +26,13 @@ from app.security import (
     set_session_cookie,
     verify_admin_password,
 )
-from app.tenants import Tenant, get_tenant, list_tenants
+from app.tenants import (
+    CLOUD_PROVIDERS,
+    UPLOAD_CATEGORIES,
+    Tenant,
+    get_tenant,
+    list_tenants,
+)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -142,6 +148,8 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
         {
             **_shell_context("tenants", active_tenant=tenant),
             "tenant": tenant,
+            "cloud_providers": CLOUD_PROVIDERS,
+            "upload_categories": UPLOAD_CATEGORIES,
         },
     )
 

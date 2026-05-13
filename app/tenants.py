@@ -23,6 +23,30 @@ class TenantHealth:
 class TenantSourceOfTruth:
     summary: str = "Not configured"
     last_edited: str = "—"
+    status: str = "unknown"          # ok | warn | down | unknown
+    files_count: int = 0
+    cloud_provider: Optional[str] = None     # google_drive | dropbox | onedrive | None
+    cloud_status: str = "disconnected"        # connected | disconnected | error | unknown
+    last_sync: str = "—"
+    pending_review: int = 0
+
+
+CLOUD_PROVIDERS: tuple[tuple[str, str], ...] = (
+    ("google_drive", "Google Drive"),
+    ("dropbox", "Dropbox"),
+    ("onedrive", "OneDrive"),
+)
+
+
+UPLOAD_CATEGORIES: tuple[str, ...] = (
+    "Documents / PDFs",
+    "Images",
+    "Price lists",
+    "Menus / brochures",
+    "FAQ files",
+    "Policies",
+    "Services / product sheets",
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +92,12 @@ _TENANTS: tuple[Tenant, ...] = (
         sot=TenantSourceOfTruth(
             summary="Demo SoT seeded with 12 entries.",
             last_edited="—",
+            status="ok",
+            files_count=12,
+            cloud_provider="google_drive",
+            cloud_status="connected",
+            last_sync="—",
+            pending_review=0,
         ),
         agent=TenantAgent(model="gpt-4o-mini", tone="friendly", handoff="manual"),
         channels=(

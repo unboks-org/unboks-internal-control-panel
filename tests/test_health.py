@@ -143,6 +143,19 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Pause tenant" in workspace.text
     # Operational cards
     assert "op-grid" in workspace.text
+    # Source of Truth / Data Room
+    assert "data-room" in workspace.text
+    assert "Knowledge items" in workspace.text
+    assert "Cloud connection" in workspace.text
+    assert "Last sync" in workspace.text
+    assert "Pending review" in workspace.text
+    for action in ("Upload files", "Connect cloud directory", "View knowledge items", "Sync now"):
+        assert action in workspace.text
+    for provider in ("Google Drive", "Dropbox", "OneDrive"):
+        assert provider in workspace.text
+    for category in ("Documents / PDFs", "Images", "Price lists", "Menus / brochures",
+                     "FAQ files", "Policies", "Services / product sheets"):
+        assert category in workspace.text
     # Activity log shows empty state
     assert "Activity" in workspace.text
     # Danger zone
