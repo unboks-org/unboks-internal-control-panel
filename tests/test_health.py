@@ -242,7 +242,7 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Channels control panel — compact list/table
     assert "channels-panel" in workspace.text
     assert "channels-table" in workspace.text
-    for channel in ("WhatsApp", "Email", "Instagram", "Facebook", "Telegram", "Website chat"):
+    for channel in ("WhatsApp", "Email", "Instagram", "Facebook", "Messenger", "Telegram", "Tiktok", "X"):
         assert channel in workspace.text
     # Compact controls: toggle + Configure link, no big Disconnect button
     assert "channel-toggle" in workspace.text

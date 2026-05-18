@@ -87,8 +87,10 @@ CHANNEL_CATALOG: tuple[str, ...] = (
     "Email",
     "Instagram",
     "Facebook",
+    "Messenger",
     "Telegram",
-    "Website chat",
+    "Tiktok",
+    "X",
 )
 
 
@@ -279,8 +281,10 @@ _TENANTS: tuple[Tenant, ...] = (
             TenantChannel("Email", "disconnected"),
             TenantChannel("Instagram", "disconnected"),
             TenantChannel("Facebook", "disconnected"),
+            TenantChannel("Messenger", "disconnected"),
             TenantChannel("Telegram", "disconnected"),
-            TenantChannel("Website chat", "connected"),
+            TenantChannel("Tiktok", "disconnected"),
+            TenantChannel("X", "disconnected"),
         ),
         billing=TenantBilling(
             status="active",
