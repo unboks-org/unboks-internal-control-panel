@@ -5,7 +5,9 @@ later milestone; for now we expose a small, hard-coded list so the UI can be
 wired end-to-end without faking storage.
 """
 
+import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -540,7 +542,7 @@ def sorted_notes(notes: tuple[TenantNote, ...]) -> tuple[TenantNote, ...]:
 
 
 _DEFAULT_TENANTS_CLIENT_DIR = "/opt/wtyj/clients"
-_ALLOWED_STATUSES = ("active", "paused", "suspended")
+_ALLOWED_STATUSES = ("active", "trial", "paused", "suspended")
 
 
 def _load_tenants_from_disk(client_dir: str) -> tuple[Tenant, ...]:
@@ -662,3 +664,77 @@ class AnomalyFlag:
 def list_anomalies() -> tuple[AnomalyFlag, ...]:
     # No real detection backend yet — return empty to render the placeholder state.
     return ()
+
+
+
+# Tenant creation (used by the Add-New-Tenant wizard).
+#
+# Pure filesystem operation — writes <client_dir>/<slug>/config/client.json
+# and an empty <slug>/data/ dir. Tenant discovery via list_tenants() picks
+# the new directory up immediately on the next request.
+
+_SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{1,49}$")
+
+
+class TenantCreateError(Exception):
+    """Raised when create_tenant_directory cannot create a tenant (bad
+    slug, slug already exists, client_dir not configured, etc.)."""
+
+
+def validate_slug(slug: str) -> str:
+    s = (slug or "").strip().lower()
+    if not _SLUG_PATTERN.match(s):
+        raise TenantCreateError(
+            "Slug must be 2-50 chars, lowercase letters / digits / - / _, "
+            "starting with a letter.")
+    return s
+
+
+def derive_slug_from_name(name: str) -> str:
+    """Lowercase, replace runs of non-alphanumerics with '-', strip
+    leading non-letters. Returns a candidate slug that may still fail
+    validate_slug — callers should validate."""
+    s = (name or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    s = re.sub(r"^[^a-z]+", "", s)
+    return s[:50]
+
+
+def get_tenants_client_dir() -> str:
+    """Resolved tenants root from env, with the same fallback semantics
+    list_tenants() uses. Empty string if the configured directory does
+    not exist."""
+    client_dir = os.getenv(
+        "NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    return client_dir if client_dir and os.path.isdir(client_dir) else ""
+
+
+def create_tenant_directory(slug: str, business: dict,
+                             client_dir: Optional[str] = None) -> str:
+    """Create <client_dir>/<slug>/{config/client.json, data/}. Returns
+    the absolute tenant root path. Raises TenantCreateError on slug
+    validation failure, missing client_dir, or pre-existing directory."""
+    safe_slug = validate_slug(slug)
+    root = client_dir or os.getenv(
+        "NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    if not root:
+        raise TenantCreateError(
+            "NR3_TENANTS_CLIENT_DIR is not set — cannot create tenant.")
+    if not os.path.isdir(root):
+        try:
+            os.makedirs(root, exist_ok=True)
+        except OSError as exc:
+            raise TenantCreateError(
+                f"Could not create tenants root {root!r}: {exc}") from exc
+    tenant_root = os.path.join(root, safe_slug)
+    if os.path.exists(tenant_root):
+        raise TenantCreateError(
+            f"Tenant {safe_slug!r} already exists at {tenant_root!r}.")
+    os.makedirs(os.path.join(tenant_root, "config"))
+    os.makedirs(os.path.join(tenant_root, "data"))
+    payload = {"business": dict(business)}
+    payload["business"]["slug"] = safe_slug
+    config_path = os.path.join(tenant_root, "config", "client.json")
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    return tenant_root

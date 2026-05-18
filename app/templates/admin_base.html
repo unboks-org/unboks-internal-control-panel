@@ -21,7 +21,14 @@
         </div>
       </div>
 
-      {% set tenants_open = active in ('tenants', 'attention', 'anomalies') %}
+      <a href="/admin/tenants/new"
+         class="sidebar-add-tenant {% if active == 'tenant_create' %}active{% endif %}"
+         {% if active == 'tenant_create' %}aria-current="page"{% endif %}>
+        <span aria-hidden="true">+</span>
+        <span>Add new tenant</span>
+      </a>
+
+      {% set tenants_open = active in ('tenants', 'attention', 'anomalies', 'tenant_create') %}
       <div
         class="tenant-selector {% if tenants_open %}is-active{% endif %}"
         data-tenant-selector

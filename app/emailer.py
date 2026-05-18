@@ -143,3 +143,42 @@ def send_email(to_email: str, subject: str, body: str, settings: Settings) -> No
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
             smtp.login(settings.smtp_username, settings.smtp_password)
             smtp.send_message(message)
+
+
+
+@dataclass(frozen=True)
+class TenantWelcomeDraft:
+    subject: str
+    body: str
+
+
+def build_tenant_welcome_email(
+    *,
+    tenant_name: str,
+    dashboard_url: str,
+    username: str,
+    initial_token: str,
+    custom_message: str = "",
+) -> TenantWelcomeDraft:
+    """Compose the welcome email sent to a new tenant after the owner
+    finishes the Add-New-Tenant wizard. Includes the dashboard URL and
+    the initial sign-in credentials the wizard generated server-side."""
+    extra = (custom_message.strip() + "\n\n") if custom_message.strip() else ""
+    body = f"""Hi,
+
+Congratulations \u2014 your {tenant_name} workspace on Unboks is ready.
+
+Your dashboard:
+  {dashboard_url}
+
+Sign in with:
+  Workspace: {username}
+  Password:  {initial_token}
+
+{extra}If you need any help, just reply to this email.
+
+Kind regards,
+The Unboks team
+"""
+    subject = f"Welcome to Unboks \u2014 {tenant_name} is ready"
+    return TenantWelcomeDraft(subject=subject, body=body)

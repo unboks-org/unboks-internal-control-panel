@@ -129,9 +129,29 @@
     });
   }
 
+  function initCreateTenantWizard() {
+    var nameInp = document.querySelector("[data-ct-name]");
+    var slugInp = document.querySelector("[data-ct-slug]");
+    if (!nameInp || !slugInp) {
+      return;
+    }
+    var slugTouched = false;
+    slugInp.addEventListener("input", function () { slugTouched = true; });
+    nameInp.addEventListener("input", function () {
+      if (slugTouched && slugInp.value.length > 0) return;
+      var s = (nameInp.value || "").toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^[^a-z]+/, "")
+        .replace(/-+$/, "")
+        .slice(0, 50);
+      slugInp.value = s;
+    });
+  }
+
   function init() {
     initSidebarDrawer();
     initTenantSelector();
+    initCreateTenantWizard();
   }
 
   if (document.readyState === "loading") {

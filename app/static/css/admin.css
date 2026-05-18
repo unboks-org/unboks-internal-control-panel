@@ -2919,3 +2919,89 @@ button.button-disabled,
     grid-template-columns: 1fr;
   }
 }
+
+/* Add New Tenant wizard */
+.sidebar-add-tenant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  border-radius: 8px;
+  background: #1a73e8;
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 14px;
+  transition: background 120ms ease;
+}
+.sidebar-add-tenant:hover { background: #155cb8; }
+.sidebar-add-tenant span:first-child { font-size: 18px; line-height: 1; }
+
+.create-tenant { max-width: 760px; margin: 0 auto; }
+.create-tenant-header h2 { margin: 0 0 6px; }
+.create-tenant-header p { margin: 0 0 16px; font-size: 13px; line-height: 1.5; }
+
+.create-tenant-form .ct-fieldset {
+  border: 1px solid #e8eaed;
+  border-radius: 10px;
+  padding: 14px 18px 18px;
+  margin: 0 0 16px;
+}
+.create-tenant-form .ct-fieldset legend {
+  font-weight: 600;
+  font-size: 14px;
+  color: #1a73e8;
+  padding: 0 6px;
+}
+.create-tenant-form .ct-row { margin: 0 0 10px; }
+.create-tenant-form .ct-row-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+.create-tenant-form label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3c4043;
+  margin-bottom: 4px;
+}
+.create-tenant-form .req { color: #d93025; }
+.create-tenant-form .ct-help { margin: 4px 0 0; font-size: 11px; }
+.create-tenant-form input[type="text"],
+.create-tenant-form input[type="email"],
+.create-tenant-form select,
+.create-tenant-form textarea {
+  width: 100%;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+.create-tenant-form textarea { resize: vertical; }
+.create-tenant-form .ct-checkbox {
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.create-tenant-form .ct-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+.form-error {
+  background: #fdecea;
+  color: #a50e0e;
+  border: 1px solid #f5b6b0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}

@@ -1,0 +1,137 @@
+{% extends "admin_base.html" %}
+
+{% block page_title %}Add new tenant{% endblock %}
+{% block section_eyebrow %}Unboks tenants{% endblock %}
+
+{% block content %}
+<section class="page-card create-tenant">
+  <header class="create-tenant-header">
+    <h2>Create a new tenant</h2>
+    <p class="muted">
+      Spins up the tenant folder, writes <code>client.json</code>, saves any
+      uploaded files, and (optionally) sends the welcome email — in one submit.
+      Redirects to the new tenant workspace afterwards.
+    </p>
+  </header>
+
+  {% if error %}
+    <div class="form-error">{{ error }}</div>
+  {% endif %}
+
+  <form class="create-tenant-form"
+        method="post"
+        action="/admin/tenants/create"
+        enctype="multipart/form-data"
+        autocomplete="off">
+
+    <fieldset class="ct-fieldset">
+      <legend>Basic info</legend>
+      <div class="ct-row">
+        <label for="ct-name">Business / tenant name <span class="req">*</span></label>
+        <input id="ct-name" name="name" type="text"
+               required maxlength="200"
+               data-ct-name
+               value="{{ form.name or '' }}"
+               placeholder="Acme Charters">
+      </div>
+      <div class="ct-row">
+        <label for="ct-slug">Slug</label>
+        <input id="ct-slug" name="slug" type="text"
+               maxlength="50"
+               data-ct-slug
+               pattern="^[a-z][a-z0-9_-]{1,49}$"
+               value="{{ form.slug or '' }}"
+               placeholder="auto-generated from name (editable)">
+        <p class="ct-help muted">2-50 chars, lowercase letters / digits / - / _, starting with a letter.</p>
+      </div>
+      <div class="ct-row-pair">
+        <div>
+          <label for="ct-contact-person">Contact person</label>
+          <input id="ct-contact-person" name="contact_person" type="text"
+                 maxlength="200" value="{{ form.contact_person or '' }}">
+        </div>
+        <div>
+          <label for="ct-contact-email">Contact email</label>
+          <input id="ct-contact-email" name="contact_email" type="email"
+                 maxlength="200" value="{{ form.contact_email or '' }}">
+        </div>
+      </div>
+      <div class="ct-row">
+        <label for="ct-phone">Phone / WhatsApp</label>
+        <input id="ct-phone" name="phone" type="text"
+               maxlength="50" value="{{ form.phone or '' }}"
+               placeholder="+1 555 …">
+      </div>
+    </fieldset>
+
+    <fieldset class="ct-fieldset">
+      <legend>Plan &amp; status</legend>
+      <div class="ct-row-pair">
+        <div>
+          <label for="ct-plan">Plan</label>
+          <select id="ct-plan" name="plan">
+            {% for opt in ["trial", "monthly", "yearly"] %}
+              <option value="{{ opt }}" {% if (form.plan or "trial") == opt %}selected{% endif %}>{{ opt | capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="ct-status">Status</label>
+          <select id="ct-status" name="status">
+            {% for opt in ["active", "trial", "paused"] %}
+              <option value="{{ opt }}" {% if (form.status or "trial") == opt %}selected{% endif %}>{{ opt | capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset class="ct-fieldset">
+      <legend>AI Agent defaults</legend>
+      <div class="ct-row">
+        <label for="ct-tone">Default tone</label>
+        <select id="ct-tone" name="tone">
+          <option value="" {% if not form.tone %}selected{% endif %}>— Skip (use platform default) —</option>
+          {% for opt in ["Professional", "Friendly", "Warm", "Casual", "Direct"] %}
+            <option value="{{ opt }}" {% if form.tone == opt %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ct-row">
+        <label for="ct-notes">Initial notes</label>
+        <textarea id="ct-notes" name="notes" maxlength="2000" rows="3"
+                  placeholder="Anything the Agent should know on day one (optional).">{{ form.notes or '' }}</textarea>
+      </div>
+    </fieldset>
+
+    <fieldset class="ct-fieldset">
+      <legend>File uploads (optional)</legend>
+      <div class="ct-row">
+        <label for="ct-files">Documents, images, contracts</label>
+        <input id="ct-files" name="files" type="file" multiple>
+        <p class="ct-help muted">25 MB max per file. Saved under the tenant's data directory.</p>
+      </div>
+    </fieldset>
+
+    <fieldset class="ct-fieldset">
+      <legend>Welcome</legend>
+      <div class="ct-row">
+        <label class="ct-checkbox">
+          <input type="checkbox" name="send_welcome" value="1"
+                 {% if form.send_welcome %}checked{% endif %}>
+          Send welcome email immediately after creation
+        </label>
+        <p class="ct-help muted">
+          Email goes to the contact email above and includes the dashboard
+          link plus an initial sign-in token generated server-side.
+        </p>
+      </div>
+    </fieldset>
+
+    <div class="ct-actions">
+      <a href="/admin/tenants" class="button-secondary">Cancel</a>
+      <button type="submit" class="button-primary">Create tenant</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

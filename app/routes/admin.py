@@ -35,12 +35,17 @@ from app.tenants import (
     NOTE_PRIORITIES,
     UPLOAD_CATEGORIES,
     Tenant,
+    TenantCreateError,
     compute_setup_checklist,
+    create_tenant_directory,
+    derive_slug_from_name,
     get_tenant,
     list_anomalies,
     list_tenants,
     sorted_notes,
+    validate_slug,
 )
+from fastapi import File, UploadFile
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -129,6 +134,165 @@ def admin_tenants_index(request: Request) -> Response:
     if tenants:
         return RedirectResponse(url=f"/admin/tenants/{tenants[0].id}", status_code=303)
     return RedirectResponse(url="/admin/settings", status_code=303)
+
+
+@router.get("/admin/tenants/new", response_class=HTMLResponse)
+def admin_tenant_create_form(request: Request) -> Response:
+    """Add-New-Tenant wizard. One page, one submit. Posts to
+    /admin/tenants/create which creates the folder, writes client.json,
+    saves uploaded files, and (optionally) sends the welcome email."""
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(
+        request,
+        "admin_tenant_create.html",
+        {
+            **_shell_context("tenant_create"),
+            "error": request.query_params.get("error", ""),
+            "form": {},
+        },
+    )
+
+
+@router.post("/admin/tenants/create", response_class=HTMLResponse)
+async def admin_tenant_create_submit(
+    request: Request,
+    name: str = Form(default=""),
+    slug: str = Form(default=""),
+    contact_person: str = Form(default=""),
+    contact_email: str = Form(default=""),
+    phone: str = Form(default=""),
+    plan: str = Form(default="trial"),
+    status: str = Form(default="trial"),
+    tone: str = Form(default=""),
+    notes: str = Form(default=""),
+    send_welcome: str = Form(default=""),
+    files: list[UploadFile] = File(default=[]),
+) -> Response:
+    """Single-submit tenant creation."""
+    import os
+    import re
+    import secrets
+    from urllib.parse import quote_plus
+
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+
+    name = (name or "").strip()
+    if not name:
+        return _create_error_response(
+            request, "Business / tenant name is required.",
+            form_echo=locals())
+    candidate_slug = (slug or "").strip() or derive_slug_from_name(name)
+    try:
+        safe_slug = validate_slug(candidate_slug)
+    except TenantCreateError as exc:
+        return _create_error_response(request, str(exc), form_echo=locals())
+
+    business: dict = {
+        "slug": safe_slug,
+        "name": name,
+        "plan": plan.strip().lower() or "trial",
+        "status": status.strip().lower() or "trial",
+    }
+    if contact_person.strip():
+        business["contact_person"] = contact_person.strip()
+    if contact_email.strip():
+        business["email"] = contact_email.strip()
+    if phone.strip():
+        business["whatsapp"] = phone.strip()
+    if tone.strip():
+        business["agent_tone"] = tone.strip()
+    if notes.strip():
+        business["notes"] = notes.strip()
+
+    try:
+        tenant_root = create_tenant_directory(safe_slug, business)
+    except TenantCreateError as exc:
+        return _create_error_response(request, str(exc), form_echo=locals())
+    except OSError as exc:
+        return _create_error_response(
+            request, f"Filesystem error creating tenant: {exc}",
+            form_echo=locals())
+
+    upload_warnings: list[str] = []
+    if files:
+        uploads_dir = os.path.join(tenant_root, "data", "uploads")
+        os.makedirs(uploads_dir, exist_ok=True)
+        for uploaded in files:
+            if not uploaded or not uploaded.filename:
+                continue
+            raw = await uploaded.read()
+            if len(raw) == 0:
+                continue
+            if len(raw) > 25 * 1024 * 1024:
+                upload_warnings.append(
+                    f"{uploaded.filename}: file too large (25 MB max)")
+                continue
+            safe_name = re.sub(r"[^A-Za-z0-9._\- ]", "_",
+                                uploaded.filename.rsplit("/", 1)[-1]).strip()[:120] or "upload"
+            with open(os.path.join(uploads_dir, safe_name), "wb") as f:
+                f.write(raw)
+
+    op_username = safe_slug
+    op_token = secrets.token_urlsafe(12)
+    dashboard_url = f"https://dashboard.unboks.org/?workspace={safe_slug}"
+
+    welcome_warning = ""
+    if send_welcome.strip() and contact_email.strip():
+        from app.emailer import (build_tenant_welcome_email, send_email,
+                                  smtp_is_configured)
+        if not smtp_is_configured(settings):
+            welcome_warning = "Welcome email skipped: SMTP not configured."
+        else:
+            draft = build_tenant_welcome_email(
+                tenant_name=name,
+                dashboard_url=dashboard_url,
+                username=op_username,
+                initial_token=op_token,
+            )
+            try:
+                send_email(
+                    contact_email.strip(),
+                    draft.subject,
+                    draft.body,
+                    settings,
+                )
+            except Exception as exc:
+                welcome_warning = f"Welcome email failed: {exc}"
+
+    qs_bits = ["created=1"]
+    if upload_warnings:
+        qs_bits.append("warn=" + quote_plus(
+            "Uploads: " + "; ".join(upload_warnings)))
+    if welcome_warning:
+        qs_bits.append("warn=" + quote_plus(welcome_warning))
+    return RedirectResponse(
+        url=f"/admin/tenants/{safe_slug}?" + "&".join(qs_bits),
+        status_code=303)
+
+
+def _create_error_response(request: Request, message: str, form_echo: dict) -> Response:
+    """Re-render the wizard with an inline error + pre-filled values
+    so the operator does not retype everything."""
+    safe_echo = {k: form_echo.get(k, "") for k in (
+        "name", "slug", "contact_person", "contact_email", "phone",
+        "plan", "status", "tone", "notes", "send_welcome",
+    )}
+    return templates.TemplateResponse(
+        request,
+        "admin_tenant_create.html",
+        {
+            **_shell_context("tenant_create"),
+            "error": message,
+            "form": safe_echo,
+        },
+        status_code=400,
+    )
 
 
 @router.get("/admin/tenants/{tenant_id}", response_class=HTMLResponse)
