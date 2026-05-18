@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Request, File, UploadFile
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.templating import Jinja2Templates
 from typing import Optional
@@ -42,7 +42,12 @@ from app.tenants import (
     sorted_notes,
     validate_slug,
 )
-from fastapi import File, UploadFile
+from app.tenant_io import provision_new_tenant   # <--- ADDED
+
+import os
+import re
+import secrets
+from urllib.parse import quote_plus
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -169,11 +174,6 @@ async def admin_tenant_create_submit(
     files: list[UploadFile] = File(default=[]),
 ) -> Response:
     """Single-submit tenant creation."""
-    import os
-    import re
-    import secrets
-    from urllib.parse import quote_plus
-
     settings = get_settings()
     redirect = require_admin(request, settings)
     if redirect:
@@ -184,6 +184,7 @@ async def admin_tenant_create_submit(
         return _create_error_response(
             request, "Business / tenant name is required.",
             form_echo=locals())
+
     candidate_slug = (slug or "").strip() or derive_slug_from_name(name)
     try:
         safe_slug = validate_slug(candidate_slug)
@@ -216,6 +217,12 @@ async def admin_tenant_create_submit(
             request, f"Filesystem error creating tenant: {exc}",
             form_echo=locals())
 
+    # Generate password
+    password = generate_random_password()
+
+    # === PROVISION TENANT ON VPS (creates folder + client.json) ===
+    provision_new_tenant(safe_slug, password)
+
     upload_warnings: list[str] = []
     if files:
         uploads_dir = os.path.join(tenant_root, "data", "uploads")
@@ -237,7 +244,7 @@ async def admin_tenant_create_submit(
 
     op_username = safe_slug
     op_token = secrets.token_urlsafe(12)
-    dashboard_url = f"https://dashboard.unboks.org/?workspace={safe_slug}"
+    dashboard_url = f"https://dashboard.unbuks.org/?workspace={safe_slug}"
 
     welcome_warning = ""
     if send_welcome.strip() and contact_email.strip():
