@@ -114,7 +114,7 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert tag_values, "expected at least one tenant row with data-tenant-tags"
     for tags in tag_values:
         assert "problem" not in tags.split(), f"unexpected problem tag in {tags!r}"
-    assert "Unboks Demo" in shell.text
+    assert "Unboks" in shell.text
     assert "Consulta Despertares" not in shell.text
     assert "BlueFinn Charters" not in shell.text
     # Sidebar must only show TENANTS and SETTINGS — Home was removed; no Onboarding/Reviews
@@ -154,9 +154,9 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     client = TestClient(app)
     client.post("/login", data={"password": "test-password"})
 
-    workspace = client.get("/admin/tenants/unboks-demo")
+    workspace = client.get("/admin/tenants/unboks")
     assert workspace.status_code == 200
-    assert "Unboks Demo" in workspace.text
+    assert "Unboks" in workspace.text
     # Soft-colored tenant header
     assert "tenant-header" in workspace.text
     # Compact health strip with all 6 cells
@@ -432,16 +432,16 @@ def test_tenant_workspace_shows_no_activity_for_empty_tenant(monkeypatch, tmp_pa
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
     monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
-    # Fallback to the hard-coded _TENANTS list (Unboks Demo only).
+    # Fallback to the hard-coded _TENANTS list (Unboks only).
     client = TestClient(app)
     client.post("/login", data={"password": "test-password"})
 
     # /admin/tenants redirects to the one remaining hard-coded tenant.
     index = client.get("/admin/tenants", follow_redirects=False)
     assert index.status_code == 303
-    assert index.headers["location"] == "/admin/tenants/unboks-demo"
+    assert index.headers["location"] == "/admin/tenants/unboks"
 
-    workspace = client.get("/admin/tenants/unboks-demo")
+    workspace = client.get("/admin/tenants/unboks")
     assert workspace.status_code == 200
     # AI Agent panel placeholder still renders for the seed tenant.
     assert "No recent replies yet" in workspace.text

@@ -91,13 +91,13 @@ def test_empty_or_unset_dir_falls_back_to_placeholders(monkeypatch, tmp_path):
     result = tenants.list_tenants()
     # Fallback to placeholders means the original 3 hard-coded tenants
     ids = [t.id for t in result]
-    assert "unboks-demo" in ids, f"expected placeholder fallback; got {ids}"
+    assert "unboks" in ids, f"expected placeholder fallback; got {ids}"
 
     # Case 2: env var points at a non-existent path
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "does_not_exist"))
     result = tenants.list_tenants()
     ids = [t.id for t in result]
-    assert "unboks-demo" in ids
+    assert "unboks" in ids
 
     # Case 3: env var explicitly empty -> falls through to the default
     # _DEFAULT_TENANTS_CLIENT_DIR which (in test environment) doesn't exist
@@ -108,7 +108,7 @@ def test_empty_or_unset_dir_falls_back_to_placeholders(monkeypatch, tmp_path):
                          str(tmp_path / "no_such_default"))
     result = tenants.list_tenants()
     ids = [t.id for t in result]
-    assert "unboks-demo" in ids
+    assert "unboks" in ids
 
 
 def test_slug_missing_falls_back_to_directory_name(monkeypatch, tmp_path):

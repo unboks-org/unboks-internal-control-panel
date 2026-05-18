@@ -219,8 +219,8 @@ class Tenant:
 
 _TENANTS: tuple[Tenant, ...] = (
     Tenant(
-        id="unboks-demo",
-        name="Unboks Demo",
+        id="unboks",
+        name="Unboks",
         status="active",
         plan="demo",
         notes=(
