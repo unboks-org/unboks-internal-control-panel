@@ -28,8 +28,6 @@ from app.security import (
 )
 from app.tenants import (
     ACTIVITY_TYPES,
-    ANOMALY_SIGNALS,
-    ANOMALY_STATUSES,
     CLOUD_PROVIDERS,
     ESCALATION_MODES,
     NOTE_PRIORITIES,
@@ -40,7 +38,6 @@ from app.tenants import (
     create_tenant_directory,
     derive_slug_from_name,
     get_tenant,
-    list_anomalies,
     list_tenants,
     sorted_notes,
     validate_slug,
@@ -473,40 +470,6 @@ def admin_reviews(request: Request) -> Response:
     if redirect:
         return redirect
     return render_reviews(request)
-
-
-@router.get("/admin/attention", response_class=HTMLResponse)
-def admin_attention(request: Request) -> Response:
-    settings = get_settings()
-    redirect = require_admin(request, settings)
-    if redirect:
-        return redirect
-    return templates.TemplateResponse(
-        request,
-        "admin_attention.html",
-        {
-            **_shell_context("attention"),
-            "attention_items": _compute_attention_items(list_tenants()),
-        },
-    )
-
-
-@router.get("/admin/anomalies", response_class=HTMLResponse)
-def admin_anomalies(request: Request) -> Response:
-    settings = get_settings()
-    redirect = require_admin(request, settings)
-    if redirect:
-        return redirect
-    return templates.TemplateResponse(
-        request,
-        "admin_anomalies.html",
-        {
-            **_shell_context("anomalies"),
-            "anomalies": list_anomalies(),
-            "anomaly_signals": ANOMALY_SIGNALS,
-            "anomaly_statuses": dict(ANOMALY_STATUSES),
-        },
-    )
 
 
 @router.get("/admin/settings", response_class=HTMLResponse)

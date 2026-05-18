@@ -115,8 +115,8 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     for tags in tag_values:
         assert "problem" not in tags.split(), f"unexpected problem tag in {tags!r}"
     assert "Unboks Demo" in shell.text
-    assert "Consulta Despertares" in shell.text
-    assert "BlueFinn Charters" in shell.text
+    assert "Consulta Despertares" not in shell.text
+    assert "BlueFinn Charters" not in shell.text
     # Sidebar must only show TENANTS and SETTINGS — Home was removed; no Onboarding/Reviews
     assert "sidebar-nav" in shell.text
     assert ">Settings<" in shell.text
@@ -131,43 +131,9 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert settings_page.status_code == 200
     assert "tenant-selector" in settings_page.text
     assert "sidebar-nav" in settings_page.text
-    # Sidebar shows the two global tenant views
-    assert 'href="/admin/attention"' in settings_page.text
-    assert 'href="/admin/anomalies"' in settings_page.text
     # Dropdown CSS fix is present (panel actually hides when [hidden] attribute is set)
     assert ".tenant-selector-panel[hidden]" in client.get("/static/css/admin.css").text
 
-    # Global Needs attention page
-    attention_page = client.get("/admin/attention")
-    assert attention_page.status_code == 200
-    assert "attention-center" in attention_page.text
-    assert "Needs attention" in attention_page.text
-    assert "tenant-selector" in attention_page.text
-
-    # Global Needs attention page renders cross-tenant items
-    assert "Trial ending soon" in attention_page.text or "Setup incomplete" in attention_page.text
-    assert "Open tenant" in attention_page.text
-
-    # Global Anomaly monitor page
-    anomalies_page = client.get("/admin/anomalies")
-    assert anomalies_page.status_code == 200
-    assert "anomaly-monitor" in anomalies_page.text
-    assert "Anomaly monitor" in anomalies_page.text
-    assert "tenant-selector" in anomalies_page.text
-    assert "No unusual activity detected." in anomalies_page.text
-    for label in (
-        "Message volume spike", "Escalation spike", "Agent reply failure",
-        "Channel disconnected", "Repeated customer complaint", "SOT missing / stale",
-        "Long unanswered conversation", "Unusual booking/order pattern", "Error rate spike",
-    ):
-        assert label in anomalies_page.text
-    import re as _re
-    anomaly_section = _re.search(
-        r'<section class="anomaly-monitor".*?</section>', anomalies_page.text, _re.DOTALL
-    )
-    assert anomaly_section is not None
-    for banned in ("emergency", "EMERGENCY", "URGENT", "CRITICAL ALERT"):
-        assert banned not in anomaly_section.group(0)
     # Global ICP audit log
     assert "Global ICP audit log" in settings_page.text
     assert "No audit events yet." in settings_page.text
@@ -380,9 +346,6 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert 'aria-controls="tenant-selector-list"' in workspace.text
     assert 'tenant-selector-caret' in workspace.text
     assert '/static/js/admin.js' in workspace.text
-    # Sidebar global links present (not in main pane)
-    assert 'href="/admin/attention"' in workspace.text
-    assert 'href="/admin/anomalies"' in workspace.text
     # Tenant notes / internal CRM
     assert "notes-panel" in workspace.text
     assert "Tenant notes" in workspace.text
@@ -469,19 +432,19 @@ def test_tenant_workspace_shows_no_activity_for_empty_tenant(monkeypatch, tmp_pa
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
     monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    # Fallback to the hard-coded _TENANTS list (Unboks Demo only).
     client = TestClient(app)
     client.post("/login", data={"password": "test-password"})
 
-    workspace = client.get("/admin/tenants/consulta-despertares")
-    assert workspace.status_code == 200
-    assert "No activity yet" in workspace.text
-    # Empty tenant must show "No recent replies yet" inside the AI Agent panel
-    assert "No recent replies yet" in workspace.text
-
-    # /admin/tenants redirects to first tenant
+    # /admin/tenants redirects to the one remaining hard-coded tenant.
     index = client.get("/admin/tenants", follow_redirects=False)
     assert index.status_code == 303
     assert index.headers["location"] == "/admin/tenants/unboks-demo"
+
+    workspace = client.get("/admin/tenants/unboks-demo")
+    assert workspace.status_code == 200
+    # AI Agent panel placeholder still renders for the seed tenant.
+    assert "No recent replies yet" in workspace.text
 
     # Unknown tenant redirects back to the tenants index (no Home page exists)
     missing = client.get("/admin/tenants/no-such-tenant", follow_redirects=False)

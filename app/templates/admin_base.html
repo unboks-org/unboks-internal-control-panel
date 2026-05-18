@@ -28,7 +28,7 @@
         <span>Add new tenant</span>
       </a>
 
-      {% set tenants_open = active in ('tenants', 'attention', 'anomalies', 'tenant_create') %}
+      {% set tenants_open = active in ('tenants', 'tenant_create') %}
       <div
         class="tenant-selector {% if tenants_open %}is-active{% endif %}"
         data-tenant-selector
@@ -103,25 +103,6 @@
           </ul>
 
           <p class="tenant-empty-note" data-tenant-empty hidden>No tenants match.</p>
-
-          <div class="tenant-global-links" role="group" aria-label="Global tenant views">
-            <a
-              href="/admin/attention"
-              class="tenant-global-link {% if active == 'attention' %}active{% endif %}"
-              {% if active == 'attention' %}aria-current="page"{% endif %}
-            >
-              <span class="tenant-global-dot" aria-hidden="true"></span>
-              <span>Needs attention</span>
-            </a>
-            <a
-              href="/admin/anomalies"
-              class="tenant-global-link {% if active == 'anomalies' %}active{% endif %}"
-              {% if active == 'anomalies' %}aria-current="page"{% endif %}
-            >
-              <span class="tenant-global-dot" aria-hidden="true"></span>
-              <span>Anomaly monitor</span>
-            </a>
-          </div>
         </div>
       </div>
 
