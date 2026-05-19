@@ -42,12 +42,17 @@ from app.tenants import (
     sorted_notes,
     validate_slug,
 )
-from app.tenant_io import provision_new_tenant   # <--- ADDED
+from app.tenant_io import provision_new_tenant
 
+import logging
 import os
 import re
 import secrets
 from urllib.parse import quote_plus
+
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -179,6 +184,10 @@ async def admin_tenant_create_submit(
     if redirect:
         return redirect
 
+    logger.info(
+        "tenant_create.received slug_raw=%r name_raw=%r files=%d send_welcome=%s",
+        slug, name, len(files or []), bool(send_welcome.strip()))
+
     name = (name or "").strip()
     if not name:
         return _create_error_response(
@@ -211,17 +220,53 @@ async def admin_tenant_create_submit(
     try:
         tenant_root = create_tenant_directory(safe_slug, business)
     except TenantCreateError as exc:
+        logger.warning(
+            "tenant_create.failed slug=%s stage=folder err=%s", safe_slug, exc)
         return _create_error_response(request, str(exc), form_echo=locals())
     except OSError as exc:
+        logger.warning(
+            "tenant_create.failed slug=%s stage=folder oserror=%r",
+            safe_slug, exc)
         return _create_error_response(
             request, f"Filesystem error creating tenant: {exc}",
             form_echo=locals())
+    logger.info(
+        "tenant_create.folder_created slug=%s root=%s", safe_slug, tenant_root)
 
-    # Generate password
-    password = generate_random_password()
+    # Initial sign-in token (server-side; secrets.token_urlsafe is
+    # the same primitive used elsewhere in the codebase for one-shot
+    # tokens). Replaces the undefined `generate_random_password()`
+    # call from the previous commit, which crashed the wizard with
+    # NameError on every submit.
+    initial_token = secrets.token_urlsafe(12)
+    logger.info(
+        "tenant_create.credentials_generated slug=%s username=%s token_len=%d",
+        safe_slug, safe_slug, len(initial_token))
 
-    # === PROVISION TENANT ON VPS (creates folder + client.json) ===
-    provision_new_tenant(safe_slug, password)
+    # PROVISION TENANT ON VPS (writes client.json over SSH).
+    # Wrap in try/except so an SSH outage NEVER 500s the wizard:
+    # the local folder + welcome email path still complete; the
+    # warning rides the redirect query string so the operator sees
+    # it on the new workspace.
+    provision_warning = ""
+    try:
+        ok = provision_new_tenant(safe_slug, initial_token)
+        if ok:
+            logger.info(
+                "tenant_create.provisioning_succeeded slug=%s", safe_slug)
+        else:
+            provision_warning = (
+                "VPS provisioning returned failure. Check ICP server logs "
+                "for the [ICP ERROR] line. Local folder + welcome email "
+                "still completed.")
+            logger.warning(
+                "tenant_create.provisioning_failed slug=%s reason=returned_false",
+                safe_slug)
+    except Exception as exc:
+        provision_warning = f"VPS provisioning crashed: {exc}"
+        logger.warning(
+            "tenant_create.provisioning_failed slug=%s exc=%r",
+            safe_slug, exc)
 
     upload_warnings: list[str] = []
     if files:
@@ -243,8 +288,8 @@ async def admin_tenant_create_submit(
                 f.write(raw)
 
     op_username = safe_slug
-    op_token = secrets.token_urlsafe(12)
-    dashboard_url = f"https://dashboard.unbuks.org/?workspace={safe_slug}"
+    op_token = initial_token
+    dashboard_url = f"https://dashboard.unboks.org/?workspace={safe_slug}"
 
     welcome_warning = ""
     if send_welcome.strip() and contact_email.strip():
@@ -270,11 +315,18 @@ async def admin_tenant_create_submit(
                 welcome_warning = f"Welcome email failed: {exc}"
 
     qs_bits = ["created=1"]
+    if provision_warning:
+        qs_bits.append("warn=" + quote_plus(provision_warning))
     if upload_warnings:
         qs_bits.append("warn=" + quote_plus(
             "Uploads: " + "; ".join(upload_warnings)))
     if welcome_warning:
         qs_bits.append("warn=" + quote_plus(welcome_warning))
+    logger.info(
+        "tenant_create.success slug=%s upload_warnings=%d "
+        "welcome_warning=%s provision_warning=%s",
+        safe_slug, len(upload_warnings),
+        bool(welcome_warning), bool(provision_warning))
     return RedirectResponse(
         url=f"/admin/tenants/{safe_slug}?" + "&".join(qs_bits),
         status_code=303)

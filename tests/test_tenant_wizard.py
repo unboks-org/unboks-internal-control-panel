@@ -172,3 +172,51 @@ def test_derive_slug_from_name():
     assert tenants.derive_slug_from_name("Acme Charters!") == "acme-charters"
     assert tenants.derive_slug_from_name("  Multiple   Spaces ") == "multiple-spaces"
     assert tenants.derive_slug_from_name("123 Numbers First") == "numbers-first"
+
+
+
+# --- VPS provisioning contract --------------------------------------
+
+
+def test_provision_new_tenant_called_after_folder_created(client, monkeypatch, tmp_path):
+    """provision_new_tenant(slug, token) is called exactly once, AFTER
+    the local folder + client.json have been written. Locks the
+    contract so future refactors can't accidentally swap order or skip
+    the call."""
+    calls = []
+
+    def fake_provision(slug, token):
+        config_path = tmp_path / "client_root" / slug / "config" / "client.json"
+        assert config_path.exists(), "provisioning fired before folder was created"
+        calls.append((slug, token))
+        return True
+
+    from app.routes import admin
+    monkeypatch.setattr(admin, "provision_new_tenant", fake_provision)
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Hook Test"},
+        follow_redirects=False)
+    assert r.status_code == 303
+    assert len(calls) == 1
+    slug, token = calls[0]
+    assert slug == "hook-test"
+    assert isinstance(token, str) and len(token) >= 12
+
+
+def test_provisioning_ssh_failure_does_not_crash_wizard(client, monkeypatch):
+    """If the SSH provisioning call raises, the wizard still completes
+    (303 redirect) and surfaces the failure as a warn= query string.
+    No 500."""
+    from app.routes import admin
+    def boom(slug, token):
+        raise RuntimeError("ssh failure")
+    monkeypatch.setattr(admin, "provision_new_tenant", boom)
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Boom Co"},
+        follow_redirects=False)
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.startswith("/admin/tenants/boom-co")
+    assert "warn=" in loc
