@@ -154,15 +154,6 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Unboks" in workspace.text
     # Soft-colored tenant header
     assert "tenant-header" in workspace.text
-    # Compact health strip with all 6 cells
-    assert "health-strip" in workspace.text
-    for label in ("Inbox", "AI Agent", "Channels", "Source of Truth", "Escalations", "Billing / Trial"):
-        assert label in workspace.text
-    # Primary controls
-    assert "Open tenant dashboard" in workspace.text
-    assert "Push changes" in workspace.text
-    assert "Edit tenant" in workspace.text
-    assert "Pause tenant" in workspace.text
     # AI Agent control panel
     assert "agent-panel" in workspace.text
     assert "Agent replies" in workspace.text
@@ -187,64 +178,28 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "ws-section" in workspace.text
     assert "ws-summary" in workspace.text
     assert "ws-chevron" in workspace.text
-    # First four sections open by default; danger zone closed
+    # Only AI Agent stays open by default; the other three are collapsed.
     import re as _re
     open_count = len(_re.findall(r'<details class="ws-section [^"]+" open>', workspace.text))
     closed_count = len(_re.findall(r'<details class="ws-section [^"]+">', workspace.text))
-    assert open_count >= 3
-    assert closed_count >= 4
-    # Soft section tones — only kept sections' tones present after the
-    # Calvin-decision deletions.
+    assert open_count >= 1
+    assert closed_count >= 3
+    # Soft section tones — only the 4 final kept sections.
     for tone in (
-        "ws-tone-cyan", "ws-tone-violet", "ws-tone-mint",
-        "ws-tone-peach", "ws-tone-gray", "ws-tone-blue",
-        "ws-tone-danger",
+        "ws-tone-violet", "ws-tone-peach", "ws-tone-gray", "ws-tone-danger",
     ):
         assert tone in workspace.text
-    # One-line descriptions for kept sections only.
+    # One-line descriptions for the final 4 sections only.
     for desc in (
-        "Manage active customer channels for this tenant.",
         "Control replies, learning, escalation behavior, and tone.",
-        "Manage files, knowledge, uploads, and cloud sources.",
         "View escalation rules, open escalations, and alert routing.",
         "Keep private internal notes for the Unboks team.",
-        "See which tenant features are enabled.",
         "Suspend or cut off tenant access.",
     ):
         assert desc in workspace.text
-    # Channels control panel — compact list/table
-    assert "channels-panel" in workspace.text
-    assert "channels-table" in workspace.text
-    for channel in ("WhatsApp", "Email", "Instagram", "Facebook", "Messenger", "Telegram", "Tiktok", "X"):
-        assert channel in workspace.text
-    # Compact controls: toggle + Configure link, no big Disconnect button
-    assert "channel-toggle" in workspace.text
-    assert 'role="switch"' in workspace.text
-    assert "Configure" in workspace.text
-    assert "Disconnect" not in workspace.text
-    # Active / Inactive labels (replace 'Connected'/'Not connected')
-    assert "Active" in workspace.text
-    assert "Inactive" in workspace.text
-    assert "Last message" in workspace.text
-    assert "Last sync" in workspace.text
-    # Attention center and anomaly monitor moved to global views (see test_admin_settings_renders)
-    # Anchor targets for the per-section headers (only kept sections).
-    for anchor_id in ("channels-section", "agent-section", "sot-section",
-                      "tenant-header-anchor"):
+    # Anchor targets for the kept-section headers only.
+    for anchor_id in ("agent-section", "tenant-header-anchor"):
         assert 'id="' + anchor_id + '"' in workspace.text
-    # Feature toggles
-    assert "features-card" in workspace.text
-    assert "Feature toggles" in workspace.text
-    for feature in (
-        "WhatsApp inbox", "Email inbox", "Instagram / Facebook", "Telegram alerts",
-        "AI auto-reply", "Soft escalations", "Hard escalations / human takeover",
-        "Learning from operator answers", "Source of Truth sync",
-        "Appointment / order handling", "Analytics",
-    ):
-        assert feature in workspace.text
-    # Must not use 'Soft mode'/'Hard mode'
-    assert "Soft mode" not in workspace.text
-    assert "Hard mode" not in workspace.text
     # Global view sections must NOT render inside tenant workspace main pane
     # (sidebar links to those views are allowed — they live in admin_base)
     assert "attention-center" not in workspace.text
@@ -296,19 +251,6 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Must use Soft escalation / Hard escalation terminology, not Soft mode / Hard mode
     assert "Soft mode" not in workspace.text
     assert "Hard mode" not in workspace.text
-    # Source of Truth / Data Room
-    assert "data-room" in workspace.text
-    assert "Knowledge items" in workspace.text
-    assert "Cloud connection" in workspace.text
-    assert "Last sync" in workspace.text
-    assert "Pending review" in workspace.text
-    for action in ("Upload files", "Connect cloud directory", "View knowledge items", "Sync now"):
-        assert action in workspace.text
-    for provider in ("Google Drive", "Dropbox", "OneDrive"):
-        assert provider in workspace.text
-    for category in ("Documents / PDFs", "Images", "Price lists", "Menus / brochures",
-                     "FAQ files", "Policies", "Services / product sheets"):
-        assert category in workspace.text
     # Danger zone
     assert "danger-zone" in workspace.text
     assert "Suspend / cut off tenant" in workspace.text

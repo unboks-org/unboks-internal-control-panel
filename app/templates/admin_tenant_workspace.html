@@ -25,33 +25,6 @@
     <span class="status-chip status-{{ 'ok' if tenant.status == 'active' else 'unknown' }}">{{ tenant.status }}</span>
   </header>
 
-  {# 2. Compact health strip #}
-  <section class="health-strip" aria-label="Tenant health">
-    {% set chips = [
-      ('Inbox', tenant.health.inbox),
-      ('AI Agent', tenant.health.ai_agent),
-      ('Channels', tenant.health.channels),
-      ('Source of Truth', tenant.health.sot),
-      ('Escalations', tenant.health.escalations),
-      ('Billing / Trial', tenant.health.billing),
-    ] %}
-    {% for label, state in chips %}
-      <div class="health-cell health-{{ state }}">
-        <span class="health-dot" aria-hidden="true"></span>
-        <span class="health-label">{{ label }}</span>
-        <span class="health-state">{{ state }}</span>
-      </div>
-    {% endfor %}
-  </section>
-
-  {# 3. Primary controls #}
-  <section class="controls-row" aria-label="Primary controls">
-    <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Open tenant dashboard</button>
-    <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Push changes</button>
-    <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Edit tenant</button>
-    <button type="button" class="control-btn control-btn-warn" disabled aria-disabled="true" title="Not wired yet">Pause tenant</button>
-  </section>
-
   {# 3b. Setup checklist #}
   {% set sc_percent = setup_checklist['percent'] %}
   {% set sc_done = setup_checklist['done_count'] %}
@@ -61,66 +34,6 @@
   {% set percent_class = 'down' if sc_percent < 40 else ('warn' if sc_percent < 100 else 'ok') %}
 
   {# 4. Channels control #}
-  <details class="ws-section ws-tone-cyan" open>
-    <summary class="ws-summary">
-      <span class="ws-title">Channels</span>
-      <span class="ws-desc muted">Manage active customer channels for this tenant.</span>
-      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
-    </summary>
-
-  <section id="channels-section" class="channels-panel" aria-label="Channels">
-    <header class="channels-panel-header">
-      <div>
-        <h3>Channels</h3>
-        <p class="muted compact-note">Customer channels connected for this tenant.</p>
-      </div>
-      <span class="status-chip status-{{ 'ok' if tenant.health.channels == 'ok' else 'unknown' }}">{{ tenant.health.channels }}</span>
-    </header>
-
-    <table class="channels-table">
-      <thead>
-        <tr>
-          <th class="ch-col-name">Channel</th>
-          <th class="ch-col-status">Status</th>
-          <th class="ch-col-toggle">On / Off</th>
-          <th class="ch-col-sync">Last sync</th>
-          <th class="ch-col-msg">Last message</th>
-          <th class="ch-col-actions"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for ch in tenant.channels %}
-          {% set is_on = ch.state == 'connected' %}
-          {% set status_label = 'Active' if is_on else 'Inactive' %}
-          {% set status_class = 'ok' if is_on else 'unknown' %}
-          <tr class="channel-row {% if is_on %}is-on{% else %}is-off{% endif %}">
-            <td class="ch-name">{{ ch.name }}</td>
-            <td><span class="status-chip status-{{ status_class }}">{{ status_label }}</span></td>
-            <td>
-              <span
-                class="channel-toggle {% if is_on %}is-on{% endif %}"
-                role="switch"
-                aria-checked="{{ 'true' if is_on else 'false' }}"
-                aria-disabled="true"
-                title="Not wired yet"
-                tabindex="0"
-              >
-                <span class="channel-toggle-knob" aria-hidden="true"></span>
-                <span class="sr-only">{{ ch.name }} {{ 'on' if is_on else 'off' }}</span>
-              </span>
-            </td>
-            <td class="ch-meta muted">{{ ch.last_sync or '—' }}</td>
-            <td class="ch-meta muted">{{ ch.last_message or '—' }}</td>
-            <td class="ch-actions">
-              <button type="button" class="link-btn" disabled aria-disabled="true" title="Not wired yet">Configure</button>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <p class="muted compact-note channels-foot">Toggle ON to add a channel, OFF to remove. Not wired yet.</p>
-  </section>
-  </details>
 
   {# 4c. AI Agent control panel #}
   <details class="ws-section ws-tone-violet" open>
@@ -210,87 +123,6 @@
   </details>
 
   {# 4b. Source of Truth / Data Room #}
-  <details class="ws-section ws-tone-mint" open>
-    <summary class="ws-summary">
-      <span class="ws-title">Source of Truth / Data Room</span>
-      <span class="ws-desc muted">Manage files, knowledge, uploads, and cloud sources.</span>
-      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
-    </summary>
-
-  <section id="sot-section" class="data-room" aria-label="Source of Truth / Data Room">
-    <header class="data-room-header">
-      <div>
-        <h3>Source of Truth <span class="muted">/ Data Room</span></h3>
-        <p class="muted compact-note">Single place where all tenant knowledge lives. The AI agent only answers from here.</p>
-      </div>
-      <span class="status-chip status-{{ 'ok' if tenant.sot.status == 'ok' else 'unknown' }}">{{ tenant.sot.status }}</span>
-    </header>
-
-    <div class="data-room-stats">
-      <div class="data-stat">
-        <span class="data-stat-label">Knowledge items</span>
-        <span class="data-stat-value">{{ tenant.sot.files_count }}</span>
-      </div>
-      <div class="data-stat">
-        <span class="data-stat-label">Cloud connection</span>
-        <span class="data-stat-value">
-          <span class="status-chip status-{{ 'ok' if tenant.sot.cloud_status == 'connected' else 'unknown' }}">{{ tenant.sot.cloud_status }}</span>
-          {% if tenant.sot.cloud_provider %}
-            {% for value, label in cloud_providers %}
-              {% if value == tenant.sot.cloud_provider %}<span class="muted">&middot; {{ label }}</span>{% endif %}
-            {% endfor %}
-          {% endif %}
-        </span>
-      </div>
-      <div class="data-stat">
-        <span class="data-stat-label">Last sync</span>
-        <span class="data-stat-value">{{ tenant.sot.last_sync }}</span>
-      </div>
-      <div class="data-stat">
-        <span class="data-stat-label">Pending review</span>
-        <span class="data-stat-value">
-          {{ tenant.sot.pending_review }}
-          {% if tenant.sot.pending_review > 0 %}
-            <span class="status-chip status-warn">review</span>
-          {% endif %}
-        </span>
-      </div>
-    </div>
-
-    <div class="data-room-actions">
-      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Upload files</button>
-      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Connect cloud directory</button>
-      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">View knowledge items</button>
-      <button type="button" class="control-btn" disabled aria-disabled="true" title="Not wired yet">Sync now</button>
-    </div>
-
-    <div class="data-room-grid">
-      <div class="data-room-block">
-        <h4>Cloud directory options</h4>
-        <ul class="cloud-list">
-          {% for value, label in cloud_providers %}
-            <li>
-              <span class="cloud-name">{{ label }}</span>
-              <span class="status-chip status-{{ 'ok' if tenant.sot.cloud_provider == value and tenant.sot.cloud_status == 'connected' else 'unknown' }}">
-                {% if tenant.sot.cloud_provider == value and tenant.sot.cloud_status == 'connected' %}connected{% else %}not connected{% endif %}
-              </span>
-            </li>
-          {% endfor %}
-        </ul>
-        <p class="muted compact-note">OAuth not wired yet.</p>
-      </div>
-
-      <div class="data-room-block">
-        <h4>Upload categories</h4>
-        <ul class="category-list">
-          {% for category in upload_categories %}
-            <li>{{ category }}</li>
-          {% endfor %}
-        </ul>
-      </div>
-    </div>
-  </section>
-  </details>
 
   {# 4d. Billing / Trial #}
   <span id="billing-section"></span>
@@ -477,32 +309,6 @@
   {# 4k. Contract / plan #}
 
   {# 4l. Feature toggles #}
-  <details class="ws-section ws-tone-blue">
-    <summary class="ws-summary">
-      <span class="ws-title">Feature toggles</span>
-      <span class="ws-desc muted">See which tenant features are enabled.</span>
-      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
-    </summary>
-
-  <section class="features-card" aria-label="Feature toggles">
-    <header class="card-header">
-      <div>
-        <h3>Feature toggles</h3>
-        <p class="muted compact-note">Per-tenant capabilities. Soft escalation = Agent needs help, operator guides, Agent replies. Hard escalation = Human takeover, Agent stops, operator replies directly.</p>
-      </div>
-    </header>
-    <ul class="features-list">
-      {% for f in feature_toggles %}
-        {% set state_label = {'enabled': 'Enabled', 'disabled': 'Disabled', 'unknown': 'Not wired yet'}[f.state] %}
-        {% set state_class = {'enabled': 'ok', 'disabled': 'unknown', 'unknown': 'unknown'}[f.state] %}
-        <li class="feature-row">
-          <span class="feature-label">{{ f.label }}</span>
-          <span class="status-chip status-{{ state_class }}">{{ state_label }}</span>
-        </li>
-      {% endfor %}
-    </ul>
-  </section>
-  </details>
 
   {# 4m. Runtime status #}
 
