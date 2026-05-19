@@ -1,0 +1,93 @@
+{% extends "admin_base.html" %}
+
+{% block page_title %}Tenant created{% endblock %}
+{% block section_eyebrow %}Unboks tenants{% endblock %}
+
+{% block content %}
+<section class="page-card create-tenant">
+  <header class="create-tenant-header">
+    <h2>Tenant created: <code>{{ slug }}</code></h2>
+    <p class="muted">
+      Manual mode — Nr 3 did not write anything to the VPS. Place
+      the <code>client.json</code> below on the VPS at
+      <code>/root/wtyj/tenant_root/{{ slug }}/config/client.json</code>,
+      then the tenant can sign in at
+      <a href="{{ dashboard_url }}">{{ dashboard_url }}</a>.
+    </p>
+  </header>
+
+  {% if welcome_status == 'sent' %}
+    <div class="form-feedback form-feedback-success">
+      Welcome email sent to <strong>{{ contact_email }}</strong> with
+      the dashboard link and temporary password.
+    </div>
+  {% elif welcome_status == 'skipped_no_email' %}
+    <div class="form-feedback form-feedback-info">
+      Welcome email not sent — no contact email was provided in the
+      form.
+    </div>
+  {% elif welcome_status == 'unchecked' %}
+    <div class="form-feedback form-feedback-info">
+      Welcome email not sent — the "Send welcome email" checkbox was not ticked.
+    </div>
+  {% elif welcome_status == 'no_smtp' %}
+    <div class="form-feedback form-feedback-warn">
+      Welcome email skipped: SMTP is not configured on this Nr 3
+      deployment. The credentials are in the JSON below — send them
+      to the tenant manually.
+    </div>
+  {% elif welcome_status == 'failed' %}
+    <div class="form-feedback form-feedback-warn">
+      Welcome email send failed: {{ welcome_error }}. The credentials
+      are in the JSON below — send them to the tenant manually.
+    </div>
+  {% endif %}
+
+  <fieldset class="ct-fieldset">
+    <legend>client.json</legend>
+    <p class="ct-help muted">
+      The full JSON that should land at
+      <code>config/client.json</code> on the VPS.
+    </p>
+    <pre id="ct-client-json"
+         class="ct-json-block"
+         data-tenant-slug="{{ slug }}">{{ client_json_text }}</pre>
+    <div class="ct-actions">
+      <button type="button"
+              class="control-btn control-btn-primary"
+              data-ct-copy
+              data-ct-copy-target="ct-client-json">
+        Copy to clipboard
+      </button>
+      <button type="button"
+              class="control-btn"
+              data-ct-download
+              data-ct-download-target="ct-client-json"
+              data-ct-download-filename="client.json">
+        Download client.json
+      </button>
+      <span class="ct-action-feedback" data-ct-copy-feedback aria-live="polite"></span>
+    </div>
+  </fieldset>
+
+  <fieldset class="ct-fieldset">
+    <legend>Credentials reminder</legend>
+    <p class="muted">
+      Workspace: <strong><code>{{ slug }}</code></strong>
+      &nbsp;&middot;&nbsp;
+      Login URL: <a href="{{ dashboard_url }}">{{ dashboard_url }}</a>
+    </p>
+    <p class="ct-help muted">
+      The temporary password is in the JSON above under
+      <code>password</code>. Treat it as a one-shot secret — once the
+      tenant logs in and changes it, this page is no longer the
+      source of truth.
+    </p>
+  </fieldset>
+
+  <div class="ct-actions">
+    <a href="/admin/tenants/new" class="button-secondary">Create another tenant</a>
+    <a href="/admin/tenants" class="button-secondary">Back to tenants</a>
+  </div>
+</section>
+{% endblock %}

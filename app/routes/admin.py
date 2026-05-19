@@ -35,19 +35,19 @@ from app.tenants import (
     Tenant,
     TenantCreateError,
     compute_setup_checklist,
-    create_tenant_directory,
     derive_slug_from_name,
     get_tenant,
     list_tenants,
     sorted_notes,
     validate_slug,
 )
-from app.tenant_io import provision_new_tenant
 
+import json
 import logging
 import os
 import re
 import secrets
+from datetime import datetime, timezone
 from urllib.parse import quote_plus
 
 
@@ -178,31 +178,21 @@ async def admin_tenant_create_submit(
     send_welcome: str = Form(default=""),
     files: list[UploadFile] = File(default=[]),
 ) -> Response:
-    """Single-submit tenant creation.
+    """J3-BE-50 -- Manual Mode tenant creation.
 
-    Two distinct phases, kept separate on purpose so the upcoming
-    HTTP provisioning service can plug in cleanly:
+    Validates name + slug, generates a server-side initial token,
+    builds a flat client.json the operator can copy or download,
+    and (optionally) sends the welcome email. Does NOT write to
+    local disk; does NOT call any provisioning service. The
+    operator manually places the JSON at
+    <NR3_TENANTS_CLIENT_DIR>/<slug>/config/client.json on the VPS.
 
-      Phase 1 -- CREATE TENANT RECORD (local).
-        Validate name + slug, build the business payload, write
-        <NR3_TENANTS_CLIENT_DIR>/<slug>/{config/client.json, data/}
-        on the Nr3 host, save any uploaded files. Generate the
-        operator's initial sign-in token server-side.
-
-      Phase 2 -- PROVISION ON VPS.
-        Call app.tenant_io.provision_new_tenant(slug, token). Today
-        that is a no-op stub that just logs the intent; the real
-        body ships in a follow-up brief and will POST to the
-        provisioning service over HTTP. Wrapped in try/except so a
-        provisioning outage NEVER 500s the wizard -- the local
-        record is already on disk, and the failure surfaces as a
-        `warn=` query string on the success redirect.
-
-    Either phase failing is observable through the structured
-    `tenant_create.*` log events. The wizard returns a 303 to
-    /admin/tenants/<slug> with a `created=...` message on success
-    or re-renders the form with an inline error on validation
-    failure -- never an uncaught exception.
+    Renders the success page with a 200 + the JSON block + the
+    Copy and Download controls. On validation failure re-renders
+    the wizard form with the inline error and pre-filled values.
+    Form `files` are accepted (so the existing form HTML keeps
+    submitting cleanly) but ignored -- Manual Mode does not store
+    uploads.
     """
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -215,6 +205,7 @@ async def admin_tenant_create_submit(
 
     name = (name or "").strip()
     if not name:
+        logger.warning("tenant_create.invalid reason=name_missing")
         return _create_error_response(
             request, "Business / tenant name is required.",
             form_echo=locals())
@@ -223,148 +214,109 @@ async def admin_tenant_create_submit(
     try:
         safe_slug = validate_slug(candidate_slug)
     except TenantCreateError as exc:
+        logger.warning(
+            "tenant_create.invalid reason=bad_slug candidate=%r err=%s",
+            candidate_slug, exc)
         return _create_error_response(request, str(exc), form_echo=locals())
 
-    business: dict = {
+    # Initial sign-in token. URL-safe so it pastes cleanly into an
+    # email body without escaping.
+    initial_token = secrets.token_urlsafe(12)
+    created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    dashboard_url = f"https://dashboard.unboks.org/{safe_slug}"
+
+    # Manual-Mode client.json payload. Flat shape per the J3-BE-50
+    # brief. The six required fields come first; optional wizard
+    # fields are appended only when the operator filled them in.
+    client_data: dict = {
         "slug": safe_slug,
         "name": name,
-        "plan": plan.strip().lower() or "trial",
+        "password": initial_token,
         "status": status.strip().lower() or "trial",
+        "plan": plan.strip().lower() or "trial",
+        "created_at": created_at,
     }
     if contact_person.strip():
-        business["contact_person"] = contact_person.strip()
+        client_data["contact_person"] = contact_person.strip()
     if contact_email.strip():
-        business["email"] = contact_email.strip()
+        client_data["email"] = contact_email.strip()
     if phone.strip():
-        business["whatsapp"] = phone.strip()
+        client_data["whatsapp"] = phone.strip()
     if tone.strip():
-        business["agent_tone"] = tone.strip()
+        client_data["agent_tone"] = tone.strip()
     if notes.strip():
-        business["notes"] = notes.strip()
+        client_data["notes"] = notes.strip()
 
-    # ===== Phase 1: CREATE TENANT RECORD =====
-    # Local-only write. Nothing leaves the Nr3 host yet -- VPS
-    # provisioning is Phase 2 (below).
-    try:
-        tenant_root = create_tenant_directory(safe_slug, business)
-    except TenantCreateError as exc:
-        logger.warning(
-            "tenant_create.failed slug=%s stage=folder err=%s", safe_slug, exc)
-        return _create_error_response(request, str(exc), form_echo=locals())
-    except OSError as exc:
-        logger.warning(
-            "tenant_create.failed slug=%s stage=folder oserror=%r",
-            safe_slug, exc)
-        return _create_error_response(
-            request, f"Filesystem error creating tenant: {exc}",
-            form_echo=locals())
     logger.info(
-        "tenant_create.folder_created slug=%s root=%s", safe_slug, tenant_root)
+        "tenant_create.client_json_built slug=%s fields=%d",
+        safe_slug, len(client_data))
 
-    # Initial sign-in token (server-side; secrets.token_urlsafe is
-    # the same primitive used elsewhere in the codebase for one-shot
-    # tokens). Replaces the undefined `generate_random_password()`
-    # call from the previous commit, which crashed the wizard with
-    # NameError on every submit.
-    initial_token = secrets.token_urlsafe(12)
-    logger.info(
-        "tenant_create.credentials_generated slug=%s username=%s token_len=%d",
-        safe_slug, safe_slug, len(initial_token))
-
-    # ===== Phase 2: PROVISION ON VPS =====
-    # Single hand-off point to app.tenant_io.provision_new_tenant.
-    # Today that is a no-op stub that just logs the intent; the real
-    # HTTP call to the provisioning service goes there in the next
-    # brief. The wizard's call site here does NOT have to change
-    # when that happens. Wrapped in try/except so a future
-    # provisioning outage NEVER 500s the wizard -- the local record
-    # is already on disk, the failure surfaces as a warn= query
-    # string on the success redirect.
-    provision_warning = ""
-    try:
-        ok = provision_new_tenant(safe_slug, initial_token)
-        if ok:
-            logger.info(
-                "tenant_create.provisioning_succeeded slug=%s", safe_slug)
-        else:
-            provision_warning = (
-                "VPS provisioning returned failure. Check ICP server logs "
-                "for the [ICP ERROR] line. Local folder + welcome email "
-                "still completed.")
-            logger.warning(
-                "tenant_create.provisioning_failed slug=%s reason=returned_false",
-                safe_slug)
-    except Exception as exc:
-        provision_warning = f"VPS provisioning crashed: {exc}"
+    # Welcome-email step. send_welcome is the checkbox value; we
+    # also need a contact_email to send anywhere.
+    welcome_status = "unchecked"
+    welcome_error = ""
+    wants_welcome = bool(send_welcome.strip())
+    contact_email_clean = contact_email.strip()
+    if wants_welcome and not contact_email_clean:
+        welcome_status = "skipped_no_email"
         logger.warning(
-            "tenant_create.provisioning_failed slug=%s exc=%r",
-            safe_slug, exc)
-
-    upload_warnings: list[str] = []
-    if files:
-        uploads_dir = os.path.join(tenant_root, "data", "uploads")
-        os.makedirs(uploads_dir, exist_ok=True)
-        for uploaded in files:
-            if not uploaded or not uploaded.filename:
-                continue
-            raw = await uploaded.read()
-            if len(raw) == 0:
-                continue
-            if len(raw) > 25 * 1024 * 1024:
-                upload_warnings.append(
-                    f"{uploaded.filename}: file too large (25 MB max)")
-                continue
-            safe_name = re.sub(r"[^A-Za-z0-9._\- ]", "_",
-                                uploaded.filename.rsplit("/", 1)[-1]).strip()[:120] or "upload"
-            with open(os.path.join(uploads_dir, safe_name), "wb") as f:
-                f.write(raw)
-
-    op_username = safe_slug
-    op_token = initial_token
-    dashboard_url = f"https://dashboard.unboks.org/?workspace={safe_slug}"
-
-    welcome_warning = ""
-    if send_welcome.strip() and contact_email.strip():
+            "tenant_create.welcome_skipped slug=%s reason=no_contact_email",
+            safe_slug)
+    elif wants_welcome:
         from app.emailer import (build_tenant_welcome_email, send_email,
                                   smtp_is_configured)
         if not smtp_is_configured(settings):
-            welcome_warning = "Welcome email skipped: SMTP not configured."
+            welcome_status = "no_smtp"
+            logger.warning(
+                "tenant_create.welcome_skipped slug=%s reason=smtp_not_configured",
+                safe_slug)
         else:
             draft = build_tenant_welcome_email(
                 tenant_name=name,
                 dashboard_url=dashboard_url,
-                username=op_username,
-                initial_token=op_token,
+                username=safe_slug,
+                initial_token=initial_token,
             )
             try:
                 send_email(
-                    contact_email.strip(),
+                    contact_email_clean,
                     draft.subject,
                     draft.body,
                     settings,
                 )
+                welcome_status = "sent"
+                logger.info(
+                    "tenant_create.welcome_sent slug=%s to=%s",
+                    safe_slug, contact_email_clean)
             except Exception as exc:
-                welcome_warning = f"Welcome email failed: {exc}"
+                welcome_status = "failed"
+                welcome_error = str(exc)
+                logger.warning(
+                    "tenant_create.welcome_failed slug=%s exc=%r",
+                    safe_slug, exc)
 
-    qs_bits = [
-        "created=1",
-        "message=" + quote_plus(f"Tenant {safe_slug!r} created."),
-    ]
-    if provision_warning:
-        qs_bits.append("warn=" + quote_plus(provision_warning))
-    if upload_warnings:
-        qs_bits.append("warn=" + quote_plus(
-            "Uploads: " + "; ".join(upload_warnings)))
-    if welcome_warning:
-        qs_bits.append("warn=" + quote_plus(welcome_warning))
     logger.info(
-        "tenant_create.success slug=%s upload_warnings=%d "
-        "welcome_warning=%s provision_warning=%s",
-        safe_slug, len(upload_warnings),
-        bool(welcome_warning), bool(provision_warning))
-    return RedirectResponse(
-        url=f"/admin/tenants/{safe_slug}?" + "&".join(qs_bits),
-        status_code=303)
+        "tenant_create.success slug=%s welcome=%s",
+        safe_slug, welcome_status)
+
+    # Pretty-print the JSON so the copy/download flow gives the
+    # operator a readable file.
+    client_json_text = json.dumps(client_data, indent=2, ensure_ascii=False)
+
+    return templates.TemplateResponse(
+        request,
+        "admin_tenant_created.html",
+        {
+            **_shell_context("tenant_create"),
+            "slug": safe_slug,
+            "name": name,
+            "client_json_text": client_json_text,
+            "dashboard_url": dashboard_url,
+            "welcome_status": welcome_status,
+            "welcome_error": welcome_error,
+            "contact_email": contact_email_clean,
+        },
+    )
 
 
 def _create_error_response(request: Request, message: str, form_echo: dict) -> Response:

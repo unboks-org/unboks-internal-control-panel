@@ -1,11 +1,17 @@
-"""Add-New-Tenant wizard: GET form + POST submit.
+"""J3-BE-50 Manual-Mode Add-New-Tenant wizard.
 
-Creates the on-disk folder + client.json, saves uploaded files, and
-optionally sends a welcome email. Tenant discovery picks the new
-folder up on the next request.
+The wizard:
+  - Validates name + slug.
+  - Builds a flat client.json (slug, name, password, status, plan,
+    created_at + optional wizard fields).
+  - Optionally sends the welcome email.
+  - Does NOT write to local disk.
+  - Does NOT call any provisioning service.
+  - Renders a 200 success page with the JSON + Copy/Download buttons.
 """
+import html
 import json
-import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +24,8 @@ from app import tenants
 def _isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
+    # Point NR3_TENANTS_CLIENT_DIR somewhere safe so the discovery
+    # code stays happy, but the Manual-Mode wizard never touches it.
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "client_root"))
     (tmp_path / "client_root").mkdir()
     yield
@@ -30,13 +38,18 @@ def client():
     return c
 
 
-def _read_client_json(tmp_path, slug):
-    return json.loads(
-        (tmp_path / "client_root" / slug / "config" / "client.json").read_text()
-    )
+def _extract_client_json(rendered_html: str) -> dict:
+    """Pull the <pre id="ct-client-json">...</pre> body out of the
+    success page, HTML-unescape it (the browser does the same when
+    rendering), and parse as JSON."""
+    m = re.search(
+        r'<pre id="ct-client-json"[^>]*>([^<]+)</pre>',
+        rendered_html, re.DOTALL)
+    assert m, "client.json <pre> not found on success page"
+    return json.loads(html.unescape(m.group(1)))
 
 
-# --- GET /admin/tenants/new ----------------------------------------
+# --- GET /admin/tenants/new ---------------------------------------
 
 
 def test_create_form_renders(client):
@@ -54,30 +67,46 @@ def test_create_form_requires_auth():
     assert r.status_code in (303, 401, 403)
 
 
-# --- POST /admin/tenants/create — happy paths ----------------------
+# --- POST /admin/tenants/create — happy paths ---------------------
 
 
-def test_create_minimal_tenant(client, tmp_path):
+def test_create_minimal_tenant_renders_success_page(client):
     r = client.post(
         "/admin/tenants/create",
         data={"name": "Acme Charters"},
         follow_redirects=False)
-    assert r.status_code == 303, r.text
-    loc = r.headers["location"]
-    assert loc.startswith("/admin/tenants/acme-charters")
-    payload = _read_client_json(tmp_path, "acme-charters")
-    assert payload["business"]["slug"] == "acme-charters"
-    assert payload["business"]["name"] == "Acme Charters"
-    assert payload["business"]["plan"] == "trial"
-    assert payload["business"]["status"] == "trial"
-    assert any(t.id == "acme-charters" for t in tenants.list_tenants())
+    assert r.status_code == 200, r.text
+    assert "Tenant created" in r.text
+    assert "acme-charters" in r.text
+    assert "https://dashboard.unboks.org/acme-charters" in r.text
+    assert "data-ct-copy" in r.text
+    assert "data-ct-download" in r.text
+    assert 'data-ct-download-filename="client.json"' in r.text
 
 
-def test_create_full_tenant_with_contacts_and_tone(client, tmp_path):
+def test_create_minimal_tenant_client_json_required_fields(client):
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Acme Charters"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    data = _extract_client_json(r.text)
+    for field in ("slug", "name", "password", "status", "plan", "created_at"):
+        assert field in data, f"missing required field: {field}"
+    assert data["slug"] == "acme-charters"
+    assert data["name"] == "Acme Charters"
+    assert isinstance(data["password"], str) and len(data["password"]) >= 12
+    assert data["plan"] == "trial"
+    assert data["status"] == "trial"
+    assert "T" in data["created_at"]
+    assert data["created_at"].endswith("+00:00")
+
+
+def test_create_full_form_propagates_optional_fields(client):
     r = client.post(
         "/admin/tenants/create",
         data={
-            "name": "Marina Bay Tours",
+            "name": "Marina Bay",
             "slug": "marina-bay",
             "contact_person": "Calvin",
             "contact_email": "calvin@example.com",
@@ -85,40 +114,48 @@ def test_create_full_tenant_with_contacts_and_tone(client, tmp_path):
             "plan": "monthly",
             "status": "active",
             "tone": "Friendly",
-            "notes": "Greet customers with hola.",
+            "notes": "Be brief.",
         },
         follow_redirects=False)
-    assert r.status_code == 303
-    payload = _read_client_json(tmp_path, "marina-bay")
-    biz = payload["business"]
-    assert biz["slug"] == "marina-bay"
-    assert biz["name"] == "Marina Bay Tours"
-    assert biz["plan"] == "monthly"
-    assert biz["status"] == "active"
-    assert biz["contact_person"] == "Calvin"
-    assert biz["email"] == "calvin@example.com"
-    assert biz["whatsapp"] == "+1 555 4321"
-    assert biz["agent_tone"] == "Friendly"
-    assert biz["notes"] == "Greet customers with hola."
+    assert r.status_code == 200
+    data = _extract_client_json(r.text)
+    assert data["slug"] == "marina-bay"
+    assert data["name"] == "Marina Bay"
+    assert data["plan"] == "monthly"
+    assert data["status"] == "active"
+    assert data["contact_person"] == "Calvin"
+    assert data["email"] == "calvin@example.com"
+    assert data["whatsapp"] == "+1 555 4321"
+    assert data["agent_tone"] == "Friendly"
+    assert data["notes"] == "Be brief."
 
 
-def test_create_with_file_upload(client, tmp_path):
+def test_create_does_not_write_local_disk(client, tmp_path):
+    """Manual Mode: the wizard must not write anything to
+    NR3_TENANTS_CLIENT_DIR. The operator places the JSON manually."""
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "No Disk"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    assert not (tmp_path / "client_root" / "no-disk").exists()
+    assert not any(t.id == "no-disk" for t in tenants.list_tenants())
+
+
+def test_create_with_file_upload_is_silently_accepted(client, tmp_path):
+    """Form's optional file-upload still submits cleanly, but in
+    Manual Mode the bytes are discarded — no local write."""
     files = [("files", ("hello.txt", b"hello world", "text/plain"))]
     r = client.post(
         "/admin/tenants/create",
         data={"name": "Upload Co"},
         files=files,
         follow_redirects=False)
-    assert r.status_code == 303
-    uploads = tmp_path / "client_root" / "upload-co" / "data" / "uploads"
-    assert uploads.is_dir()
-    saved = list(uploads.iterdir())
-    assert len(saved) == 1
-    assert saved[0].name == "hello.txt"
-    assert saved[0].read_bytes() == b"hello world"
+    assert r.status_code == 200
+    assert not (tmp_path / "client_root" / "upload-co").exists()
 
 
-# --- POST /admin/tenants/create — error paths ----------------------
+# --- POST /admin/tenants/create — error paths ---------------------
 
 
 def test_create_rejects_empty_name(client):
@@ -139,21 +176,127 @@ def test_create_rejects_bad_slug(client):
     assert "Slug must be" in r.text
 
 
-def test_create_rejects_duplicate_slug(client):
+def test_create_duplicate_slug_is_allowed_in_manual_mode(client):
+    """Manual Mode: nothing persists, so two consecutive submits
+    with the same slug both succeed. The operator decides whether
+    they really want two copies of the JSON."""
     r1 = client.post(
         "/admin/tenants/create",
-        data={"name": "First", "slug": "dupe"},
+        data={"name": "Dup A", "slug": "dupe-slug"},
         follow_redirects=False)
-    assert r1.status_code == 303
+    assert r1.status_code == 200
     r2 = client.post(
         "/admin/tenants/create",
-        data={"name": "Second", "slug": "dupe"},
+        data={"name": "Dup B", "slug": "dupe-slug"},
         follow_redirects=False)
-    assert r2.status_code == 400
-    assert "already exists" in r2.text
+    assert r2.status_code == 200
 
 
-# --- helpers --------------------------------------------------------
+# --- welcome email -----------------------------------------------
+
+
+@pytest.fixture
+def email_capture(monkeypatch):
+    """Capture every send_email call without hitting SMTP."""
+    sent = []
+
+    def fake_send(to_email, subject, body, settings):
+        sent.append({"to": to_email, "subject": subject, "body": body})
+
+    from app import emailer
+    monkeypatch.setattr(emailer, "send_email", fake_send)
+    monkeypatch.setattr(emailer, "smtp_is_configured", lambda s: True)
+    return sent
+
+
+def test_welcome_email_sent_when_checked(client, email_capture):
+    r = client.post(
+        "/admin/tenants/create",
+        data={
+            "name": "Acme",
+            "slug": "acme",
+            "contact_email": "ops@acme.test",
+            "send_welcome": "1",
+        },
+        follow_redirects=False)
+    assert r.status_code == 200
+    assert len(email_capture) == 1
+    msg = email_capture[0]
+    assert msg["to"] == "ops@acme.test"
+    assert "Acme" in msg["subject"]
+    assert "https://dashboard.unboks.org/acme" in msg["body"]
+    data = _extract_client_json(r.text)
+    assert data["password"] in msg["body"]
+    assert "Welcome email sent to" in r.text
+
+
+def test_welcome_email_skipped_when_unchecked(client, email_capture):
+    r = client.post(
+        "/admin/tenants/create",
+        data={
+            "name": "Acme",
+            "slug": "acme",
+            "contact_email": "ops@acme.test",
+        },
+        follow_redirects=False)
+    assert r.status_code == 200
+    assert len(email_capture) == 0
+    assert "checkbox was not ticked" in r.text
+
+
+def test_welcome_email_skipped_without_contact_email(client, email_capture):
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "No Email", "send_welcome": "1"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    assert len(email_capture) == 0
+    assert "no contact email was provided" in r.text
+
+
+def test_welcome_email_send_failure_does_not_crash(client, monkeypatch):
+    """SMTP raise → success page still renders with a warning; the
+    JSON is still shown so the operator can send credentials
+    manually."""
+    from app import emailer
+    monkeypatch.setattr(emailer, "smtp_is_configured", lambda s: True)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("smtp connection refused")
+
+    monkeypatch.setattr(emailer, "send_email", boom)
+    r = client.post(
+        "/admin/tenants/create",
+        data={
+            "name": "Boom",
+            "slug": "boom",
+            "contact_email": "ops@boom.test",
+            "send_welcome": "1",
+        },
+        follow_redirects=False)
+    assert r.status_code == 200
+    assert "Welcome email send failed" in r.text
+    data = _extract_client_json(r.text)
+    assert data["slug"] == "boom"
+
+
+def test_welcome_email_no_smtp(client, monkeypatch):
+    from app import emailer
+    monkeypatch.setattr(emailer, "smtp_is_configured", lambda s: False)
+    r = client.post(
+        "/admin/tenants/create",
+        data={
+            "name": "No SMTP",
+            "slug": "no-smtp",
+            "contact_email": "x@y.com",
+            "send_welcome": "1",
+        },
+        follow_redirects=False)
+    assert r.status_code == 200
+    assert "SMTP is not configured" in r.text
+
+
+# --- slug helpers (unchanged unit tests) --------------------------
 
 
 def test_validate_slug_accepts_clean():
@@ -172,81 +315,3 @@ def test_derive_slug_from_name():
     assert tenants.derive_slug_from_name("Acme Charters!") == "acme-charters"
     assert tenants.derive_slug_from_name("  Multiple   Spaces ") == "multiple-spaces"
     assert tenants.derive_slug_from_name("123 Numbers First") == "numbers-first"
-
-
-
-# --- VPS provisioning contract --------------------------------------
-
-
-def test_provision_new_tenant_called_after_folder_created(client, monkeypatch, tmp_path):
-    """provision_new_tenant(slug, token) is called exactly once, AFTER
-    the local folder + client.json have been written. Locks the
-    contract so future refactors can't accidentally swap order or skip
-    the call."""
-    calls = []
-
-    def fake_provision(slug, token):
-        config_path = tmp_path / "client_root" / slug / "config" / "client.json"
-        assert config_path.exists(), "provisioning fired before folder was created"
-        calls.append((slug, token))
-        return True
-
-    from app.routes import admin
-    monkeypatch.setattr(admin, "provision_new_tenant", fake_provision)
-    r = client.post(
-        "/admin/tenants/create",
-        data={"name": "Hook Test"},
-        follow_redirects=False)
-    assert r.status_code == 303
-    assert len(calls) == 1
-    slug, token = calls[0]
-    assert slug == "hook-test"
-    assert isinstance(token, str) and len(token) >= 12
-
-
-def test_provisioning_failure_does_not_crash_wizard(client, monkeypatch):
-    """If provision_new_tenant raises, the wizard still completes
-    (303 redirect with the success message + a warn= query string).
-    No 500. Provider-agnostic — works the same way whether the body
-    is the current no-op stub or a future HTTP call."""
-    from app.routes import admin
-    def boom(slug, token):
-        raise RuntimeError("provisioning unavailable")
-    monkeypatch.setattr(admin, "provision_new_tenant", boom)
-    r = client.post(
-        "/admin/tenants/create",
-        data={"name": "Boom Co"},
-        follow_redirects=False)
-    assert r.status_code == 303
-    loc = r.headers["location"]
-    assert loc.startswith("/admin/tenants/boom-co")
-    assert "warn=" in loc
-    assert "created=1" in loc
-    assert "message=" in loc
-
-
-def test_provision_new_tenant_is_a_no_op_stub_today():
-    """Lock the J3-BE-41 contract: tenant_io.provision_new_tenant
-    is a stub that performs no remote write and returns True. The
-    real HTTP call ships in a later brief; until then this contract
-    must not regress (the wizard depends on the True-by-default
-    behaviour to log a clean tenant_create.provisioning_succeeded
-    event)."""
-    from app import tenant_io
-    result = tenant_io.provision_new_tenant("any-slug", "any-token")
-    assert result is True
-
-
-def test_success_redirect_carries_message(client):
-    """Brief J3-BE-41: 'flow returns a proper success response (303
-    redirect with message)'. The location header carries
-    created=1 + a message= query param."""
-    r = client.post(
-        "/admin/tenants/create",
-        data={"name": "Message Co"},
-        follow_redirects=False)
-    assert r.status_code == 303
-    loc = r.headers["location"]
-    assert loc.startswith("/admin/tenants/message-co")
-    assert "created=1" in loc
-    assert "message=" in loc

@@ -148,10 +148,85 @@
     });
   }
 
+  function initTenantCreatedActions() {
+    // J3-BE-50: Copy + Download buttons on the tenant-created
+    // success page. Lift the JSON text out of a <pre> element by
+    // id; trim trailing whitespace because the template indents
+    // the contents.
+    function targetText(btn, attr) {
+      var id = btn.getAttribute(attr);
+      var el = id ? document.getElementById(id) : null;
+      return el ? (el.textContent || "").replace(/^\s*\n/, "").trimEnd() : "";
+    }
+
+    function showFeedback(msg) {
+      var fb = document.querySelector("[data-ct-copy-feedback]");
+      if (!fb) return;
+      fb.textContent = msg;
+      window.clearTimeout(showFeedback._t);
+      showFeedback._t = window.setTimeout(function () {
+        fb.textContent = "";
+      }, 2500);
+    }
+
+    document.querySelectorAll("[data-ct-copy]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var text = targetText(btn, "data-ct-copy-target");
+        if (!text) {
+          showFeedback("Nothing to copy.");
+          return;
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(
+            function () { showFeedback("Copied to clipboard."); },
+            function () { showFeedback("Copy failed — select the JSON and copy manually."); }
+          );
+          return;
+        }
+        // Fallback for older browsers.
+        try {
+          var ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+          showFeedback("Copied to clipboard.");
+        } catch (_) {
+          showFeedback("Copy failed — select the JSON and copy manually.");
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-ct-download]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var text = targetText(btn, "data-ct-download-target");
+        if (!text) {
+          showFeedback("Nothing to download.");
+          return;
+        }
+        var filename = btn.getAttribute("data-ct-download-filename") || "client.json";
+        var blob = new Blob([text + "\n"], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        showFeedback("Downloaded " + filename + ".");
+      });
+    });
+  }
+
   function init() {
     initSidebarDrawer();
     initTenantSelector();
     initCreateTenantWizard();
+    initTenantCreatedActions();
   }
 
   if (document.readyState === "loading") {
