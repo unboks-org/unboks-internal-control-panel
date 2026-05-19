@@ -11,14 +11,12 @@ from app.onboarding import (
     list_intake_answers,
 )
 
-
 def test_healthz_returns_ok() -> None:
     client = TestClient(app)
     response = client.get("/healthz")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "wtyj-admin"}
-
 
 def test_admin_redirects_unauthenticated(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -30,7 +28,6 @@ def test_admin_redirects_unauthenticated(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 303
     assert response.headers["location"] == "/login"
-
 
 def test_create_onboarding_lead_persists_and_rejects_duplicate(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -77,7 +74,6 @@ def test_create_onboarding_lead_persists_and_rejects_duplicate(monkeypatch, tmp_
     persisted = refreshed.get("/admin/onboarding")
     assert persisted.status_code == 200
     assert "test@example.com" in persisted.text
-
 
 def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -146,7 +142,6 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     for action in ("Invite admin", "Change role", "Disable user", "Rotate admin password"):
         assert action in settings_page.text
 
-
 def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
@@ -188,16 +183,6 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Forbidden legacy terminology
     assert "Soft mode" not in workspace.text
     assert "Hard mode" not in workspace.text
-    # Billing / Trial panel
-    assert "billing-panel" in workspace.text
-    assert "Billing / Trial" in workspace.text
-    assert "Trial days left" in workspace.text
-    assert "Next billing" in workspace.text
-    assert "Monthly price" in workspace.text
-    for action in ("Extend trial", "Mark paid", "Pause billing", "Cancel tenant"):
-        assert action in workspace.text
-    # Cancel tenant must be visually separated in a danger zone
-    assert "billing-danger" in workspace.text
     # Collapsible workspace sections — chevron + one-line desc on each
     assert "ws-section" in workspace.text
     assert "ws-summary" in workspace.text
@@ -206,36 +191,24 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     import re as _re
     open_count = len(_re.findall(r'<details class="ws-section [^"]+" open>', workspace.text))
     closed_count = len(_re.findall(r'<details class="ws-section [^"]+">', workspace.text))
-    assert open_count >= 4
-    assert closed_count >= 1
-    # Soft section tones applied — all 18 must be present
+    assert open_count >= 3
+    assert closed_count >= 4
+    # Soft section tones — only kept sections' tones present after the
+    # Calvin-decision deletions.
     for tone in (
-        "ws-tone-blue-gray", "ws-tone-cyan", "ws-tone-violet", "ws-tone-mint",
-        "ws-tone-amber", "ws-tone-yellow", "ws-tone-slate", "ws-tone-lavender",
-        "ws-tone-peach", "ws-tone-gray", "ws-tone-beige", "ws-tone-blue",
-        "ws-tone-gray-blue", "ws-tone-mint2", "ws-tone-gray2", "ws-tone-cream",
-        "ws-tone-gray3", "ws-tone-danger",
+        "ws-tone-cyan", "ws-tone-violet", "ws-tone-mint",
+        "ws-tone-peach", "ws-tone-gray", "ws-tone-blue",
+        "ws-tone-danger",
     ):
         assert tone in workspace.text
-    # One-line descriptions present
+    # One-line descriptions for kept sections only.
     for desc in (
-        "Track what is missing before this tenant is ready.",
         "Manage active customer channels for this tenant.",
         "Control replies, learning, escalation behavior, and tone.",
         "Manage files, knowledge, uploads, and cloud sources.",
-        "View trial, plan, payment, and billing state.",
-        "Preview and push ICP changes to the tenant dashboard.",
-        "Manage who can operate this tenant.",
-        "Send intake links and review onboarding progress.",
         "View escalation rules, open escalations, and alert routing.",
         "Keep private internal notes for the Unboks team.",
-        "View commercial plan and contract state.",
         "See which tenant features are enabled.",
-        "Check dashboard, agent, API, and webhook health.",
-        "Export tenant setup, SOT, and activity data.",
-        "View communication history with this tenant.",
-        "Track invoices, amounts, and payment status.",
-        "Review tenant-level audit events.",
         "Suspend or cut off tenant access.",
     ):
         assert desc in workspace.text
@@ -255,40 +228,10 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Last message" in workspace.text
     assert "Last sync" in workspace.text
     # Attention center and anomaly monitor moved to global views (see test_admin_settings_renders)
-    # Setup checklist
-    assert "setup-checklist" in workspace.text
-    assert "Setup checklist" in workspace.text
-    for label in (
-        "Tenant profile completed",
-        "Onboarding form completed",
-        "Source of Truth uploaded",
-        "Channels connected",
-        "AI Agent configured",
-        "Escalation rules configured",
-        "Operators invited",
-        "Dashboard ready",
-        "Trial / payment configured",
-    ):
-        assert label in workspace.text
-    # Status labels and percent badge
-    for s in ("Done", "Missing", "Needs review"):
-        # at least one of these is present given seed data
-        pass
-    assert "Done" in workspace.text  # demo tenant has several done items
-    assert "%</span>" in workspace.text or "% " in workspace.text or "%\n" in workspace.text
-    assert "Open section" in workspace.text
-    # Anchor targets exist for the per-item links
+    # Anchor targets for the per-section headers (only kept sections).
     for anchor_id in ("channels-section", "agent-section", "sot-section",
-                      "billing-section", "access-section", "onboarding-section",
-                      "escalations-section", "tenant-header-anchor"):
+                      "tenant-header-anchor"):
         assert 'id="' + anchor_id + '"' in workspace.text
-    # Contract / plan card
-    assert "contract-card" in workspace.text
-    assert "Contract / plan" in workspace.text
-    for label in ("Plan", "Trial start", "Trial end", "Monthly price", "Setup fee", "Payment status"):
-        assert label in workspace.text
-    for action in ("Edit plan", "Extend trial", "Mark paid", "Pause contract", "Cancel tenant"):
-        assert action in workspace.text
     # Feature toggles
     assert "features-card" in workspace.text
     assert "Feature toggles" in workspace.text
@@ -302,29 +245,6 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Must not use 'Soft mode'/'Hard mode'
     assert "Soft mode" not in workspace.text
     assert "Hard mode" not in workspace.text
-    # Runtime status card
-    assert "runtime-card" in workspace.text
-    assert "Runtime status" in workspace.text
-    for label in ("Dashboard", "Agent", "API", "Channel webhooks", "Last sync", "Last error", "Uptime", "Environment"):
-        assert label in workspace.text
-    for action in ("Check status", "Restart sync", "View logs", "Open dashboard"):
-        assert action in workspace.text
-    # Backup / export
-    assert "backup-card" in workspace.text
-    assert "Backup / export" in workspace.text
-    for action in ("Export config", "Export SOT", "Download setup summary", "Create backup"):
-        assert action in workspace.text
-    # Communication log
-    assert "comms-card" in workspace.text
-    assert "Communication log" in workspace.text
-    for label in ("Last email sent", "Last onboarding link sent", "Last operator note", "Last client reply"):
-        assert label in workspace.text
-    for action in ("View communication log", "Send internal email", "Copy onboarding link"):
-        assert action in workspace.text
-    # Invoice history
-    assert "invoices-card" in workspace.text
-    assert "Invoice history" in workspace.text
-    assert "No invoices yet." in workspace.text
     # Global view sections must NOT render inside tenant workspace main pane
     # (sidebar links to those views are allowed — they live in admin_base)
     assert "attention-center" not in workspace.text
@@ -365,13 +285,6 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         assert action in workspace.text
     # Follow-up label appears for note-demo-2
     assert "Follow-up:" in workspace.text
-    # Onboarding control panel
-    assert "onboarding-panel" in workspace.text
-    for label in ("Intake link", "Intake submitted", "Review", "Missing setup items", "Next action"):
-        assert label in workspace.text
-    for action in ("Send onboarding link", "Copy onboarding link", "Complete onboarding",
-                   "Review submitted answers", "Mark tenant ready", "Reset onboarding"):
-        assert action in workspace.text
     # Escalations panel
     assert "escalations-panel" in workspace.text
     for label in ("Open", "Soft escalations", "Hard escalations", "Avg response time",
@@ -383,28 +296,6 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Must use Soft escalation / Hard escalation terminology, not Soft mode / Hard mode
     assert "Soft mode" not in workspace.text
     assert "Hard mode" not in workspace.text
-    # Operators / access panel
-    assert "access-panel" in workspace.text
-    assert "Operators &amp; access" in workspace.text
-    for stat in ("Owner", "Admins", "Operators", "Alert recipients"):
-        assert stat in workspace.text
-    for action in ("Invite operator", "Remove operator", "Change role", "Resend invite"):
-        assert action in workspace.text
-    # Push changes panel
-    assert "push-panel" in workspace.text
-    assert "Push changes" in workspace.text
-    assert "Pending changes" in workspace.text
-    assert "Last pushed" in workspace.text
-    assert "Tenant dashboard" in workspace.text
-    for action in ("Preview changes", "Revert pending changes"):
-        assert action in workspace.text
-    assert "Push changes will update this tenant" in workspace.text
-    # Activity log / audit trail
-    assert "activity-panel" in workspace.text
-    assert "View full activity log" in workspace.text
-    assert "Export log" in workspace.text
-    # No fake events: empty tenants must show "No activity yet"
-    assert "No activity yet" in workspace.text
     # Source of Truth / Data Room
     assert "data-room" in workspace.text
     assert "Knowledge items" in workspace.text
@@ -418,15 +309,12 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     for category in ("Documents / PDFs", "Images", "Price lists", "Menus / brochures",
                      "FAQ files", "Policies", "Services / product sheets"):
         assert category in workspace.text
-    # Activity log shows empty state
-    assert "Activity" in workspace.text
     # Danger zone
     assert "danger-zone" in workspace.text
     assert "Suspend / cut off tenant" in workspace.text
     # All controls are still placeholders, must render disabled
     assert "disabled" in workspace.text
     assert 'aria-current="page"' in workspace.text
-
 
 def test_tenant_workspace_shows_no_activity_for_empty_tenant(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -451,7 +339,6 @@ def test_tenant_workspace_shows_no_activity_for_empty_tenant(monkeypatch, tmp_pa
     assert missing.status_code == 303
     assert missing.headers["location"] == "/admin/tenants"
 
-
 def test_admin_onboarding_and_reviews_still_reachable(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
@@ -464,7 +351,6 @@ def test_admin_onboarding_and_reviews_still_reachable(monkeypatch, tmp_path) -> 
     reviews = client.get("/admin/reviews")
     assert reviews.status_code == 200
     assert "Awaiting review" in reviews.text
-
 
 def test_public_onboarding_does_not_render_admin_shell(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -495,7 +381,6 @@ def test_public_onboarding_does_not_render_admin_shell(monkeypatch, tmp_path) ->
     assert login.status_code == 200
     assert "sidebar-nav" not in login.text
 
-
 def test_admin_send_email_route_requires_auth(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
@@ -510,7 +395,6 @@ def test_admin_send_email_route_requires_auth(monkeypatch, tmp_path) -> None:
     assert response.status_code == 303
     assert response.headers["location"] == "/login"
 
-
 def test_admin_lead_review_requires_auth(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
@@ -521,7 +405,6 @@ def test_admin_lead_review_requires_auth(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 303
     assert response.headers["location"] == "/login"
-
 
 def test_token_generation_and_public_onboarding_placeholder(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -554,7 +437,6 @@ def test_token_generation_and_public_onboarding_placeholder(monkeypatch, tmp_pat
     assert invalid.status_code == 404
     assert "invalid or expired" in invalid.text
 
-
 def test_missing_smtp_generates_preview_without_fake_success(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
@@ -583,7 +465,6 @@ def test_missing_smtp_generates_preview_without_fake_success(monkeypatch, tmp_pa
     assert lead.status == "email_pending"
     assert lead.email_sent_at is None
     assert lead.email_last_error == "Email not configured."
-
 
 def test_public_onboarding_saves_one_question_at_a_time(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -627,7 +508,6 @@ def test_public_onboarding_saves_one_question_at_a_time(monkeypatch, tmp_path) -
     assert answers[INTAKE_QUESTIONS[0].key].answer == "We repair air conditioners."
     assert get_lead(lead.id).status == "form_started"
 
-
 def test_public_onboarding_completion_updates_status(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
@@ -659,7 +539,6 @@ def test_public_onboarding_completion_updates_status(monkeypatch, tmp_path) -> N
     assert "You can close this tab now." in complete.text
     assert "What happens next" in complete.text
     assert get_lead(lead.id).status == "form_submitted"
-
 
 def test_admin_can_review_and_export_setup_summary(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -699,7 +578,6 @@ def test_admin_can_review_and_export_setup_summary(monkeypatch, tmp_path) -> Non
     assert "Unboks onboarding setup summary" in export.text
     assert "Review Business" in export.text
     assert "Answer for escalation_rules" in export.text
-
 
 def test_admin_can_mark_review_needs_changes_and_approved(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -750,7 +628,6 @@ def test_admin_can_mark_review_needs_changes_and_approved(monkeypatch, tmp_path)
     export = client.get(f"/admin/onboarding/leads/{lead.id}/setup-summary.txt")
     assert "Review status: approved" in export.text
     assert "Ready for setup." in export.text
-
 
 def test_admin_review_rejects_invalid_decision(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
