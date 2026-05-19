@@ -204,13 +204,14 @@ def test_provision_new_tenant_called_after_folder_created(client, monkeypatch, t
     assert isinstance(token, str) and len(token) >= 12
 
 
-def test_provisioning_ssh_failure_does_not_crash_wizard(client, monkeypatch):
-    """If the SSH provisioning call raises, the wizard still completes
-    (303 redirect) and surfaces the failure as a warn= query string.
-    No 500."""
+def test_provisioning_failure_does_not_crash_wizard(client, monkeypatch):
+    """If provision_new_tenant raises, the wizard still completes
+    (303 redirect with the success message + a warn= query string).
+    No 500. Provider-agnostic — works the same way whether the body
+    is the current no-op stub or a future HTTP call."""
     from app.routes import admin
     def boom(slug, token):
-        raise RuntimeError("ssh failure")
+        raise RuntimeError("provisioning unavailable")
     monkeypatch.setattr(admin, "provision_new_tenant", boom)
     r = client.post(
         "/admin/tenants/create",
@@ -220,3 +221,32 @@ def test_provisioning_ssh_failure_does_not_crash_wizard(client, monkeypatch):
     loc = r.headers["location"]
     assert loc.startswith("/admin/tenants/boom-co")
     assert "warn=" in loc
+    assert "created=1" in loc
+    assert "message=" in loc
+
+
+def test_provision_new_tenant_is_a_no_op_stub_today():
+    """Lock the J3-BE-41 contract: tenant_io.provision_new_tenant
+    is a stub that performs no remote write and returns True. The
+    real HTTP call ships in a later brief; until then this contract
+    must not regress (the wizard depends on the True-by-default
+    behaviour to log a clean tenant_create.provisioning_succeeded
+    event)."""
+    from app import tenant_io
+    result = tenant_io.provision_new_tenant("any-slug", "any-token")
+    assert result is True
+
+
+def test_success_redirect_carries_message(client):
+    """Brief J3-BE-41: 'flow returns a proper success response (303
+    redirect with message)'. The location header carries
+    created=1 + a message= query param."""
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Message Co"},
+        follow_redirects=False)
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.startswith("/admin/tenants/message-co")
+    assert "created=1" in loc
+    assert "message=" in loc

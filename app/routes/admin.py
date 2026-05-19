@@ -178,7 +178,32 @@ async def admin_tenant_create_submit(
     send_welcome: str = Form(default=""),
     files: list[UploadFile] = File(default=[]),
 ) -> Response:
-    """Single-submit tenant creation."""
+    """Single-submit tenant creation.
+
+    Two distinct phases, kept separate on purpose so the upcoming
+    HTTP provisioning service can plug in cleanly:
+
+      Phase 1 -- CREATE TENANT RECORD (local).
+        Validate name + slug, build the business payload, write
+        <NR3_TENANTS_CLIENT_DIR>/<slug>/{config/client.json, data/}
+        on the Nr3 host, save any uploaded files. Generate the
+        operator's initial sign-in token server-side.
+
+      Phase 2 -- PROVISION ON VPS.
+        Call app.tenant_io.provision_new_tenant(slug, token). Today
+        that is a no-op stub that just logs the intent; the real
+        body ships in a follow-up brief and will POST to the
+        provisioning service over HTTP. Wrapped in try/except so a
+        provisioning outage NEVER 500s the wizard -- the local
+        record is already on disk, and the failure surfaces as a
+        `warn=` query string on the success redirect.
+
+    Either phase failing is observable through the structured
+    `tenant_create.*` log events. The wizard returns a 303 to
+    /admin/tenants/<slug> with a `created=...` message on success
+    or re-renders the form with an inline error on validation
+    failure -- never an uncaught exception.
+    """
     settings = get_settings()
     redirect = require_admin(request, settings)
     if redirect:
@@ -217,6 +242,9 @@ async def admin_tenant_create_submit(
     if notes.strip():
         business["notes"] = notes.strip()
 
+    # ===== Phase 1: CREATE TENANT RECORD =====
+    # Local-only write. Nothing leaves the Nr3 host yet -- VPS
+    # provisioning is Phase 2 (below).
     try:
         tenant_root = create_tenant_directory(safe_slug, business)
     except TenantCreateError as exc:
@@ -243,11 +271,15 @@ async def admin_tenant_create_submit(
         "tenant_create.credentials_generated slug=%s username=%s token_len=%d",
         safe_slug, safe_slug, len(initial_token))
 
-    # PROVISION TENANT ON VPS (writes client.json over SSH).
-    # Wrap in try/except so an SSH outage NEVER 500s the wizard:
-    # the local folder + welcome email path still complete; the
-    # warning rides the redirect query string so the operator sees
-    # it on the new workspace.
+    # ===== Phase 2: PROVISION ON VPS =====
+    # Single hand-off point to app.tenant_io.provision_new_tenant.
+    # Today that is a no-op stub that just logs the intent; the real
+    # HTTP call to the provisioning service goes there in the next
+    # brief. The wizard's call site here does NOT have to change
+    # when that happens. Wrapped in try/except so a future
+    # provisioning outage NEVER 500s the wizard -- the local record
+    # is already on disk, the failure surfaces as a warn= query
+    # string on the success redirect.
     provision_warning = ""
     try:
         ok = provision_new_tenant(safe_slug, initial_token)
@@ -314,7 +346,10 @@ async def admin_tenant_create_submit(
             except Exception as exc:
                 welcome_warning = f"Welcome email failed: {exc}"
 
-    qs_bits = ["created=1"]
+    qs_bits = [
+        "created=1",
+        "message=" + quote_plus(f"Tenant {safe_slug!r} created."),
+    ]
     if provision_warning:
         qs_bits.append("warn=" + quote_plus(provision_warning))
     if upload_warnings:
