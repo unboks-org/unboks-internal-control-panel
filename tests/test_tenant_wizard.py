@@ -381,6 +381,7 @@ def test_platform_env_carries_dashboard_password(client):
     data = _extract_client_json(r.text)
     env_text = _extract_block(r.text, "ct-platform-env")
     assert "DASHBOARD_PASSWORD=" + data["password"] in env_text
+    assert "TENANT_ID=acme" in env_text
     assert "TENANT_SLUG=acme" in env_text
 
 
@@ -392,8 +393,10 @@ def test_docker_compose_names_container_and_port(client):
     assert r.status_code == 200
     compose = _extract_block(r.text, "ct-docker-compose")
     assert "container_name: wtyj-acme" in compose
-    assert "image: wtyj-agent:latest" in compose
-    assert re.search(r'"\d{4}:8000"', compose),         f"no host_port mapping in compose: {compose!r}"
+    assert "image: wtyj-agent" in compose
+    assert "env_file:\n      - ./config/platform.env" in compose
+    assert "./logs:/app/logs" in compose
+    assert re.search(r'"\d{4}:8001"', compose),         f"no host_port mapping in compose: {compose!r}"
 
 
 def test_nginx_snippet_routes_slug_to_proxy_pass(client):
@@ -403,9 +406,10 @@ def test_nginx_snippet_routes_slug_to_proxy_pass(client):
         follow_redirects=False)
     assert r.status_code == 200
     nginx = _extract_block(r.text, "ct-nginx-snippet")
-    assert "location /api/acme/" in nginx
-    assert "rewrite ^/api/acme/(.*) /$1 break;" in nginx
-    assert "proxy_pass http://127.0.0.1:" in nginx
+    assert "location ^~ /api/acme/" in nginx
+    assert "proxy_set_header X-Tenant-Slug acme;" in nginx
+    assert "Access-Control-Allow-Credentials" in nginx
+    assert re.search(r"proxy_pass http://127\.0\.0\.1:\d{4}/;", nginx)
 
 
 def test_host_port_is_deterministic_and_in_range(client):
@@ -420,8 +424,8 @@ def test_host_port_is_deterministic_and_in_range(client):
         data={"name": "Stable B", "slug": "stable-b"},
         follow_redirects=False)
     assert r1.status_code == 200 and r2.status_code == 200
-    port_a = re.search(r'(\d{4}):8000', _extract_block(r1.text, "ct-docker-compose"))
-    port_b = re.search(r'(\d{4}):8000', _extract_block(r2.text, "ct-docker-compose"))
+    port_a = re.search(r'(\d{4}):8001', _extract_block(r1.text, "ct-docker-compose"))
+    port_b = re.search(r'(\d{4}):8001', _extract_block(r2.text, "ct-docker-compose"))
     assert port_a and port_b
     assert 8100 <= int(port_a.group(1)) <= 8199
     assert 8100 <= int(port_b.group(1)) <= 8199

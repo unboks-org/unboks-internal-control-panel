@@ -11,7 +11,7 @@
       Four files below are everything the VPS needs to bring this
       tenant online. SSH to the VPS, run the deploy script, paste
       each file at the destination it names, then
-      <code>docker compose up -d</code> + <code>nginx -s reload</code>.
+      <code>docker compose up -d</code> + <code>systemctl reload nginx</code>.
       Once that's done the tenant can sign in at
       <a href="{{ dashboard_url }}">{{ dashboard_url }}</a>.
     </p>
@@ -75,7 +75,7 @@
     <legend>2. platform.env</legend>
     <p class="ct-help muted">
       Destination on VPS:
-      <code>/root/clients/{{ slug }}/platform.env</code>
+      <code>/root/clients/{{ slug }}/config/platform.env</code>
     </p>
     <pre id="ct-platform-env"
          class="ct-json-block">{{ platform_env_text }}</pre>
