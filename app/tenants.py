@@ -678,16 +678,27 @@ def register_tenant(client_data: dict) -> None:
 
 
 def list_tenants() -> tuple[Tenant, ...]:
-    """Return real tenants from disk when NR3_TENANTS_CLIENT_DIR is set AND
-    the directory contains at least one parseable client.json; otherwise
-    fall back to the hard-coded placeholder list."""
+    """Return every tenant Nr3 can know about.
+
+    Priority:
+    - If a real client root is mounted, load every
+      {root}/*/config/client.json folder dynamically.
+    - Add tenants registered inside ICP.
+    - If no real client root is available, keep the built-in unboks
+      seed so a manually registered tenant such as pepe does not make
+      the main tenant disappear.
+    """
     registry = _load_tenants_from_registry()
     client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
-    by_id: dict[str, Tenant] = {tenant.id: tenant for tenant in registry}
+    loaded: tuple[Tenant, ...] = tuple()
     if client_dir and os.path.isdir(client_dir):
         loaded = _load_tenants_from_disk(client_dir)
-        if loaded:
-            by_id.update({tenant.id: tenant for tenant in loaded})
+    if loaded:
+        by_id: dict[str, Tenant] = {tenant.id: tenant for tenant in registry}
+        by_id.update({tenant.id: tenant for tenant in loaded})
+        return tuple(sorted(by_id.values(), key=lambda t: t.id))
+    by_id = {tenant.id: tenant for tenant in _TENANTS}
+    by_id.update({tenant.id: tenant for tenant in registry})
     if by_id:
         return tuple(sorted(by_id.values(), key=lambda t: t.id))
     return _TENANTS

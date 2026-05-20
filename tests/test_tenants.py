@@ -98,8 +98,40 @@ def test_registry_tenants_are_visible_without_client_root(monkeypatch, tmp_path)
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "missing"))
 
     result = tenants.list_tenants()
-    assert [t.id for t in result] == ["pepe"]
-    assert result[0].name == "Pepe Test"
+    by_id = {t.id: t for t in result}
+    assert "unboks" in by_id
+    assert "pepe" in by_id
+    assert by_id["pepe"].name == "Pepe Test"
+
+
+def test_registry_does_not_replace_mounted_client_root(monkeypatch, tmp_path):
+    registry_path = tmp_path / "tenant_registry.json"
+    registry_path.write_text(json.dumps({
+        "tenants": {
+            "pepe": {
+                "slug": "pepe",
+                "name": "Pepe Test",
+                "status": "trial",
+                "plan": "trial",
+            }
+        }
+    }))
+    unboks = tmp_path / "clients" / "unboks" / "config"
+    unboks.mkdir(parents=True)
+    (unboks / "client.json").write_text(json.dumps({
+        "slug": "unboks",
+        "name": "Unboks",
+        "status": "active",
+        "plan": "demo",
+    }))
+    monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "clients"))
+
+    result = tenants.list_tenants()
+    by_id = {t.id: t for t in result}
+    assert sorted(by_id) == ["pepe", "unboks"]
+    assert by_id["unboks"].status == "active"
+    assert by_id["pepe"].status == "trial"
 
 
 def test_empty_or_unset_dir_falls_back_to_placeholders(monkeypatch, tmp_path):
