@@ -8,11 +8,9 @@
   <header class="create-tenant-header">
     <h2>Tenant created: <code>{{ slug }}</code></h2>
     <p class="muted">
-      Four files below are everything the VPS needs to bring this
-      tenant online. SSH to the VPS, run the deploy script, paste
-      each file at the destination it names, then
-      <code>docker compose up -d</code> + <code>systemctl reload nginx</code>.
-      Once that's done the tenant can sign in at
+      Use the first button below. It copies one complete VPS script.
+      SSH into the VPS, paste the script once, press Enter, and wait for
+      it to finish. Once that's done the tenant can sign in at
       <a href="{{ dashboard_url }}">{{ dashboard_url }}</a>.
     </p>
     <p class="muted">
@@ -49,6 +47,27 @@
   {% endif %}
 
   <p class="ct-action-feedback" data-ct-copy-feedback aria-live="polite"></p>
+
+  <fieldset class="ct-fieldset">
+    <legend>One-paste VPS setup</legend>
+    <p class="ct-help muted">
+      Click Copy, open the VPS terminal, paste the whole script, and press Enter.
+      No file editing required.
+    </p>
+    <pre id="ct-full-vps-setup"
+         class="ct-json-block">{{ full_vps_setup_script_text }}</pre>
+    <div class="ct-actions">
+      <button type="button" class="control-btn control-btn-primary"
+              data-ct-copy data-ct-copy-target="ct-full-vps-setup">
+        Copy full VPS setup script
+      </button>
+      <button type="button" class="control-btn"
+              data-ct-download data-ct-download-target="ct-full-vps-setup"
+              data-ct-download-filename="setup-{{ slug }}.sh">
+        Download setup script
+      </button>
+    </div>
+  </fieldset>
 
   <fieldset class="ct-fieldset">
     <legend>1. client.json</legend>

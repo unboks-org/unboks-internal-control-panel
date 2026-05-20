@@ -391,6 +391,8 @@ def test_success_page_renders_all_four_provisioner_files(client):
         data={"name": "Provisioner Demo", "slug": "prov-demo"},
         follow_redirects=False)
     assert r.status_code == 200
+    assert 'id="ct-full-vps-setup"' in r.text
+    assert 'data-ct-download-filename="setup-prov-demo.sh"' in r.text
     for dom_id in ("ct-client-json", "ct-platform-env",
                     "ct-docker-compose", "ct-nginx-snippet",
                     "ct-deploy-script"):
@@ -473,3 +475,25 @@ def test_host_port_is_deterministic_and_in_range(client):
     assert port_a and port_b
     assert 8100 <= int(port_a.group(1)) <= 8199
     assert 8100 <= int(port_b.group(1)) <= 8199
+
+
+def test_full_vps_setup_script_is_ready_to_paste(client):
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "One Paste", "slug": "one-paste"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    script = _extract_block(r.text, "ct-full-vps-setup")
+    assert "Paste this entire block into the VPS terminal as root" in script
+    assert "TENANT_DIR=/root/clients/one-paste" in script
+    assert "cat > \"$TENANT_DIR/config/client.json\"" in script
+    assert '"slug": "one-paste"' in script
+    assert "cat > \"$TENANT_DIR/config/platform.env\"" in script
+    assert "cat > \"$TENANT_DIR/docker-compose.yml\"" in script
+    assert "python3 - <<'UNBOKS_NGINX_INSERT'" in script
+    assert "# BEGIN UNBOKS TENANT one-paste" in script
+    assert "docker compose down || true" in script
+    assert "docker compose up -d" in script
+    assert "nginx -t" in script
+    assert "systemctl reload nginx" in script
+    assert "https://dashboard.unboks.org/one-paste" in script
