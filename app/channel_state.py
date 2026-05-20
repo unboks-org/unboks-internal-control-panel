@@ -1,20 +1,21 @@
 """Per-tenant channel on/off state.
 
-Placeholder backend: a single JSON file (path overridable via
-NR3_CHANNEL_STATE_PATH, default ./data/channel_state.json) maps
+A single JSON file (path overridable via NR3_CHANNEL_STATE_PATH,
+default ./data/channel_state.json) maps
 
     {<tenant_slug>: {<channel_key>: True|False, ...}, ...}
 
 Atomic write via os.replace so a half-written file can't corrupt
-the store. The wtyj-agent doesn't read this file -- the toggle is
-purely an Nr 3 UI knob today; future briefs may sync the values
-into client.json or push them over to the VPS.
+the store. Each toggle also writes the Nr2-facing ICP override key
+used by /internal/tenants/{tenant}/overrides.
 """
 import json
 import logging
 import os
 import tempfile
 from typing import Iterable
+
+from app import icp_overrides
 
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,11 @@ def toggle_channel(slug: str, channel: str) -> dict[str, bool]:
     all_state[slug] = tenant_state
     try:
         _save_all(all_state)
+        icp_overrides.set_channel_visibility(
+            slug,
+            channel,
+            tenant_state[channel],
+        )
         logger.info(
             "channel_state.toggle slug=%s channel=%s now=%s",
             slug, channel, tenant_state[channel])

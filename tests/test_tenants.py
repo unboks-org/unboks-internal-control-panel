@@ -82,6 +82,26 @@ def test_load_tenants_skips_invalid_json_and_keeps_valid(monkeypatch, tmp_path):
     assert len(result) == 1
 
 
+def test_registry_tenants_are_visible_without_client_root(monkeypatch, tmp_path):
+    registry_path = tmp_path / "tenant_registry.json"
+    registry_path.write_text(json.dumps({
+        "tenants": {
+            "pepe": {
+                "slug": "pepe",
+                "name": "Pepe Test",
+                "status": "trial",
+                "plan": "trial",
+            }
+        }
+    }))
+    monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "missing"))
+
+    result = tenants.list_tenants()
+    assert [t.id for t in result] == ["pepe"]
+    assert result[0].name == "Pepe Test"
+
+
 def test_empty_or_unset_dir_falls_back_to_placeholders(monkeypatch, tmp_path):
     """When the env var points at a missing/empty directory (or no
     parseable client.json files inside), the loader falls back to the

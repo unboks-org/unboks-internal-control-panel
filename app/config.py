@@ -17,6 +17,7 @@ class Settings:
     smtp_username: Optional[str]
     smtp_password: Optional[str]
     smtp_use_tls: bool
+    internal_api_token: Optional[str]
 
 
 def get_settings() -> Settings:
@@ -43,6 +44,7 @@ def get_settings() -> Settings:
         smtp_password=_clean_env("NR3_SMTP_PASSWORD"),
         smtp_use_tls=os.getenv("NR3_SMTP_USE_TLS", "true").strip().lower()
         not in {"0", "false", "no", "off"},
+        internal_api_token=_clean_env("NR3_INTERNAL_API_TOKEN"),
     )
 
 

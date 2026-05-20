@@ -27,6 +27,10 @@ def _isolated_env(tmp_path, monkeypatch):
     # Point NR3_TENANTS_CLIENT_DIR somewhere safe so the discovery
     # code stays happy, but the Manual-Mode wizard never touches it.
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "client_root"))
+    monkeypatch.setenv(
+        "NR3_TENANT_REGISTRY_PATH",
+        str(tmp_path / "tenant_registry.json"),
+    )
     (tmp_path / "client_root").mkdir()
     yield
 
@@ -148,6 +152,18 @@ def test_create_writes_client_json_locally_for_sidebar(client, tmp_path):
     # And list_tenants() now sees the new tenant.
     listed = [t.id for t in tenants.list_tenants()]
     assert "sidebar-co" in listed
+
+
+def test_create_writes_tenant_registry_for_icp_sidebar(client, tmp_path):
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Registry Co", "slug": "registry-co"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    registry_path = tmp_path / "tenant_registry.json"
+    assert registry_path.exists()
+    registered = json.loads(registry_path.read_text())
+    assert registered["tenants"]["registry-co"]["name"] == "Registry Co"
 
 
 def test_create_with_file_upload_is_silently_accepted(client, tmp_path):
@@ -383,6 +399,9 @@ def test_platform_env_carries_dashboard_password(client):
     assert "DASHBOARD_PASSWORD=" + data["password"] in env_text
     assert "TENANT_ID=acme" in env_text
     assert "TENANT_SLUG=acme" in env_text
+    assert "NR3_INTERNAL_OVERRIDES_URL=http://127.0.0.1:8010" in env_text
+    assert "NR3_INTERNAL_API_TOKEN=PASTE_NR3_INTERNAL_API_TOKEN_HERE" in env_text
+    assert "ICP_OVERRIDES_TTL_SECONDS=5" in env_text
 
 
 def test_docker_compose_names_container_and_port(client):

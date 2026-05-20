@@ -333,6 +333,17 @@ async def admin_tenant_create_submit(
             # Render the success page anyway -- the operator still gets
             # the JSON to copy/download, they can place it manually.
 
+    try:
+        from app.tenants import register_tenant
+        register_tenant(client_data)
+        logger.info("tenant_create.registry_written slug=%s", safe_slug)
+    except OSError as exc:
+        logger.warning(
+            "tenant_create.registry_failed slug=%s err=%r",
+            safe_slug,
+            exc,
+        )
+
     # Welcome-email step. send_welcome is the checkbox value; we
     # also need a contact_email to send anywhere.
     welcome_status = "unchecked"
@@ -390,6 +401,9 @@ async def admin_tenant_create_submit(
         f"DASHBOARD_PASSWORD={initial_token}\n"
         f"TENANT_ID={safe_slug}\n"
         f"TENANT_SLUG={safe_slug}\n"
+        f"NR3_INTERNAL_OVERRIDES_URL={settings.base_url}\n"
+        f"NR3_INTERNAL_API_TOKEN=PASTE_NR3_INTERNAL_API_TOKEN_HERE\n"
+        f"ICP_OVERRIDES_TTL_SECONDS=5\n"
     )
 
     docker_compose_text = (
@@ -570,8 +584,12 @@ def _build_contract(tenant: Tenant) -> dict:
 _FEATURE_TOGGLE_DEFS: tuple[tuple[str, str], ...] = (
     ("whatsapp_inbox", "WhatsApp inbox"),
     ("email_inbox", "Email inbox"),
-    ("instagram_facebook", "Instagram / Facebook"),
+    ("instagram_dms", "Instagram DMs"),
+    ("facebook_dms", "Facebook DMs"),
+    ("messenger_dms", "Messenger DMs"),
     ("telegram_alerts", "Telegram alerts"),
+    ("tiktok_dms", "TikTok DMs"),
+    ("x_dms", "X DMs"),
     ("ai_auto_reply", "AI auto-reply"),
     ("soft_escalations", "Soft escalations"),
     ("hard_escalations", "Hard escalations / human takeover"),
@@ -591,10 +609,18 @@ def _build_feature_toggles(tenant: Tenant) -> list[dict]:
             derived["whatsapp_inbox"] = ch.state == "connected"
         elif name == "email":
             derived["email_inbox"] = ch.state == "connected"
-        elif name in ("instagram", "facebook"):
-            derived["instagram_facebook"] = derived.get("instagram_facebook", False) or ch.state == "connected"
+        elif name == "instagram":
+            derived["instagram_dms"] = ch.state == "connected"
+        elif name == "facebook":
+            derived["facebook_dms"] = ch.state == "connected"
+        elif name == "messenger":
+            derived["messenger_dms"] = ch.state == "connected"
         elif name == "telegram":
             derived["telegram_alerts"] = ch.state == "connected"
+        elif name == "tiktok":
+            derived["tiktok_dms"] = ch.state == "connected"
+        elif name == "x":
+            derived["x_dms"] = ch.state == "connected"
     if tenant.agent.auto_reply_enabled:
         derived["ai_auto_reply"] = True
     if tenant.agent.escalation_mode in ("soft", "both"):

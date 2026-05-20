@@ -52,6 +52,7 @@ data/*.db
 data/*.db-*
 data/*.sqlite
 data/*.sqlite-*
+data/*.json
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/

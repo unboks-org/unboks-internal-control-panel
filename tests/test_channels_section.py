@@ -18,6 +18,7 @@ def _isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
     monkeypatch.setenv("NR3_CHANNEL_STATE_PATH", str(tmp_path / "ch.json"))
+    monkeypatch.setenv("NR3_ICP_STATE_PATH", str(tmp_path / "icp.json"))
     (tmp_path / "tenants").mkdir()
     yield
 
@@ -49,8 +50,8 @@ def test_channels_default_all_off(client):
     r = client.get("/admin/tenants/unboks")
     assert r.status_code == 200
     # 8 channels, all Off.
-    assert r.text.count("channel-toggle is-off") == 8
-    assert r.text.count("channel-toggle is-on") == 0
+    assert r.text.count("ios-toggle is-off") == 8
+    assert r.text.count("ios-toggle is-on") == 0
 
 
 # --- toggle works + persists --------------------------------------
@@ -69,11 +70,18 @@ def test_toggle_one_channel_then_render_again(client, tmp_path):
     data = json.loads(state_path.read_text())
     assert data["unboks"]["whatsapp"] is True
 
+    # Bridge state for Nr2 is written at the same time.
+    icp_path = tmp_path / "icp.json"
+    bridge = json.loads(icp_path.read_text())
+    toggle = bridge["tenants"]["unboks"]["feature_toggles"]["whatsapp_inbox"]
+    assert toggle["value"] is True
+    assert toggle["source"] == "icp_override"
+
     # Re-render the workspace: WhatsApp now shows On, the others Off.
     r2 = client.get("/admin/tenants/unboks")
     assert r2.status_code == 200
-    assert r2.text.count("channel-toggle is-on") == 1
-    assert r2.text.count("channel-toggle is-off") == 7
+    assert r2.text.count("ios-toggle is-on") == 1
+    assert r2.text.count("ios-toggle is-off") == 7
 
 
 def test_toggle_round_trip(client):
@@ -83,7 +91,7 @@ def test_toggle_round_trip(client):
     client.post("/admin/tenants/unboks/channels/email/toggle",
                  follow_redirects=False)
     r = client.get("/admin/tenants/unboks")
-    assert r.text.count("channel-toggle is-on") == 0
+    assert r.text.count("ios-toggle is-on") == 0
 
 
 def test_toggle_rejects_unknown_channel(client, tmp_path):
@@ -98,6 +106,26 @@ def test_toggle_rejects_unknown_channel(client, tmp_path):
     if state_path.exists():
         data = json.loads(state_path.read_text())
         assert "sms" not in (data.get("unboks") or {})
+
+
+def test_channel_toggle_keys_match_nr2_contract(client, tmp_path):
+    for channel, feature_key in (
+        ("email", "email_inbox"),
+        ("instagram", "instagram_dms"),
+        ("facebook", "facebook_dms"),
+        ("messenger", "messenger_dms"),
+        ("telegram", "telegram_alerts"),
+        ("tiktok", "tiktok_dms"),
+        ("x", "x_dms"),
+    ):
+        client.post(
+            f"/admin/tenants/unboks/channels/{channel}/toggle",
+            follow_redirects=False,
+        )
+        bridge = json.loads((tmp_path / "icp.json").read_text())
+        toggles = bridge["tenants"]["unboks"]["feature_toggles"]
+        assert toggles[feature_key]["value"] is True
+        assert channel not in toggles
 
 
 def test_toggle_isolates_tenants(client):
@@ -115,8 +143,8 @@ def test_toggle_isolates_tenants(client):
                  follow_redirects=False)
     r_alpha = client.get("/admin/tenants/alpha")
     r_bravo = client.get("/admin/tenants/bravo")
-    assert r_alpha.text.count("channel-toggle is-on") == 1
-    assert r_bravo.text.count("channel-toggle is-on") == 0
+    assert r_alpha.text.count("ios-toggle is-on") == 1
+    assert r_bravo.text.count("ios-toggle is-on") == 0
 
 
 # --- sidebar slug display ------------------------------------------

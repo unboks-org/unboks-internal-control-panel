@@ -8,6 +8,7 @@ wired end-to-end without faking storage.
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -503,7 +504,41 @@ def sorted_notes(notes: tuple[TenantNote, ...]) -> tuple[TenantNote, ...]:
 
 
 _DEFAULT_TENANTS_CLIENT_DIR = "/root/clients"
+_DEFAULT_TENANT_REGISTRY_PATH = "data/tenant_registry.json"
 _ALLOWED_STATUSES = ("active", "trial", "paused", "suspended")
+
+
+def _tenant_from_source(source: dict, fallback_id: str) -> Optional[Tenant]:
+    slug = source.get("slug")
+    if isinstance(slug, str):
+        slug = slug.strip()
+    else:
+        slug = ""
+    tenant_id = slug or fallback_id
+    if not tenant_id:
+        return None
+    raw_name = source.get("name")
+    if isinstance(raw_name, str) and raw_name.strip():
+        name = raw_name.strip()
+    else:
+        name = tenant_id
+    raw_status = source.get("status")
+    if isinstance(raw_status, str):
+        normalized = raw_status.strip().lower()
+        status = normalized if normalized in _ALLOWED_STATUSES else "active"
+    else:
+        status = "active"
+    raw_plan = source.get("plan")
+    if isinstance(raw_plan, str) and raw_plan.strip():
+        plan = raw_plan.strip()
+    else:
+        plan = "trial"
+    return Tenant(
+        id=tenant_id,
+        name=name,
+        status=status,
+        plan=plan,
+    )
 
 
 def _load_tenants_from_disk(client_dir: str) -> tuple[Tenant, ...]:
@@ -544,49 +579,113 @@ def _load_tenants_from_disk(client_dir: str) -> tuple[Tenant, ...]:
         else:
             source = data
         directory_name = os.path.basename(os.path.dirname(os.path.dirname(path))).strip()
-        slug = source.get("slug")
-        if isinstance(slug, str):
-            slug = slug.strip()
-        else:
-            slug = ""
-        tenant_id = slug or directory_name
-        if not tenant_id:
-            continue
-        raw_name = source.get("name")
-        if isinstance(raw_name, str) and raw_name.strip():
-            name = raw_name.strip()
-        else:
-            name = tenant_id
-        raw_status = source.get("status")
-        if isinstance(raw_status, str):
-            normalized = raw_status.strip().lower()
-            status = normalized if normalized in _ALLOWED_STATUSES else "active"
-        else:
-            status = "active"
-        raw_plan = source.get("plan")
-        if isinstance(raw_plan, str) and raw_plan.strip():
-            plan = raw_plan.strip()
-        else:
-            plan = "trial"
-        discovered.append(Tenant(
-            id=tenant_id,
-            name=name,
-            status=status,
-            plan=plan,
-        ))
+        tenant = _tenant_from_source(source, directory_name)
+        if tenant is not None:
+            discovered.append(tenant)
     discovered.sort(key=lambda t: t.id)
     return tuple(discovered)
+
+
+def _registry_path() -> str:
+    return os.getenv(
+        "NR3_TENANT_REGISTRY_PATH",
+        _DEFAULT_TENANT_REGISTRY_PATH,
+    ).strip()
+
+
+def _load_tenants_from_registry() -> tuple[Tenant, ...]:
+    """Load tenants created through ICP even when the VPS client root is
+    not mounted into this Nr3 process."""
+    path = _registry_path()
+    if not path:
+        return tuple()
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return tuple()
+    tenants_raw = data.get("tenants") if isinstance(data, dict) else {}
+    if not isinstance(tenants_raw, dict):
+        return tuple()
+    loaded: list[Tenant] = []
+    for fallback_id, source in tenants_raw.items():
+        if not isinstance(fallback_id, str) or not isinstance(source, dict):
+            continue
+        tenant = _tenant_from_source(source, fallback_id)
+        if tenant is not None:
+            loaded.append(tenant)
+    loaded.sort(key=lambda t: t.id)
+    return tuple(loaded)
+
+
+def _save_registry(data: dict) -> None:
+    path = _registry_path()
+    if not path:
+        return
+    parent = os.path.dirname(path) or "."
+    os.makedirs(parent, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        prefix=".tenant_registry.", suffix=".json", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False, sort_keys=True)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def register_tenant(client_data: dict) -> None:
+    """Persist a lightweight tenant registry row for the ICP sidebar.
+
+    This is separate from the VPS runtime client.json. It lets Nr3 show
+    tenants created in ICP even when `/root/clients` lives on another
+    machine and is not mounted into the control panel.
+    """
+    if not isinstance(client_data, dict):
+        return
+    tenant = _tenant_from_source(client_data, "")
+    if tenant is None:
+        return
+    path = _registry_path()
+    if not path:
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        data = {"tenants": {}}
+    if not isinstance(data, dict):
+        data = {"tenants": {}}
+    tenants = data.setdefault("tenants", {})
+    if not isinstance(tenants, dict):
+        tenants = {}
+        data["tenants"] = tenants
+    tenants[tenant.id] = {
+        "slug": tenant.id,
+        "name": tenant.name,
+        "status": tenant.status,
+        "plan": tenant.plan,
+    }
+    _save_registry(data)
 
 
 def list_tenants() -> tuple[Tenant, ...]:
     """Return real tenants from disk when NR3_TENANTS_CLIENT_DIR is set AND
     the directory contains at least one parseable client.json; otherwise
     fall back to the hard-coded placeholder list."""
+    registry = _load_tenants_from_registry()
     client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    by_id: dict[str, Tenant] = {tenant.id: tenant for tenant in registry}
     if client_dir and os.path.isdir(client_dir):
         loaded = _load_tenants_from_disk(client_dir)
         if loaded:
-            return loaded
+            by_id.update({tenant.id: tenant for tenant in loaded})
+    if by_id:
+        return tuple(sorted(by_id.values(), key=lambda t: t.id))
     return _TENANTS
 
 
