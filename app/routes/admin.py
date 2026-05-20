@@ -251,6 +251,43 @@ async def admin_tenant_create_submit(
         "tenant_create.client_json_built slug=%s fields=%d",
         safe_slug, len(client_data))
 
+    # Persist the flat client.json under NR3_TENANTS_CLIENT_DIR so the
+    # sidebar's list_tenants() picks the new tenant up on the next
+    # render. The downloaded JSON the operator places on the VPS is
+    # IDENTICAL to the file written here -- same shape, same bytes.
+    # Refuse to overwrite an existing slug: a duplicate submit would
+    # otherwise silently regenerate the password and destroy the
+    # paper trail the operator already copied.
+    root = os.environ.get("NR3_TENANTS_CLIENT_DIR", "").strip()
+    if root and os.path.isdir(root):
+        tenant_dir = os.path.join(root, safe_slug)
+        config_path = os.path.join(tenant_dir, "config", "client.json")
+        if os.path.exists(tenant_dir):
+            logger.warning(
+                "tenant_create.duplicate_slug slug=%s path=%s",
+                safe_slug, tenant_dir)
+            return _create_error_response(
+                request,
+                f"A tenant folder for slug {safe_slug!r} already exists. "
+                f"Delete or rename it first if you really want to recreate.",
+                form_echo=locals())
+        try:
+            os.makedirs(os.path.join(tenant_dir, "config"))
+            os.makedirs(os.path.join(tenant_dir, "data"))
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(client_data, f, indent=2, ensure_ascii=False)
+            logger.info(
+                "tenant_create.disk_written slug=%s path=%s", safe_slug, config_path)
+        except OSError as exc:
+            logger.warning(
+                "tenant_create.disk_failed slug=%s err=%r", safe_slug, exc)
+            # Render the success page anyway -- the operator still gets
+            # the JSON to copy/download, they can place it manually.
+    else:
+        logger.warning(
+            "tenant_create.disk_skipped reason=client_dir_unset_or_missing slug=%s",
+            safe_slug)
+
     # Welcome-email step. send_welcome is the checkbox value; we
     # also need a contact_email to send anywhere.
     welcome_status = "unchecked"

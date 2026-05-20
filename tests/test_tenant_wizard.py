@@ -130,21 +130,30 @@ def test_create_full_form_propagates_optional_fields(client):
     assert data["notes"] == "Be brief."
 
 
-def test_create_does_not_write_local_disk(client, tmp_path):
-    """Manual Mode: the wizard must not write anything to
-    NR3_TENANTS_CLIENT_DIR. The operator places the JSON manually."""
+def test_create_writes_client_json_locally_for_sidebar(client, tmp_path):
+    """Sidebar fix: the wizard writes the flat client.json under
+    NR3_TENANTS_CLIENT_DIR so list_tenants() picks the new tenant
+    up on the next page render."""
     r = client.post(
         "/admin/tenants/create",
-        data={"name": "No Disk"},
+        data={"name": "Sidebar Co", "slug": "sidebar-co"},
         follow_redirects=False)
     assert r.status_code == 200
-    assert not (tmp_path / "client_root" / "no-disk").exists()
-    assert not any(t.id == "no-disk" for t in tenants.list_tenants())
+    config_path = tmp_path / "client_root" / "sidebar-co" / "config" / "client.json"
+    assert config_path.exists()
+    import json as _json
+    written = _json.loads(config_path.read_text())
+    assert written["slug"] == "sidebar-co"
+    assert written["name"] == "Sidebar Co"
+    # And list_tenants() now sees the new tenant.
+    listed = [t.id for t in tenants.list_tenants()]
+    assert "sidebar-co" in listed
 
 
 def test_create_with_file_upload_is_silently_accepted(client, tmp_path):
-    """Form's optional file-upload still submits cleanly, but in
-    Manual Mode the bytes are discarded — no local write."""
+    """Form's optional file-upload still submits cleanly. The file
+    bytes themselves are discarded (Manual Mode does not store
+    uploads); the tenant folder + client.json still get written."""
     files = [("files", ("hello.txt", b"hello world", "text/plain"))]
     r = client.post(
         "/admin/tenants/create",
@@ -152,7 +161,11 @@ def test_create_with_file_upload_is_silently_accepted(client, tmp_path):
         files=files,
         follow_redirects=False)
     assert r.status_code == 200
-    assert not (tmp_path / "client_root" / "upload-co").exists()
+    # client.json is written...
+    assert (tmp_path / "client_root" / "upload-co" / "config" / "client.json").exists()
+    # ...but the upload bytes are NOT persisted anywhere.
+    uploads_dir = tmp_path / "client_root" / "upload-co" / "data" / "uploads"
+    assert not uploads_dir.exists() or not any(uploads_dir.iterdir())
 
 
 # --- POST /admin/tenants/create — error paths ---------------------
@@ -176,10 +189,10 @@ def test_create_rejects_bad_slug(client):
     assert "Slug must be" in r.text
 
 
-def test_create_duplicate_slug_is_allowed_in_manual_mode(client):
-    """Manual Mode: nothing persists, so two consecutive submits
-    with the same slug both succeed. The operator decides whether
-    they really want two copies of the JSON."""
+def test_create_rejects_duplicate_slug(client):
+    """The wizard refuses to overwrite an existing slug folder so a
+    duplicate submit can't silently regenerate the password and
+    invalidate the operator's paper trail."""
     r1 = client.post(
         "/admin/tenants/create",
         data={"name": "Dup A", "slug": "dupe-slug"},
@@ -189,7 +202,8 @@ def test_create_duplicate_slug_is_allowed_in_manual_mode(client):
         "/admin/tenants/create",
         data={"name": "Dup B", "slug": "dupe-slug"},
         follow_redirects=False)
-    assert r2.status_code == 200
+    assert r2.status_code == 400
+    assert "already exists" in r2.text
 
 
 # --- welcome email -----------------------------------------------

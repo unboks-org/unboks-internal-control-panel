@@ -533,12 +533,18 @@ def _load_tenants_from_disk(client_dir: str) -> tuple[Tenant, ...]:
             continue
         if not isinstance(data, dict):
             continue
+        # Two supported client.json shapes:
+        #   wrapped (legacy): {"business": {"slug": ..., "name": ..., ...}}
+        #   flat (J3-BE-50):  {"slug": ..., "name": ..., ...}
+        # Read from the wrapped business dict if present and non-empty,
+        # otherwise fall through to the top-level data dict.
         business = data.get("business")
-        if not isinstance(business, dict):
-            business = {}
-        # Parent directory name (e.g. "unboks" from /opt/wtyj/clients/unboks/config/client.json)
+        if isinstance(business, dict) and business:
+            source = business
+        else:
+            source = data
         directory_name = os.path.basename(os.path.dirname(os.path.dirname(path))).strip()
-        slug = business.get("slug")
+        slug = source.get("slug")
         if isinstance(slug, str):
             slug = slug.strip()
         else:
@@ -546,18 +552,18 @@ def _load_tenants_from_disk(client_dir: str) -> tuple[Tenant, ...]:
         tenant_id = slug or directory_name
         if not tenant_id:
             continue
-        raw_name = business.get("name")
+        raw_name = source.get("name")
         if isinstance(raw_name, str) and raw_name.strip():
             name = raw_name.strip()
         else:
             name = tenant_id
-        raw_status = business.get("status")
+        raw_status = source.get("status")
         if isinstance(raw_status, str):
             normalized = raw_status.strip().lower()
             status = normalized if normalized in _ALLOWED_STATUSES else "active"
         else:
             status = "active"
-        raw_plan = business.get("plan")
+        raw_plan = source.get("plan")
         if isinstance(raw_plan, str) and raw_plan.strip():
             plan = raw_plan.strip()
         else:
