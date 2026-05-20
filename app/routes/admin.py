@@ -451,8 +451,8 @@ async def admin_tenant_create_submit(
         f"DASHBOARD_PASSWORD={initial_token}\n"
         f"TENANT_ID={safe_slug}\n"
         f"TENANT_SLUG={safe_slug}\n"
-        f"NR3_INTERNAL_OVERRIDES_URL={settings.base_url}\n"
-        f"NR3_INTERNAL_API_TOKEN=PASTE_NR3_INTERNAL_API_TOKEN_HERE\n"
+        f"NR3_INTERNAL_OVERRIDES_URL=http://wtyj-admin:8010\n"
+        f"NR3_INTERNAL_API_TOKEN=SET_BY_FULL_VPS_SETUP_SCRIPT\n"
         f"ICP_OVERRIDES_TTL_SECONDS=5\n"
     )
 
@@ -473,6 +473,12 @@ async def admin_tenant_create_submit(
         f"      - ./config:/app/config:rw\n"
         f"      - ./data:/app/data\n"
         f"      - ./logs:/app/logs\n"
+        f"    networks:\n"
+        f"      - default\n"
+        f"      - unboks-control\n"
+        f"networks:\n"
+        f"  unboks-control:\n"
+        f"    external: true\n"
     )
 
     nginx_snippet_text = (
@@ -537,10 +543,12 @@ async def admin_tenant_create_submit(
         f"TENANT_DIR=/root/clients/{safe_slug}\n"
         f"NGINX_SITE=/etc/nginx/sites-enabled/api-unboks\n"
         f"BRIDGE_TOKEN_FILE=/root/clients/_shared/nr3_internal_api_token\n"
-        f"BRIDGE_TOKEN=PASTE_NR3_INTERNAL_API_TOKEN_HERE\n"
-        f"if [ -f \"$BRIDGE_TOKEN_FILE\" ]; then\n"
-        f"  BRIDGE_TOKEN=$(tr -d '\\r\\n' < \"$BRIDGE_TOKEN_FILE\")\n"
+        f"if [ ! -s \"$BRIDGE_TOKEN_FILE\" ]; then\n"
+        f"  echo \"ERROR: ICP bridge token file is missing: $BRIDGE_TOKEN_FILE\"\n"
+        f"  echo \"Ask Codex to repair the Nr3 bridge token before creating this tenant.\"\n"
+        f"  exit 1\n"
         f"fi\n"
+        f"BRIDGE_TOKEN=$(tr -d '\\r\\n' < \"$BRIDGE_TOKEN_FILE\")\n"
         f"\n"
         f"mkdir -p \"$TENANT_DIR/config\" \"$TENANT_DIR/data\" \"$TENANT_DIR/logs\"\n"
         f"cd \"$TENANT_DIR\"\n"
@@ -555,7 +563,7 @@ async def admin_tenant_create_submit(
         f"DASHBOARD_PASSWORD={initial_token}\n"
         f"TENANT_ID={safe_slug}\n"
         f"TENANT_SLUG={safe_slug}\n"
-        f"NR3_INTERNAL_OVERRIDES_URL={settings.base_url}\n"
+        f"NR3_INTERNAL_OVERRIDES_URL=http://wtyj-admin:8010\n"
         f"NR3_INTERNAL_API_TOKEN=${{BRIDGE_TOKEN}}\n"
         f"ICP_OVERRIDES_TTL_SECONDS=5\n"
         f"UNBOKS_PLATFORM_ENV\n"
@@ -584,6 +592,7 @@ async def admin_tenant_create_submit(
         f"path.write_text(text)\n"
         f"UNBOKS_NGINX_INSERT\n"
         f"\n"
+        f"docker network inspect unboks-control >/dev/null 2>&1 || docker network create unboks-control >/dev/null\n"
         f"docker compose down || true\n"
         f"docker compose up -d\n"
         f"nginx -t\n"
@@ -591,9 +600,7 @@ async def admin_tenant_create_submit(
         f"\n"
         f"echo \"Done. Test login: https://dashboard.unboks.org/{safe_slug}\"\n"
         f"echo \"Direct health check: curl -s http://127.0.0.1:{host_port}/health\"\n"
-        f"if [ \"$BRIDGE_TOKEN\" = \"PASTE_NR3_INTERNAL_API_TOKEN_HERE\" ]; then\n"
-        f"  echo \"Warning: ICP bridge token was not found at $BRIDGE_TOKEN_FILE. Channel sync needs that shared token file.\"\n"
-        f"fi\n"
+        f"echo \"ICP bridge token loaded from $BRIDGE_TOKEN_FILE. No manual token paste was needed.\"\n"
     )
 
     return templates.TemplateResponse(

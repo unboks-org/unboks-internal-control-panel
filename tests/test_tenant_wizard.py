@@ -428,8 +428,9 @@ def test_platform_env_carries_dashboard_password(client):
     assert "DASHBOARD_PASSWORD=" + data["password"] in env_text
     assert "TENANT_ID=acme" in env_text
     assert "TENANT_SLUG=acme" in env_text
-    assert "NR3_INTERNAL_OVERRIDES_URL=http://127.0.0.1:8010" in env_text
-    assert "NR3_INTERNAL_API_TOKEN=PASTE_NR3_INTERNAL_API_TOKEN_HERE" in env_text
+    assert "NR3_INTERNAL_OVERRIDES_URL=http://wtyj-admin:8010" in env_text
+    assert "NR3_INTERNAL_API_TOKEN=SET_BY_FULL_VPS_SETUP_SCRIPT" in env_text
+    assert "PASTE_NR3_INTERNAL_API_TOKEN_HERE" not in env_text
     assert "ICP_OVERRIDES_TTL_SECONDS=5" in env_text
 
 
@@ -492,7 +493,12 @@ def test_full_vps_setup_script_is_ready_to_paste(client):
     assert "cat > \"$TENANT_DIR/config/client.json\"" in script
     assert '"slug": "one-paste"' in script
     assert "cat > \"$TENANT_DIR/config/platform.env\"" in script
+    assert "PASTE_NR3_INTERNAL_API_TOKEN_HERE" not in script
+    assert "BRIDGE_TOKEN=$(tr -d" in script
+    assert "ICP bridge token loaded from $BRIDGE_TOKEN_FILE" in script
     assert "cat > \"$TENANT_DIR/docker-compose.yml\"" in script
+    assert "docker network inspect unboks-control" in script
+    assert "NR3_INTERNAL_OVERRIDES_URL=http://wtyj-admin:8010" in script
     assert "python3 - <<'UNBOKS_NGINX_INSERT'" in script
     assert "# BEGIN UNBOKS TENANT one-paste" in script
     assert "docker compose down || true" in script
