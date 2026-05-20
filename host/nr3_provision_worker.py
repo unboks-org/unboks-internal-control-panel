@@ -48,6 +48,10 @@ BRIDGE_TOKEN_FILE = env_path(
     "NR3_PROVISION_BRIDGE_TOKEN_FILE",
     "/root/clients/_shared/nr3_internal_api_token",
 )
+NGINX_BACKUP_DIR = env_path(
+    "NR3_PROVISION_NGINX_BACKUP_DIR",
+    "/root/nginx-sites-enabled-backups",
+)
 POLL_SECONDS = float(os.getenv("NR3_PROVISION_POLL_SECONDS", "2"))
 
 
@@ -97,8 +101,12 @@ def platform_env_text(slug: str, password: str, created_at: str, token: str) -> 
 
 def insert_nginx_block(slug: str, block: str) -> None:
     text = NGINX_SITE.read_text(encoding="utf-8")
-    backup = NGINX_SITE.with_name(
-        f"{NGINX_SITE.name}.bak-nr3-{slug}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    # Never place backups inside sites-enabled; nginx reads every file
+    # there and backup copies create duplicate server_name warnings.
+    NGINX_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup = NGINX_BACKUP_DIR / (
+        f"{NGINX_SITE.name}.bak-nr3-{slug}-"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     )
     shutil.copy2(NGINX_SITE, backup)
 

@@ -12,6 +12,7 @@ Environment=NR3_PROVISION_RESULT_DIR=/root/unboks-internal-control-panel/data/pr
 Environment=NR3_PROVISION_FAILED_DIR=/root/unboks-internal-control-panel/data/provisioning/failed
 Environment=NR3_PROVISION_CLIENTS_ROOT=/root/clients
 Environment=NR3_PROVISION_NGINX_SITE=/etc/nginx/sites-enabled/api-unboks
+Environment=NR3_PROVISION_NGINX_BACKUP_DIR=/root/nginx-sites-enabled-backups
 Environment=NR3_PROVISION_BRIDGE_TOKEN_FILE=/root/clients/_shared/nr3_internal_api_token
 ExecStart=/usr/bin/python3 /root/unboks-internal-control-panel/host/nr3_provision_worker.py
 Restart=always

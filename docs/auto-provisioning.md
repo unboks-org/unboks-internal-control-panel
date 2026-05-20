@@ -49,6 +49,7 @@ The worker expects:
 - Docker installed on the host.
 - nginx installed on the host.
 - `/etc/nginx/sites-enabled/api-unboks` exists.
+- `/root/nginx-sites-enabled-backups` can be created for nginx backups.
 - `/root/clients/_shared/nr3_internal_api_token` exists and is non-empty.
 - The `wtyj-agent` Docker image exists locally.
 
@@ -57,5 +58,6 @@ The worker expects:
 - Slugs are validated before any host write.
 - Existing tenant directories are not overwritten.
 - The bridge token is read by the host worker and is not shown in the UI.
-- nginx config is backed up before insertion and restored if `nginx -t` fails.
+- nginx config is backed up outside `sites-enabled` before insertion and
+  restored if `nginx -t` fails.
 - Manual one-paste setup remains available as fallback.

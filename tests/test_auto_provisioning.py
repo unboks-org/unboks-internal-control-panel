@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from app.provisioning import auto_provision_tenant
 
@@ -45,3 +46,13 @@ def test_auto_provision_writes_queue_job_without_waiting(monkeypatch, tmp_path):
     assert payload["slug"] == "acme"
     assert payload["host_port"] == 8123
     assert payload["dashboard_url"] == "https://dashboard.unboks.org/acme"
+
+
+def test_host_worker_keeps_nginx_backups_outside_sites_enabled():
+    worker_source = Path("host/nr3_provision_worker.py").read_text()
+    service_source = Path("host/nr3-provision-worker.service").read_text()
+
+    assert "NGINX_BACKUP_DIR" in worker_source
+    assert "Never place backups inside sites-enabled" in worker_source
+    assert "NGINX_SITE.with_name" not in worker_source
+    assert "NR3_PROVISION_NGINX_BACKUP_DIR=/root/nginx-sites-enabled-backups" in service_source
