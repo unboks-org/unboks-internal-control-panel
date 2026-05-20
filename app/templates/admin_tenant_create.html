@@ -65,28 +65,6 @@
     </fieldset>
 
     <fieldset class="ct-fieldset">
-      <legend>Plan &amp; status</legend>
-      <div class="ct-row-pair">
-        <div>
-          <label for="ct-plan">Plan</label>
-          <select id="ct-plan" name="plan">
-            {% for opt in ["trial", "monthly", "yearly"] %}
-              <option value="{{ opt }}" {% if (form.plan or "trial") == opt %}selected{% endif %}>{{ opt | capitalize }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label for="ct-status">Status</label>
-          <select id="ct-status" name="status">
-            {% for opt in ["active", "trial", "paused"] %}
-              <option value="{{ opt }}" {% if (form.status or "trial") == opt %}selected{% endif %}>{{ opt | capitalize }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
-    </fieldset>
-
-    <fieldset class="ct-fieldset">
       <legend>AI Agent defaults</legend>
       <div class="ct-row">
         <label for="ct-tone">Default tone</label>
