@@ -95,7 +95,7 @@
                   class="tenant-selector-item {% if active_tenant and active_tenant.id == tenant.id %}active{% endif %}"
                   {% if active_tenant and active_tenant.id == tenant.id %}aria-current="page"{% endif %}
                 >
-                  <span class="tenant-selector-dot tenant-status-{{ tenant.status }}" aria-hidden="true" title="{{ tenant.status }}"></span>
+                  <span class="tenant-selector-dot tenant-status-{{ tenant.status }}" aria-hidden="true"></span>
                   <span class="tenant-selector-text">
                     <span class="tenant-selector-name">{{ tenant.name }}</span>
                     <span class="tenant-selector-slug muted">{{ tenant.id }}</span>
@@ -110,6 +110,38 @@
       </div>
 
       <nav class="sidebar-nav" aria-label="Sections">
+        <a
+          href="/admin/attention"
+          class="nav-item {% if active == 'attention' %}active{% endif %}"
+          {% if active == 'attention' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Needs attention</span>
+        </a>
+        <a
+          href="/admin/anomalies"
+          class="nav-item {% if active == 'anomalies' %}active{% endif %}"
+          {% if active == 'anomalies' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Anomaly monitor</span>
+        </a>
+        <a
+          href="/admin/pending-changes"
+          class="nav-item {% if active == 'pending' %}active{% endif %}"
+          {% if active == 'pending' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Pending changes</span>
+        </a>
+        <a
+          href="/admin/audit/push"
+          class="nav-item {% if active == 'push_audit' %}active{% endif %}"
+          {% if active == 'push_audit' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Push audit</span>
+        </a>
         <a
           href="/admin/settings"
           class="nav-item {% if active == 'settings' %}active{% endif %}"
@@ -151,6 +183,54 @@
       <main class="page-content" id="content">
         {% block content %}{% endblock %}
       </main>
+    </div>
+  </div>
+
+  {# Owner action modal — used by all data-action buttons #}
+  <div
+    class="owner-modal"
+    data-owner-modal
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="owner-modal-title"
+    aria-describedby="owner-modal-body"
+    hidden
+  >
+    <div class="owner-modal-backdrop" data-owner-modal-close></div>
+    <div class="owner-modal-card" role="document">
+      <header class="owner-modal-head">
+        <h2 id="owner-modal-title" data-owner-modal-title>Action</h2>
+        <button
+          type="button"
+          class="owner-modal-x"
+          data-owner-modal-close
+          aria-label="Close"
+        >&times;</button>
+      </header>
+      <div class="owner-modal-body" id="owner-modal-body" data-owner-modal-body>
+        <p class="owner-modal-text" data-owner-modal-text></p>
+        <dl class="owner-modal-meta" data-owner-modal-meta hidden>
+          <div><dt>Tenant</dt><dd data-owner-modal-tenant>—</dd></div>
+          <div><dt>Action</dt><dd data-owner-modal-action>—</dd></div>
+          <div data-owner-modal-consequence-row hidden>
+            <dt>Consequence</dt><dd data-owner-modal-consequence>—</dd>
+          </div>
+        </dl>
+        <p class="owner-modal-result" data-owner-modal-result hidden></p>
+      </div>
+      <footer class="owner-modal-foot">
+        <button
+          type="button"
+          class="button-secondary"
+          data-owner-modal-cancel
+        >Cancel</button>
+        <button
+          type="button"
+          class="button-primary"
+          data-owner-modal-confirm
+          hidden
+        >Confirm</button>
+      </footer>
     </div>
   </div>
 {% endblock %}

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """J3-BE-01: real tenant discovery from clients/*/config/client.json files."""
 import json
 import os
