@@ -121,6 +121,10 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert ">Home<" not in shell.text
     assert "Onboarding" not in sidebar
     assert "Reviews" not in sidebar
+    assert "Needs attention" not in sidebar
+    assert "Anomaly monitor" not in sidebar
+    assert "Pending changes" not in sidebar
+    assert "Push audit" not in sidebar
     assert "Settings" in sidebar
 
     settings_page = client.get("/admin/settings")

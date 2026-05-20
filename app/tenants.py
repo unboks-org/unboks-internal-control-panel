@@ -647,6 +647,10 @@ def register_tenant(client_data: dict) -> None:
     """
     if not isinstance(client_data, dict):
         return
+    slug = client_data.get("slug")
+    if isinstance(slug, str):
+        client_data = dict(client_data)
+        client_data["slug"] = validate_slug(slug)
     tenant = _tenant_from_source(client_data, "")
     if tenant is None:
         return

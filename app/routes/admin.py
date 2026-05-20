@@ -38,6 +38,7 @@ from app.tenants import (
     derive_slug_from_name,
     get_tenant,
     list_tenants,
+    register_tenant,
     sorted_notes,
     validate_slug,
 )
@@ -163,6 +164,55 @@ def admin_toggle_channel(
         url=f"/admin/tenants/{tenant_id}#channels-section",
         status_code=303,
     )
+
+
+@router.post("/admin/tenants/import", response_class=HTMLResponse)
+def admin_tenant_import_existing(
+    request: Request,
+    slug: str = Form(default=""),
+    name: str = Form(default=""),
+    status: str = Form(default="trial"),
+    plan: str = Form(default="trial"),
+) -> Response:
+    """Register an existing tenant in the ICP sidebar.
+
+    This is for tenants already provisioned on the VPS when Nr3 cannot
+    directly read that VPS filesystem. It does not create credentials,
+    touch runtime files, or deploy anything.
+    """
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+
+    candidate_slug = (slug or "").strip()
+    try:
+        safe_slug = validate_slug(candidate_slug)
+    except TenantCreateError as exc:
+        return _create_error_response(
+            request,
+            str(exc),
+            form_echo={
+                "existing_slug": slug,
+                "existing_name": name,
+                "existing_status": status,
+                "existing_plan": plan,
+            },
+        )
+
+    display_name = (name or "").strip() or safe_slug
+    normalized_status = (status or "trial").strip().lower()
+    if normalized_status not in ("active", "trial", "paused", "suspended"):
+        normalized_status = "trial"
+    normalized_plan = (plan or "trial").strip().lower() or "trial"
+    register_tenant({
+        "slug": safe_slug,
+        "name": display_name,
+        "status": normalized_status,
+        "plan": normalized_plan,
+    })
+    logger.info("tenant_import.registry_written slug=%s", safe_slug)
+    return RedirectResponse(url=f"/admin/tenants/{safe_slug}", status_code=303)
 
 
 

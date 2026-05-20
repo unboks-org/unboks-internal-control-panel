@@ -61,6 +61,7 @@ def test_create_form_renders(client):
     assert r.status_code == 200
     body = r.text
     assert "Create a new tenant" in body
+    assert "Register existing tenant" in body
     assert 'name="files"' in body
     assert 'name="send_welcome"' in body
 
@@ -164,6 +165,30 @@ def test_create_writes_tenant_registry_for_icp_sidebar(client, tmp_path):
     assert registry_path.exists()
     registered = json.loads(registry_path.read_text())
     assert registered["tenants"]["registry-co"]["name"] == "Registry Co"
+
+
+def test_import_existing_tenant_registers_sidebar_row(client, tmp_path):
+    r = client.post(
+        "/admin/tenants/import",
+        data={
+            "slug": "pepe",
+            "name": "Pepe Test",
+            "status": "trial",
+            "plan": "trial",
+        },
+        follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/tenants/pepe"
+
+    registry_path = tmp_path / "tenant_registry.json"
+    registered = json.loads(registry_path.read_text())
+    assert registered["tenants"]["pepe"]["name"] == "Pepe Test"
+
+    sidebar = client.get("/admin/tenants/pepe")
+    assert sidebar.status_code == 200
+    assert 'class="tenant-selector-name">Pepe Test<' in sidebar.text
+    assert 'class="tenant-selector-slug muted">pepe<' in sidebar.text
+    assert "channels-section" in sidebar.text
 
 
 def test_create_with_file_upload_is_silently_accepted(client, tmp_path):

@@ -112,4 +112,61 @@
     </div>
   </form>
 </section>
+
+<section class="page-card create-tenant">
+  <header class="create-tenant-header">
+    <h2>Register existing tenant</h2>
+    <p class="muted">
+      Use this for tenants already running on the VPS, such as a tenant
+      manually created before ICP provisioning. This only adds the tenant
+      to the ICP sidebar; it does not touch runtime files or secrets.
+    </p>
+  </header>
+
+  <form class="create-tenant-form"
+        method="post"
+        action="/admin/tenants/import"
+        autocomplete="off">
+    <fieldset class="ct-fieldset">
+      <legend>Existing tenant</legend>
+      <div class="ct-row">
+        <label for="ct-existing-slug">Slug <span class="req">*</span></label>
+        <input id="ct-existing-slug" name="slug" type="text"
+               required maxlength="50"
+               pattern="^[a-z][a-z0-9_-]{1,49}$"
+               value="{{ form.existing_slug or '' }}"
+               placeholder="pepe">
+      </div>
+      <div class="ct-row">
+        <label for="ct-existing-name">Business name</label>
+        <input id="ct-existing-name" name="name" type="text"
+               maxlength="200"
+               value="{{ form.existing_name or '' }}"
+               placeholder="Pepe Test">
+      </div>
+      <div class="ct-row-pair">
+        <div>
+          <label for="ct-existing-status">Status</label>
+          <select id="ct-existing-status" name="status">
+            {% for opt in ["trial", "active", "paused", "suspended"] %}
+              <option value="{{ opt }}" {% if (form.existing_status or 'trial') == opt %}selected{% endif %}>{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="ct-existing-plan">Plan</label>
+          <select id="ct-existing-plan" name="plan">
+            {% for opt in ["trial", "demo", "paid"] %}
+              <option value="{{ opt }}" {% if (form.existing_plan or 'trial') == opt %}selected{% endif %}>{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </fieldset>
+
+    <div class="ct-actions">
+      <button type="submit" class="button-primary">Register tenant</button>
+    </div>
+  </form>
+</section>
 {% endblock %}
