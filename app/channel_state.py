@@ -105,3 +105,22 @@ def toggle_channel(slug: str, channel: str) -> dict[str, bool]:
             "channel_state.save_failed slug=%s channel=%s err=%r",
             slug, channel, exc)
     return {key: bool(tenant_state.get(key, False)) for _, key in CHANNEL_KEYS}
+
+
+def forget_tenant(slug: str) -> bool:
+    """Drop every channel toggle for ``slug``.
+
+    Mirrors icp_overrides.forget_tenant so a deleted tenant leaves no
+    state behind. Returns True if anything was removed."""
+    all_state = _load_all()
+    if slug not in all_state:
+        return False
+    all_state.pop(slug, None)
+    try:
+        _save_all(all_state)
+        icp_overrides.forget_tenant(slug)
+        logger.info("channel_state.forget_tenant slug=%s", slug)
+    except OSError as exc:
+        logger.warning("channel_state.forget_failed slug=%s err=%r", slug, exc)
+    return True
+

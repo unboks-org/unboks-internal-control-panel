@@ -677,6 +677,40 @@ def register_tenant(client_data: dict) -> None:
     _save_registry(data)
 
 
+def unregister_tenant(slug: str) -> bool:
+    """Remove ``slug`` from the lightweight ICP registry.
+
+    The registry is the second source of truth for the sidebar (alongside
+    the disk glob). Removing the directory alone leaves a ghost entry
+    here, which is exactly the bug we hit on 2026-05-20 with `roberto`.
+    Returns True if a registry row was actually removed.
+
+    Best-effort: silently returns False if the registry file is unset,
+    missing, or malformed. Never raises -- the disk delete already
+    succeeded by the time this is called and the caller is on the
+    cleanup path.
+    """
+    path = _registry_path()
+    if not path:
+        return False
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    tenants = data.get("tenants")
+    if not isinstance(tenants, dict) or slug not in tenants:
+        return False
+    tenants.pop(slug, None)
+    try:
+        _save_registry(data)
+    except OSError:
+        return False
+    return True
+
+
 def list_tenants() -> tuple[Tenant, ...]:
     """Return every tenant Nr3 can know about.
 
@@ -834,4 +868,14 @@ def delete_tenant_directory(slug: str,
         raise TenantDeleteError(
             f"Tenant {safe_slug!r} not found at {tenant_root!r}.")
     shutil.rmtree(tenant_root)
+    # Belt-and-braces cleanup of every other place a tenant leaves
+    # state. Each call is best-effort: the on-disk delete already
+    # succeeded and a single ghost JSON row must not raise.
+    unregister_tenant(safe_slug)
+    try:
+        from app import channel_state, icp_overrides
+        channel_state.forget_tenant(safe_slug)
+        icp_overrides.forget_tenant(safe_slug)
+    except Exception:  # pragma: no cover -- defensive
+        pass
 

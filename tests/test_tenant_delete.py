@@ -90,3 +90,65 @@ def test_delete_one_tenant_leaves_others(client_dir):
     with open(Path(client_dir, "bravo", "config", "client.json")) as f:
         cfg = json.load(f)
     assert cfg["business"]["name"] == "Bravo"
+
+
+def test_delete_cleans_registry_and_state_files(client_dir, tmp_path, monkeypatch):
+    """The roberto-2026-05-20 bug: removing the tenant directory left
+    ghost entries in tenant_registry.json, icp_overrides.json, and
+    channel_state.json -- so the sidebar still listed the dead tenant.
+    delete_tenant_directory() must wipe every place a tenant lives."""
+    from app import channel_state, icp_overrides
+    from app.tenants import register_tenant
+
+    registry_path = tmp_path / "tenant_registry.json"
+    overrides_path = tmp_path / "icp_overrides.json"
+    channels_path = tmp_path / "channel_state.json"
+    monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("NR3_ICP_STATE_PATH", str(overrides_path))
+    monkeypatch.setenv("NR3_CHANNEL_STATE_PATH", str(channels_path))
+
+    _make("ghost", client_dir, "Ghost")
+    register_tenant({"slug": "ghost", "name": "Ghost",
+                     "status": "trial", "plan": "trial"})
+    channel_state.toggle_channel("ghost", "whatsapp")
+    icp_overrides.set_feature_toggle("ghost", "email_inbox", True)
+
+    # Sanity: ghost is in all three state files.
+    assert json.loads(registry_path.read_text())["tenants"].get("ghost")
+    assert "ghost" in json.loads(overrides_path.read_text())["tenants"]
+    assert "ghost" in json.loads(channels_path.read_text())
+
+    delete_tenant_directory("ghost", client_dir=client_dir)
+
+    assert not Path(client_dir, "ghost").exists()
+    assert "ghost" not in json.loads(registry_path.read_text())["tenants"]
+    assert "ghost" not in json.loads(overrides_path.read_text())["tenants"]
+    assert "ghost" not in json.loads(channels_path.read_text())
+
+
+def test_reserved_slug_blocks_state_cleanup_too(client_dir, tmp_path, monkeypatch):
+    """The reserved-slug guard must fire before ANY cleanup -- a
+    blocked delete must not even touch the state files."""
+    from app import channel_state, icp_overrides
+    from app.tenants import register_tenant
+
+    registry_path = tmp_path / "tenant_registry.json"
+    overrides_path = tmp_path / "icp_overrides.json"
+    channels_path = tmp_path / "channel_state.json"
+    monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("NR3_ICP_STATE_PATH", str(overrides_path))
+    monkeypatch.setenv("NR3_CHANNEL_STATE_PATH", str(channels_path))
+
+    _make("unboks", client_dir)
+    register_tenant({"slug": "unboks", "name": "Unboks",
+                     "status": "active", "plan": "demo"})
+    icp_overrides.set_feature_toggle("unboks", "email_inbox", True)
+    channel_state.toggle_channel("unboks", "whatsapp")
+
+    with pytest.raises(TenantDeleteError, match="reserved"):
+        delete_tenant_directory("unboks", client_dir=client_dir)
+
+    # All three state stores must still hold the unboks rows.
+    assert json.loads(registry_path.read_text())["tenants"].get("unboks")
+    assert json.loads(overrides_path.read_text())["tenants"].get("unboks")
+    assert json.loads(channels_path.read_text()).get("unboks")

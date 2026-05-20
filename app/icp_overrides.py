@@ -122,6 +122,23 @@ def set_channel_visibility(
     )
 
 
+def forget_tenant(tenant_id: str) -> bool:
+    """Drop every override row for ``tenant_id``.
+
+    Returns True if any state was removed. Called from the tenant-delete
+    flow so a deleted tenant does not leave ghost feature-toggle entries
+    that resurface in Nr2 via /internal/tenants/.../overrides.
+    """
+    data = _load_all()
+    tenants = data.get("tenants") if isinstance(data, dict) else None
+    if not isinstance(tenants, dict) or tenant_id not in tenants:
+        return False
+    tenants.pop(tenant_id, None)
+    _save_all(data)
+    logger.info("icp_overrides.forget_tenant tenant=%s", tenant_id)
+    return True
+
+
 def feature_toggles_for_tenant(tenant_id: str) -> dict[str, dict[str, Any]]:
     data = _load_all()
     tenants = data.get("tenants") if isinstance(data, dict) else {}
