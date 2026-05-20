@@ -48,11 +48,14 @@ __pycache__/
 *.py[cod]
 
 # Local Nr 3 persistence
+data/
 data/*.db
 data/*.db-*
 data/*.sqlite
 data/*.sqlite-*
 data/*.json
+ADMIN_LOGIN.txt
+docker-compose.override.yml
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
