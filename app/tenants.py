@@ -727,10 +727,22 @@ def get_tenant(tenant_id: str) -> Optional[Tenant]:
 
 _SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{1,49}$")
 
+# Slugs that the Internal Control Panel refuses to delete. `unboks`
+# is the master / admin tenant -- it owns the control panel itself
+# and is the source of operator logins, so wiping it would lock
+# everyone out. Defense-in-depth lock requested by Benson 2026-05-20
+# after the bulk-cleanup that left unboks as the only tenant.
+RESERVED_SLUGS: frozenset[str] = frozenset({"unboks"})
+
 
 class TenantCreateError(Exception):
     """Raised when create_tenant_directory cannot create a tenant (bad
     slug, slug already exists, client_dir not configured, etc.)."""
+
+
+class TenantDeleteError(Exception):
+    """Raised when delete_tenant_directory cannot delete a tenant
+    (reserved slug, client_dir not configured, missing directory)."""
 
 
 def validate_slug(slug: str) -> str:
@@ -790,3 +802,36 @@ def create_tenant_directory(slug: str, business: dict,
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
     return tenant_root
+
+
+def delete_tenant_directory(slug: str,
+                             client_dir: Optional[str] = None) -> None:
+    """Remove <client_dir>/<slug>/ entirely (config + data + everything
+    underneath).
+
+    Raises ``TenantDeleteError`` if:
+      * the slug fails ``validate_slug``
+      * the slug is in ``RESERVED_SLUGS`` (the master tenant is locked)
+      * ``NR3_TENANTS_CLIENT_DIR`` is not configured
+      * ``<client_dir>/<slug>/`` does not exist
+
+    Irreversible -- callers are expected to confirm with the operator
+    before calling. The reserved-slug check happens BEFORE any disk
+    work so a guarded slug can never be partially removed.
+    """
+    import shutil
+    safe_slug = validate_slug(slug)
+    if safe_slug in RESERVED_SLUGS:
+        raise TenantDeleteError(
+            f"Tenant {safe_slug!r} is reserved and cannot be deleted.")
+    root = client_dir or os.getenv(
+        "NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    if not root:
+        raise TenantDeleteError(
+            "NR3_TENANTS_CLIENT_DIR is not set -- cannot delete tenant.")
+    tenant_root = os.path.join(root, safe_slug)
+    if not os.path.isdir(tenant_root):
+        raise TenantDeleteError(
+            f"Tenant {safe_slug!r} not found at {tenant_root!r}.")
+    shutil.rmtree(tenant_root)
+
