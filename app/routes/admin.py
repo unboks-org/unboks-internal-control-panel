@@ -484,7 +484,7 @@ async def admin_tenant_create_submit(
         f"    if ($request_method = OPTIONS) {{\n"
         f"        add_header Access-Control-Allow-Origin \"https://dashboard.unboks.org\" always;\n"
         f"        add_header Access-Control-Allow-Methods \"GET, POST, PUT, PATCH, DELETE, OPTIONS\" always;\n"
-        f"        add_header Access-Control-Allow-Headers \"Authorization, Content-Type, Accept, Origin, X-Tenant-Slug\" always;\n"
+        f"        add_header Access-Control-Allow-Headers \"Authorization, Content-Type, Accept, Origin, X-Tenant-Slug, Cache-Control, Pragma\" always;\n"
         f"        add_header Access-Control-Allow-Credentials \"true\" always;\n"
         f"        add_header Access-Control-Max-Age 86400 always;\n"
         f"        return 204;\n"

@@ -457,6 +457,7 @@ def test_nginx_snippet_routes_slug_to_proxy_pass(client):
     assert "location ^~ /api/acme/" in nginx
     assert "proxy_set_header X-Tenant-Slug acme;" in nginx
     assert "Access-Control-Allow-Credentials" in nginx
+    assert "Cache-Control, Pragma" in nginx
     assert re.search(r"proxy_pass http://127\.0\.0\.1:\d{4}/;", nginx)
 
 
