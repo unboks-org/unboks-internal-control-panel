@@ -1360,15 +1360,15 @@ button.button-disabled,
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   margin-bottom: 14px;
-  padding: 16px 18px;
+  padding: 12px 14px;
 }
 
 .channels-panel-header {
-  align-items: flex-start;
+  align-items: center;
   display: flex;
-  gap: 12px;
+  gap: 8px;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .channels-panel-header h3 {
@@ -1377,9 +1377,9 @@ button.button-disabled,
   margin: 0 0 2px;
 }
 
-.channels-panel { padding: 12px 14px; }
-
 .ch-name {
+  color: #202124;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -2106,56 +2106,49 @@ button.button-disabled,
 /* ---------------------------------------------------------------- */
 .channels-list {
   list-style: none;
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   padding: 0;
-  border: 1px solid #e6e8ec;
-  border-radius: 10px;
+  border: 1px solid #e7e9ef;
+  border-radius: 8px;
   overflow: hidden;
   background: #fff;
 }
 .channels-list .channel-item {
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: minmax(0, 1fr) 34px 38px;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-bottom: 1px solid #eef0f3;
-  font-size: 0.92rem;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid #edf0f4;
+  font-size: 13px;
 }
 .channels-list .channel-item:last-child {
   border-bottom: 0;
 }
 .channels-list .channel-item:hover {
-  background: #fafbfc;
+  background: #fbfcfd;
 }
 .channels-list .ch-name {
-  font-weight: 500;
-  color: #1f2330;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .channels-list .ch-status {
-  font-size: 0.72rem;
-  padding: 2px 8px;
+  font-size: 11px;
+  justify-self: end;
+  line-height: 16px;
+  min-width: 28px;
+  padding: 0 6px;
   border-radius: 999px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-.channels-list .ch-configure {
-  background: transparent;
-  border: 1px solid #d8dce3;
-  color: #3a4252;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 0.78rem;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-.channels-list .ch-configure:hover {
-  background: #f3f5f8;
-  border-color: #c4cad4;
+  font-weight: 600;
+  text-align: center;
 }
 .channels-list .channel-toggle-form {
   margin: 0;
   display: inline-flex;
+  justify-self: end;
 }
 
 /* ---------------------------------------------------------------- */
@@ -2166,8 +2159,9 @@ button.button-disabled,
 .ios-toggle {
   position: relative;
   display: inline-flex;
-  width: 44px;
-  height: 26px;
+  width: 34px;
+  height: 20px;
+  min-height: 20px;
   border-radius: 999px;
   background: #E9E9EB;
   border: 0;
@@ -2179,20 +2173,19 @@ button.button-disabled,
   box-sizing: border-box;
   -webkit-appearance: none;
   appearance: none;
-  transition: background-color 0.25s cubic-bezier(0.4, 0.0, 0.2, 1);
+  transition: background-color 0.18s ease;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
 }
 .ios-toggle.is-on {
-  background: #34C759;
+  background: #2fbf5b;
 }
 .ios-toggle.is-off {
   background: #E9E9EB;
 }
-.ios-toggle:hover.is-on { background: #30BB54; }
+.ios-toggle:hover.is-on { background: #2aaa51; }
 .ios-toggle:hover.is-off { background: #DEDEE0; }
 .ios-toggle:active .ios-toggle-knob {
-  /* Subtle knob squish on press, mimicking iOS feedback */
-  width: 26px;
+  width: 18px;
 }
 .ios-toggle.is-on:active .ios-toggle-knob {
   transform: translateX(14px);
@@ -2202,20 +2195,19 @@ button.button-disabled,
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #FFFFFF;
   box-shadow:
-    0 3px 8px rgba(0, 0, 0, 0.15),
-    0 3px 1px rgba(0, 0, 0, 0.06),
+    0 1px 4px rgba(0, 0, 0, 0.18),
     0 0 0 0.5px rgba(0, 0, 0, 0.04);
   transition:
-    transform 0.28s cubic-bezier(0.4, 0.0, 0.2, 1),
-    width 0.18s ease;
+    transform 0.18s ease,
+    width 0.14s ease;
 }
 .ios-toggle.is-on .ios-toggle-knob {
-  transform: translateX(18px);
+  transform: translateX(14px);
 }
 .ios-toggle:focus-visible {
   outline: 2px solid #4f8cff;
