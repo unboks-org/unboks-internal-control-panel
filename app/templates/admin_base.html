@@ -13,13 +13,13 @@
     ></button>
 
     <aside class="sidebar" data-sidebar aria-label="Primary navigation">
-      <div class="sidebar-brand">
+      <a class="sidebar-brand" href="/admin/tenants" aria-label="Go to tenant list">
         <span class="brand-mark" aria-hidden="true">U</span>
         <div class="brand-text">
           <span class="brand-name">Unboks</span>
           <span class="brand-sub">Internal control panel</span>
         </div>
-      </div>
+      </a>
 
       <a href="/admin/tenants/new"
          class="sidebar-add-tenant {% if active == 'tenant_create' %}active{% endif %}"

@@ -178,12 +178,12 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "ws-section" in workspace.text
     assert "ws-summary" in workspace.text
     assert "ws-chevron" in workspace.text
-    # Only AI Agent stays open by default; the other three are collapsed.
+    # All sections start collapsed by default — operator opens them on click.
     import re as _re
     open_count = len(_re.findall(r'<details class="ws-section [^"]+" open>', workspace.text))
     closed_count = len(_re.findall(r'<details class="ws-section [^"]+">', workspace.text))
-    assert open_count >= 1
-    assert closed_count >= 3
+    assert open_count == 0
+    assert closed_count >= 4
     # Soft section tones — only the 4 final kept sections.
     for tone in (
         "ws-tone-violet", "ws-tone-peach", "ws-tone-gray", "ws-tone-danger",
