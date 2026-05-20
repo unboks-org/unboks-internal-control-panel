@@ -258,8 +258,23 @@ async def admin_tenant_create_submit(
     # Refuse to overwrite an existing slug: a duplicate submit would
     # otherwise silently regenerate the password and destroy the
     # paper trail the operator already copied.
-    root = os.environ.get("NR3_TENANTS_CLIENT_DIR", "").strip()
-    if root and os.path.isdir(root):
+    # Resolve the tenants root from the env var, falling back to the
+    # same default list_tenants() reads from. mkdir -p the directory
+    # if it doesn't exist yet -- silently-skipping when the dir is
+    # missing was the J3 sidebar-list bug ("only 1 tenant" on a fresh
+    # Replit deploy where /opt/wtyj/clients can't be created).
+    from app.tenants import _DEFAULT_TENANTS_CLIENT_DIR
+    root = (os.environ.get("NR3_TENANTS_CLIENT_DIR")
+            or _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    try:
+        os.makedirs(root, exist_ok=True)
+    except OSError as exc:
+        logger.warning(
+            "tenant_create.disk_skipped slug=%s reason=root_mkdir_failed err=%r",
+            safe_slug, exc)
+        root = ""
+
+    if root:
         tenant_dir = os.path.join(root, safe_slug)
         config_path = os.path.join(tenant_dir, "config", "client.json")
         if os.path.exists(tenant_dir):
@@ -283,10 +298,6 @@ async def admin_tenant_create_submit(
                 "tenant_create.disk_failed slug=%s err=%r", safe_slug, exc)
             # Render the success page anyway -- the operator still gets
             # the JSON to copy/download, they can place it manually.
-    else:
-        logger.warning(
-            "tenant_create.disk_skipped reason=client_dir_unset_or_missing slug=%s",
-            safe_slug)
 
     # Welcome-email step. send_welcome is the checkbox value; we
     # also need a contact_email to send anywhere.

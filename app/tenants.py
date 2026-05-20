@@ -502,7 +502,7 @@ def sorted_notes(notes: tuple[TenantNote, ...]) -> tuple[TenantNote, ...]:
     return tuple(sorted(notes, key=lambda n: (0 if n.pinned else 1,)))
 
 
-_DEFAULT_TENANTS_CLIENT_DIR = "/opt/wtyj/clients"
+_DEFAULT_TENANTS_CLIENT_DIR = "data/tenants"
 _ALLOWED_STATUSES = ("active", "trial", "paused", "suspended")
 
 
