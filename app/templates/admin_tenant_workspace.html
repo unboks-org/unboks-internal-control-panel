@@ -69,73 +69,51 @@
       <span class="status-chip status-{{ 'ok' if tenant.health.channels == 'ok' else 'unknown' }}">{{ tenant.health.channels }}</span>
     </header>
 
-    <table class="channels-table">
-      <thead>
-        <tr>
-          <th class="ch-col-name">Channel</th>
-          <th class="ch-col-status">Status</th>
-          <th class="ch-col-toggle">On / Off</th>
-          <th class="ch-col-sync">Last sync</th>
-          <th class="ch-col-msg">Last message</th>
-          <th class="ch-col-actions"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% if channel_keys is defined and channels is defined %}
-          {% for label, key in channel_keys %}
-          {% set is_on = channels.get(key, False) %}
-          {% set status_label = 'Active' if is_on else 'Inactive' %}
-          {% set status_class = 'ok' if is_on else 'unknown' %}
-          <tr class="channel-row {% if is_on %}is-on{% else %}is-off{% endif %}">
-            <td class="ch-name">{{ label }}</td>
-            <td><span class="status-chip status-{{ status_class }}">{{ status_label }}</span></td>
-            <td>
-              <form method="post" action="/admin/tenants/{{ tenant.id }}/channels/{{ key }}/toggle" class="channel-toggle-form">
-                <button
-                  type="submit"
-                  class="channel-toggle {% if is_on %}is-on{% else %}is-off{% endif %}"
-                  aria-pressed="{{ 'true' if is_on else 'false' }}"
-                  title="Click to turn {{ 'off' if is_on else 'on' }}">
-                  <span class="channel-toggle-knob" aria-hidden="true"></span>
-                  <span class="sr-only">{{ label }} {{ 'on' if is_on else 'off' }}</span>
-                  {{ 'On' if is_on else 'Off' }}
-                </button>
-              </form>
-            </td>
-            <td class="ch-meta muted">—</td>
-            <td class="ch-meta muted">—</td>
-            <td class="ch-actions">
-              <button type="button" class="link-btn" data-action="configure" data-action-name="Configure" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Configure</button>
-            </td>
-          </tr>
-          {% endfor %}
-        {% else %}
-          {% for ch in tenant.channels %}
-          {% set is_on = ch.state == 'connected' %}
-          {% set status_label = 'Active' if is_on else 'Inactive' %}
-          {% set status_class = 'ok' if is_on else 'unknown' %}
-          <tr class="channel-row {% if is_on %}is-on{% else %}is-off{% endif %}">
-            <td class="ch-name">{{ ch.name }}</td>
-            <td><span class="status-chip status-{{ status_class }}">{{ status_label }}</span></td>
-            <td>
-              <span
-                class="channel-toggle {% if is_on %}is-on{% else %}is-off{% endif %}"
-                role="switch"
-                aria-checked="{{ 'true' if is_on else 'false' }}" data-action="toggle-channel" data-action-name="Toggle channel" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}" tabindex="0">
-                <span class="channel-toggle-knob" aria-hidden="true"></span>
-                <span class="sr-only">{{ ch.name }} {{ 'on' if is_on else 'off' }}</span>
-              </span>
-            </td>
-            <td class="ch-meta muted">{{ ch.last_sync or '—' }}</td>
-            <td class="ch-meta muted">{{ ch.last_message or '—' }}</td>
-            <td class="ch-actions">
-              <button type="button" class="link-btn" data-action="configure" data-action-name="Configure" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Configure</button>
-            </td>
-          </tr>
-          {% endfor %}
-        {% endif %}
-      </tbody>
-    </table>
+    <ul class="channels-list" role="list">
+      {% if channel_keys is defined and channels is defined %}
+        {% for label, key in channel_keys %}
+        {% set is_on = channels.get(key, False) %}
+        {% set status_label = 'Active' if is_on else 'Inactive' %}
+        {% set status_class = 'ok' if is_on else 'unknown' %}
+        <li class="channel-item {% if is_on %}is-on{% else %}is-off{% endif %}">
+          <span class="ch-name">{{ label }}</span>
+          <span class="status-chip status-{{ status_class }} ch-status">{{ status_label }}</span>
+          <form method="post" action="/admin/tenants/{{ tenant.id }}/channels/{{ key }}/toggle" class="channel-toggle-form">
+            <button
+              type="submit"
+              class="ios-toggle {% if is_on %}is-on{% else %}is-off{% endif %}"
+              role="switch"
+              aria-checked="{{ 'true' if is_on else 'false' }}"
+              title="Click to turn {{ 'off' if is_on else 'on' }}">
+              <span class="ios-toggle-knob" aria-hidden="true"></span>
+              <span class="sr-only">{{ label }} {{ 'on' if is_on else 'off' }}</span>
+            </button>
+          </form>
+          <button type="button" class="ch-configure" data-action="configure" data-action-name="Configure" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Configure</button>
+        </li>
+        {% endfor %}
+      {% else %}
+        {% for ch in tenant.channels %}
+        {% set is_on = ch.state == 'connected' %}
+        {% set status_label = 'Active' if is_on else 'Inactive' %}
+        {% set status_class = 'ok' if is_on else 'unknown' %}
+        <li class="channel-item {% if is_on %}is-on{% else %}is-off{% endif %}">
+          <span class="ch-name">{{ ch.name }}</span>
+          <span class="status-chip status-{{ status_class }} ch-status">{{ status_label }}</span>
+          <span
+            class="ios-toggle {% if is_on %}is-on{% else %}is-off{% endif %}"
+            role="switch"
+            aria-checked="{{ 'true' if is_on else 'false' }}"
+            data-action="toggle-channel" data-action-name="Toggle channel" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}"
+            tabindex="0">
+            <span class="ios-toggle-knob" aria-hidden="true"></span>
+            <span class="sr-only">{{ ch.name }} {{ 'on' if is_on else 'off' }}</span>
+          </span>
+          <button type="button" class="ch-configure" data-action="configure" data-action-name="Configure" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Configure</button>
+        </li>
+        {% endfor %}
+      {% endif %}
+    </ul>
     <p class="muted compact-note channels-foot">Toggle state persists locally in Nr3. Tenant runtime sync is not wired yet.</p>
   </section>
   </details>
