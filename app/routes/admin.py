@@ -258,6 +258,40 @@ def admin_save_agent_tone(
     )
 
 
+@router.post("/admin/tenants/{tenant_id}/agent/escalation-rules")
+def admin_save_agent_escalation_rules(
+    request: Request,
+    tenant_id: str,
+    soft_escalation_when: str = Form(default=""),
+    hard_escalation_when: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app import icp_overrides
+    icp_overrides.set_escalation_rules(
+        tenant_id,
+        soft_when=soft_escalation_when,
+        hard_when=hard_escalation_when,
+    )
+    has_rules = bool(
+        (soft_escalation_when or "").strip()
+        or (hard_escalation_when or "").strip()
+    )
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message=(
+            "Escalation rules override saved."
+            if has_rules
+            else "Escalation rules override cleared."
+        ),
+    )
+
+
 @router.post("/admin/tenants/{tenant_id}/sot")
 def admin_add_sot_entry(
     request: Request,
@@ -964,6 +998,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     override_toggles = _icp_overrides.feature_toggles_for_tenant(tenant.id)
     ai_settings = _icp_overrides.ai_agent_settings_for_tenant(tenant.id)
     tone_override = ai_settings.get("tone")
+    escalation_rules_override = ai_settings.get("escalation_rules")
     sot_entries = _icp_overrides.sot_entries_for_tenant(tenant.id)
     agent_feature_states = {
         "agent_replies": override_toggles.get(
@@ -982,7 +1017,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             any(key in override_toggles for key in AGENT_FEATURE_ACTIONS.values())
             or bool(tone_override)
             or bool(sot_entries)
-            or bool(ai_settings.get("escalation_rules"))
+            or bool(escalation_rules_override)
         )
         else "backend"
     )
@@ -1002,6 +1037,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "agent_source": agent_source,
             "ai_settings": ai_settings,
             "tone_override": tone_override,
+            "escalation_rules_override": escalation_rules_override,
             "sot_entries": sot_entries,
             "is_reserved_tenant": tenant.id in RESERVED_SLUGS,
             "escalation_modes": ESCALATION_MODES,

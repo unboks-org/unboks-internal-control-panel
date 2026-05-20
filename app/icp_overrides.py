@@ -102,6 +102,42 @@ def _normalize_tone(raw: Any) -> dict[str, Any] | None:
     }
 
 
+def _normalize_escalation_rules(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    soft_raw = raw.get("soft_escalation")
+    hard_raw = raw.get("hard_escalation")
+    if not isinstance(soft_raw, dict) and not isinstance(hard_raw, dict):
+        return None
+    soft_when = _clean_text(
+        soft_raw.get("when") if isinstance(soft_raw, dict) else ""
+    )
+    hard_when = _clean_text(
+        hard_raw.get("when") if isinstance(hard_raw, dict) else ""
+    )
+    soft_enabled = bool(
+        soft_raw.get("enabled") if isinstance(soft_raw, dict) else False
+    )
+    hard_enabled = bool(
+        hard_raw.get("enabled") if isinstance(hard_raw, dict) else False
+    )
+    if not (soft_enabled or hard_enabled or soft_when or hard_when):
+        return None
+    return {
+        "soft_escalation": {
+            "enabled": soft_enabled,
+            "when": soft_when,
+        },
+        "hard_escalation": {
+            "enabled": hard_enabled,
+            "when": hard_when,
+        },
+        "source": raw.get("source") or "icp_override",
+        "updated_at": raw.get("updated_at"),
+        "updated_by": raw.get("updated_by"),
+    }
+
+
 def _normalize_sot_entry(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -218,6 +254,48 @@ def set_ai_tone(
     )
 
 
+def set_escalation_rules(
+    tenant_id: str,
+    *,
+    soft_when: str = "",
+    hard_when: str = "",
+    updated_by: str = "nr3-admin",
+) -> None:
+    """Set or clear the ICP escalation rules override for one tenant.
+
+    A non-empty textarea enables that escalation type. Empty text disables
+    it. When both are empty, the whole override is cleared.
+    """
+    data = _load_all()
+    tenant_state = _tenant_state(data, tenant_id)
+    settings = tenant_state.setdefault("ai_agent_settings", {})
+    soft = _clean_text(soft_when)
+    hard = _clean_text(hard_when)
+    if soft or hard:
+        settings["escalation_rules"] = {
+            "soft_escalation": {
+                "enabled": bool(soft),
+                "when": soft,
+            },
+            "hard_escalation": {
+                "enabled": bool(hard),
+                "when": hard,
+            },
+            "source": "icp_override",
+            "updated_at": _now(),
+            "updated_by": updated_by,
+        }
+    else:
+        settings["escalation_rules"] = None
+    settings.setdefault("tone", None)
+    _save_all(data)
+    logger.info(
+        "icp_overrides.set_escalation_rules tenant=%s present=%s",
+        tenant_id,
+        bool(soft or hard),
+    )
+
+
 def ai_agent_settings_for_tenant(tenant_id: str) -> dict[str, Any]:
     data = _load_all()
     tenants = data.get("tenants") if isinstance(data, dict) else {}
@@ -231,7 +309,9 @@ def ai_agent_settings_for_tenant(tenant_id: str) -> dict[str, Any]:
         raw = {}
     return {
         "tone": _normalize_tone(raw.get("tone")),
-        "escalation_rules": raw.get("escalation_rules"),
+        "escalation_rules": _normalize_escalation_rules(
+            raw.get("escalation_rules")
+        ),
     }
 
 

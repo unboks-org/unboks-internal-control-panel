@@ -184,6 +184,28 @@
       <div class="agent-block">
         <h4>Escalation rules</h4>
         <p class="agent-summary">{{ tenant.agent.escalation_rules_summary }}</p>
+        {% if escalation_rules_override %}
+          <p class="muted compact-note">ICP override active.</p>
+        {% endif %}
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/escalation-rules" class="agent-inline-form">
+          <label class="agent-form-field">
+            <span>Agent needs help when</span>
+            <textarea
+              name="soft_escalation_when"
+              rows="3"
+              placeholder="Use soft escalation when Marina is unsure, needs a decision, or needs Calvin to choose a time.">{{ escalation_rules_override.soft_escalation.when if escalation_rules_override else '' }}</textarea>
+          </label>
+          <label class="agent-form-field">
+            <span>Human takeover when</span>
+            <textarea
+              name="hard_escalation_when"
+              rows="3"
+              placeholder="Use hard escalation for legal risk, angry customer, refund dispute, or when Marina must stop replying.">{{ escalation_rules_override.hard_escalation.when if escalation_rules_override else '' }}</textarea>
+          </label>
+          <div class="agent-form-actions">
+            <button type="submit" class="button-secondary">Save rules</button>
+          </div>
+        </form>
       </div>
 
       <div class="agent-block agent-block-wide">

@@ -122,6 +122,64 @@ def test_agent_tone_override_is_visible_to_nr2_bridge(client):
     assert tone["source"] == "icp_override"
 
 
+def test_agent_escalation_rules_override_is_visible_to_nr2_bridge(client):
+    client.post("/login", data={"password": "test-password"})
+    r = client.post(
+        "/admin/tenants/unboks/agent/escalation-rules",
+        data={
+            "soft_escalation_when": "Marina is unsure or needs Calvin to choose a time.",
+            "hard_escalation_when": "Legal risk, angry customer, or refund dispute.",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].endswith("#agent-section")
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge.status_code == 200
+    rules = bridge.json()["ai_agent_settings"]["escalation_rules"]
+    assert rules["soft_escalation"] == {
+        "enabled": True,
+        "when": "Marina is unsure or needs Calvin to choose a time.",
+    }
+    assert rules["hard_escalation"] == {
+        "enabled": True,
+        "when": "Legal risk, angry customer, or refund dispute.",
+    }
+    assert rules["source"] == "icp_override"
+
+
+def test_agent_escalation_rules_blank_submit_clears_override(client):
+    client.post("/login", data={"password": "test-password"})
+    client.post(
+        "/admin/tenants/unboks/agent/escalation-rules",
+        data={
+            "soft_escalation_when": "Needs a decision.",
+            "hard_escalation_when": "Stop replying.",
+        },
+        follow_redirects=False,
+    )
+    cleared = client.post(
+        "/admin/tenants/unboks/agent/escalation-rules",
+        data={
+            "soft_escalation_when": "",
+            "hard_escalation_when": "",
+        },
+        follow_redirects=False,
+    )
+    assert cleared.status_code == 303
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge.status_code == 200
+    assert bridge.json()["ai_agent_settings"]["escalation_rules"] is None
+
+
 def test_sot_entry_add_and_delete_are_visible_to_nr2_bridge(client):
     client.post("/login", data={"password": "test-password"})
     added = client.post(
