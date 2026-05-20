@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import tempfile
 from datetime import datetime, timezone
 from typing import Any
@@ -71,6 +72,54 @@ def _save_all(data: dict[str, Any]) -> None:
         raise
 
 
+def _tenant_state(data: dict[str, Any], tenant_id: str) -> dict[str, Any]:
+    tenants = data.setdefault("tenants", {})
+    state = tenants.setdefault(tenant_id, {})
+    if not isinstance(state, dict):
+        state = {}
+        tenants[tenant_id] = state
+    return state
+
+
+def _clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_tone(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    tone = _clean_text(raw.get("tone"))
+    if not tone:
+        return None
+    return {
+        "tone": tone,
+        "notes": _clean_text(raw.get("notes")),
+        "source": raw.get("source") or "icp_override",
+        "updated_at": raw.get("updated_at"),
+        "updated_by": raw.get("updated_by"),
+    }
+
+
+def _normalize_sot_entry(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    title = _clean_text(raw.get("title"))
+    content = _clean_text(raw.get("content"))
+    if not title or not content:
+        return None
+    return {
+        "id": _clean_text(raw.get("id")) or secrets.token_urlsafe(8),
+        "title": title,
+        "content": content,
+        "category": _clean_text(raw.get("category")) or "general",
+        "source": raw.get("source") or "icp_override",
+        "updated_at": raw.get("updated_at"),
+        "updated_by": raw.get("updated_by"),
+    }
+
+
 def set_feature_toggle(
     tenant_id: str,
     feature_key: str,
@@ -80,8 +129,7 @@ def set_feature_toggle(
 ) -> None:
     """Persist one feature toggle override for one tenant."""
     data = _load_all()
-    tenants = data.setdefault("tenants", {})
-    tenant_state = tenants.setdefault(tenant_id, {})
+    tenant_state = _tenant_state(data, tenant_id)
     toggles = tenant_state.setdefault("feature_toggles", {})
     toggles[feature_key] = {
         "value": bool(value),
@@ -139,6 +187,128 @@ def forget_tenant(tenant_id: str) -> bool:
     return True
 
 
+def set_ai_tone(
+    tenant_id: str,
+    tone: str,
+    *,
+    notes: str = "",
+    updated_by: str = "nr3-admin",
+) -> None:
+    """Set or clear the ICP tone/personality override for one tenant."""
+    data = _load_all()
+    tenant_state = _tenant_state(data, tenant_id)
+    settings = tenant_state.setdefault("ai_agent_settings", {})
+    clean_tone = _clean_text(tone)
+    if clean_tone:
+        settings["tone"] = {
+            "tone": clean_tone,
+            "notes": _clean_text(notes),
+            "source": "icp_override",
+            "updated_at": _now(),
+            "updated_by": updated_by,
+        }
+    else:
+        settings["tone"] = None
+    settings.setdefault("escalation_rules", None)
+    _save_all(data)
+    logger.info(
+        "icp_overrides.set_ai_tone tenant=%s present=%s",
+        tenant_id,
+        bool(clean_tone),
+    )
+
+
+def ai_agent_settings_for_tenant(tenant_id: str) -> dict[str, Any]:
+    data = _load_all()
+    tenants = data.get("tenants") if isinstance(data, dict) else {}
+    tenant_state = tenants.get(tenant_id) if isinstance(tenants, dict) else {}
+    raw = (
+        tenant_state.get("ai_agent_settings")
+        if isinstance(tenant_state, dict)
+        else {}
+    )
+    if not isinstance(raw, dict):
+        raw = {}
+    return {
+        "tone": _normalize_tone(raw.get("tone")),
+        "escalation_rules": raw.get("escalation_rules"),
+    }
+
+
+def sot_entries_for_tenant(tenant_id: str) -> list[dict[str, Any]]:
+    data = _load_all()
+    tenants = data.get("tenants") if isinstance(data, dict) else {}
+    tenant_state = tenants.get(tenant_id) if isinstance(tenants, dict) else {}
+    raw_entries = (
+        tenant_state.get("sot_entries")
+        if isinstance(tenant_state, dict)
+        else []
+    )
+    if not isinstance(raw_entries, list):
+        return []
+    entries: list[dict[str, Any]] = []
+    for raw in raw_entries:
+        entry = _normalize_sot_entry(raw)
+        if entry:
+            entries.append(entry)
+    return entries
+
+
+def add_sot_entry(
+    tenant_id: str,
+    *,
+    title: str,
+    content: str,
+    category: str = "general",
+    updated_by: str = "nr3-admin",
+) -> dict[str, Any]:
+    """Add one authoritative Source of Truth entry for a tenant."""
+    clean_title = _clean_text(title)
+    clean_content = _clean_text(content)
+    if not clean_title:
+        raise ValueError("SOT title is required.")
+    if not clean_content:
+        raise ValueError("SOT content is required.")
+    entry = {
+        "id": secrets.token_urlsafe(8),
+        "title": clean_title,
+        "content": clean_content,
+        "category": _clean_text(category) or "general",
+        "source": "icp_override",
+        "updated_at": _now(),
+        "updated_by": updated_by,
+    }
+    data = _load_all()
+    tenant_state = _tenant_state(data, tenant_id)
+    entries = tenant_state.setdefault("sot_entries", [])
+    if not isinstance(entries, list):
+        entries = []
+        tenant_state["sot_entries"] = entries
+    entries.insert(0, entry)
+    _save_all(data)
+    logger.info("icp_overrides.add_sot_entry tenant=%s title=%r", tenant_id, clean_title)
+    return entry
+
+
+def delete_sot_entry(tenant_id: str, entry_id: str) -> bool:
+    data = _load_all()
+    tenants = data.get("tenants") if isinstance(data, dict) else {}
+    tenant_state = tenants.get(tenant_id) if isinstance(tenants, dict) else {}
+    if not isinstance(tenant_state, dict):
+        return False
+    entries = tenant_state.get("sot_entries")
+    if not isinstance(entries, list):
+        return False
+    target = _clean_text(entry_id)
+    kept = [entry for entry in entries if _clean_text(entry.get("id")) != target]
+    if len(kept) == len(entries):
+        return False
+    tenant_state["sot_entries"] = kept
+    _save_all(data)
+    logger.info("icp_overrides.delete_sot_entry tenant=%s entry=%s", tenant_id, target)
+    return True
+
+
 def feature_toggles_for_tenant(tenant_id: str) -> dict[str, dict[str, Any]]:
     data = _load_all()
     tenants = data.get("tenants") if isinstance(data, dict) else {}
@@ -171,9 +341,6 @@ def effective_state_envelope(tenant_id: str) -> dict[str, Any]:
         "tenant_id": tenant_id,
         "feature_toggles": feature_toggles_for_tenant(tenant_id),
         "display_metadata": {},
-        "sot_entries": [],
-        "ai_agent_settings": {
-            "tone": None,
-            "escalation_rules": None,
-        },
+        "sot_entries": sot_entries_for_tenant(tenant_id),
+        "ai_agent_settings": ai_agent_settings_for_tenant(tenant_id),
     }

@@ -231,6 +231,91 @@ def admin_toggle_agent_feature(
     )
 
 
+@router.post("/admin/tenants/{tenant_id}/agent/tone")
+def admin_save_agent_tone(
+    request: Request,
+    tenant_id: str,
+    tone: str = Form(default=""),
+    tone_notes: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app import icp_overrides
+    icp_overrides.set_ai_tone(
+        tenant_id,
+        tone,
+        notes=tone_notes,
+    )
+    clean_tone = (tone or "").strip()
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message="Tone override saved." if clean_tone else "Tone override cleared.",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/sot")
+def admin_add_sot_entry(
+    request: Request,
+    tenant_id: str,
+    title: str = Form(default=""),
+    category: str = Form(default="general"),
+    content: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app import icp_overrides
+    try:
+        icp_overrides.add_sot_entry(
+            tenant_id,
+            title=title,
+            category=category,
+            content=content,
+        )
+    except ValueError as exc:
+        return _workspace_redirect(
+            tenant_id,
+            "agent-section",
+            message=str(exc),
+            level="warn",
+        )
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message="Source of Truth entry added.",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/sot/{entry_id}/delete")
+def admin_delete_sot_entry(
+    request: Request,
+    tenant_id: str,
+    entry_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app import icp_overrides
+    deleted = icp_overrides.delete_sot_entry(tenant_id, entry_id)
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message="Source of Truth entry deleted." if deleted else "Source of Truth entry was not found.",
+        level="ok" if deleted else "warn",
+    )
+
+
 @router.post("/admin/tenants/{tenant_id}/notes")
 def admin_add_tenant_note(
     request: Request,
@@ -877,6 +962,9 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     from app import icp_overrides as _icp_overrides
     from app import tenant_notes as _tenant_notes
     override_toggles = _icp_overrides.feature_toggles_for_tenant(tenant.id)
+    ai_settings = _icp_overrides.ai_agent_settings_for_tenant(tenant.id)
+    tone_override = ai_settings.get("tone")
+    sot_entries = _icp_overrides.sot_entries_for_tenant(tenant.id)
     agent_feature_states = {
         "agent_replies": override_toggles.get(
             "agent_replies_enabled", {}
@@ -890,7 +978,12 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     }
     agent_source = (
         "icp_override"
-        if any(key in override_toggles for key in AGENT_FEATURE_ACTIONS.values())
+        if (
+            any(key in override_toggles for key in AGENT_FEATURE_ACTIONS.values())
+            or bool(tone_override)
+            or bool(sot_entries)
+            or bool(ai_settings.get("escalation_rules"))
+        )
         else "backend"
     )
     stored_notes = _tenant_notes.list_notes(tenant.id)
@@ -907,6 +1000,9 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "action_level": request.query_params.get("action_level", "ok"),
             "agent_feature_states": agent_feature_states,
             "agent_source": agent_source,
+            "ai_settings": ai_settings,
+            "tone_override": tone_override,
+            "sot_entries": sot_entries,
             "is_reserved_tenant": tenant.id in RESERVED_SLUGS,
             "escalation_modes": ESCALATION_MODES,
             "notes": notes,

@@ -1285,6 +1285,10 @@ button.button-disabled,
   padding: 12px 14px;
 }
 
+.agent-block-wide {
+  grid-column: 1 / -1;
+}
+
 .agent-block h4 {
   font-size: 12px;
   font-weight: 700;
@@ -1297,6 +1301,125 @@ button.button-disabled,
   color: var(--color-text);
   font-size: 12px;
   margin: 0;
+}
+
+.agent-inline-form,
+.agent-sot-form {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-form-field {
+  color: var(--color-text);
+  display: grid;
+  gap: 5px;
+}
+
+.agent-form-field span {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.agent-form-field input,
+.agent-form-field select,
+.agent-form-field textarea {
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  width: 100%;
+}
+
+.agent-form-field input,
+.agent-form-field select {
+  height: 36px;
+  padding: 0 10px;
+}
+
+.agent-form-field textarea {
+  min-height: 84px;
+  padding: 9px 10px;
+}
+
+.agent-form-field input:focus,
+.agent-form-field select:focus,
+.agent-form-field textarea:focus {
+  border-color: var(--color-blue);
+  outline: 2px solid var(--color-blue-soft);
+}
+
+.agent-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.agent-sot-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr);
+}
+
+.agent-sot-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+}
+
+.agent-sot-item {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+
+.agent-sot-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.agent-sot-header > div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-sot-header strong {
+  font-size: 12px;
+}
+
+.agent-sot-content {
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+}
+
+.text-button {
+  background: transparent;
+  border: 0;
+  color: var(--color-blue);
+  min-height: auto;
+  padding: 0;
+}
+
+.text-button:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.danger-text {
+  color: var(--color-red);
 }
 
 .escalation-list {
@@ -1351,6 +1474,9 @@ button.button-disabled,
   }
   .agent-toggle {
     border-top: 1px solid var(--color-border);
+  }
+  .agent-sot-row {
+    grid-template-columns: 1fr;
   }
 }
 

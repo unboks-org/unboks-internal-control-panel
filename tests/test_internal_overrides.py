@@ -96,3 +96,67 @@ def test_channel_toggle_off_reflects_false_to_nr2_bridge(client):
     )
     assert bridge.status_code == 200
     assert bridge.json()["feature_toggles"]["tiktok_dms"]["value"] is False
+
+
+def test_agent_tone_override_is_visible_to_nr2_bridge(client):
+    client.post("/login", data={"password": "test-password"})
+    r = client.post(
+        "/admin/tenants/unboks/agent/tone",
+        data={
+            "tone": "Calm, concise, professional",
+            "tone_notes": "Use plain language and avoid legal promises.",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].endswith("#agent-section")
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge.status_code == 200
+    tone = bridge.json()["ai_agent_settings"]["tone"]
+    assert tone["tone"] == "Calm, concise, professional"
+    assert tone["notes"] == "Use plain language and avoid legal promises."
+    assert tone["source"] == "icp_override"
+
+
+def test_sot_entry_add_and_delete_are_visible_to_nr2_bridge(client):
+    client.post("/login", data={"password": "test-password"})
+    added = client.post(
+        "/admin/tenants/unboks/sot",
+        data={
+            "title": "Consultation pricing",
+            "category": "pricing",
+            "content": "First consultation is free for up to 15 minutes.",
+        },
+        follow_redirects=False,
+    )
+    assert added.status_code == 303
+    assert added.headers["location"].endswith("#agent-section")
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge.status_code == 200
+    entries = bridge.json()["sot_entries"]
+    assert len(entries) == 1
+    assert entries[0]["title"] == "Consultation pricing"
+    assert entries[0]["category"] == "pricing"
+    assert entries[0]["content"] == "First consultation is free for up to 15 minutes."
+    assert entries[0]["source"] == "icp_override"
+
+    deleted = client.post(
+        f"/admin/tenants/unboks/sot/{entries[0]['id']}/delete",
+        follow_redirects=False,
+    )
+    assert deleted.status_code == 303
+
+    bridge_after_delete = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge_after_delete.status_code == 200
+    assert bridge_after_delete.json()["sot_entries"] == []
