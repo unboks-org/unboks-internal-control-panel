@@ -144,6 +144,28 @@ def admin_tenants_index(request: Request) -> Response:
     return RedirectResponse(url="/admin/settings", status_code=303)
 
 
+
+@router.post("/admin/tenants/{tenant_id}/channels/{channel}/toggle")
+def admin_toggle_channel(
+    request: Request, tenant_id: str, channel: str,
+) -> Response:
+    """Flip one channel's on/off state for one tenant. Placeholder
+    backend (a single JSON file in data/channel_state.json) — the
+    wtyj-agent doesn't read this yet. Redirects back to the
+    workspace's #channels anchor so the operator stays in place."""
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    from app import channel_state as _channel_state
+    _channel_state.toggle_channel(tenant_id, channel)
+    return RedirectResponse(
+        url=f"/admin/tenants/{tenant_id}#channels-section",
+        status_code=303,
+    )
+
+
+
 @router.get("/admin/tenants/new", response_class=HTMLResponse)
 def admin_tenant_create_form(request: Request) -> Response:
     """Add-New-Tenant wizard. One page, one submit. Posts to
@@ -469,10 +491,13 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     tenant = get_tenant(tenant_id)
     if tenant is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app import channel_state as _channel_state
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
         {
+            "channels": _channel_state.read_channels(tenant.id),
+            "channel_keys": _channel_state.CHANNEL_KEYS,
             **_shell_context("tenants", active_tenant=tenant),
             "tenant": tenant,
             "cloud_providers": CLOUD_PROVIDERS,

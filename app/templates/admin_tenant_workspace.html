@@ -167,7 +167,42 @@
   {% set ob_link_label = {'not_generated': 'Not generated', 'active': 'Active', 'expired': 'Expired'}.get(ob.intake_link_status, ob.intake_link_status) %}
 
   {# 4h. Escalations #}
-  <span id="escalations-section"></span>
+  <span id="channels-section"></span>
+  <details class="ws-section ws-tone-cyan">
+    <summary class="ws-summary">
+      <span class="ws-title">Channels</span>
+      <span class="ws-desc muted">Toggle which channels are active for this tenant.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
+    <section class="channels-panel" aria-label="Channels">
+      <ul class="channel-list">
+        {% for label, key in channel_keys %}
+          {% set is_on = channels.get(key, False) %}
+          <li class="channel-row">
+            <span class="channel-label">{{ label }}</span>
+            <form method="post"
+                  action="/admin/tenants/{{ tenant.id }}/channels/{{ key }}/toggle"
+                  class="channel-toggle-form">
+              <button type="submit"
+                      class="channel-toggle {% if is_on %}is-on{% else %}is-off{% endif %}"
+                      aria-pressed="{{ 'true' if is_on else 'false' }}"
+                      title="Click to turn {{ 'off' if is_on else 'on' }}">
+                {{ 'On' if is_on else 'Off' }}
+              </button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="muted compact-note">
+        Placeholder toggle. State persists locally in
+        <code>data/channel_state.json</code>; the wtyj-agent doesn't
+        consume it yet.
+      </p>
+    </section>
+  </details>
+
+    <span id="escalations-section"></span>
   {% set esc = tenant.escalations %}
   {% set esc_state_class = 'down' if esc.hard_count > 0 else ('warn' if esc.open_count > 0 or esc.soft_count > 0 else 'ok') %}
   {% set esc_state_label = 'Action needed' if esc.hard_count > 0 else ('Open' if esc.open_count > 0 or esc.soft_count > 0 else 'Clear') %}

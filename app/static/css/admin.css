@@ -2786,3 +2786,73 @@ button.button-disabled,
   color: #5f6368;
   min-width: 180px;
 }
+
+/* Sidebar slug under name */
+.tenant-selector-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.tenant-selector-name {
+  font-size: 13px;
+  color: #202124;
+}
+.tenant-selector-slug {
+  font-size: 11px;
+  font-family: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #80868b;
+  margin-top: 1px;
+}
+
+/* Channels section toggles */
+.channels-panel .channel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+.channels-panel .channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid #e8eaed;
+  border-radius: 8px;
+  background: #fff;
+}
+.channels-panel .channel-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #3c4043;
+}
+.channels-panel .channel-toggle-form {
+  margin: 0;
+}
+.channels-panel .channel-toggle {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  min-width: 56px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.channels-panel .channel-toggle.is-on {
+  background: #1e8e3e;
+  color: #fff;
+  border-color: #1a7f37;
+}
+.channels-panel .channel-toggle.is-on:hover {
+  background: #1a7f37;
+}
+.channels-panel .channel-toggle.is-off {
+  background: #fce8e6;
+  color: #c5221f;
+  border-color: #f5b6b0;
+}
+.channels-panel .channel-toggle.is-off:hover {
+  background: #f8d4d1;
+}

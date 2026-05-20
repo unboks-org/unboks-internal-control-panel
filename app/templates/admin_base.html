@@ -95,8 +95,11 @@
                   class="tenant-selector-item {% if active_tenant and active_tenant.id == tenant.id %}active{% endif %}"
                   {% if active_tenant and active_tenant.id == tenant.id %}aria-current="page"{% endif %}
                 >
-                  <span class="tenant-selector-dot tenant-status-{{ tenant.status }}" aria-hidden="true"></span>
-                  <span>{{ tenant.name }}</span>
+                  <span class="tenant-selector-dot tenant-status-{{ tenant.status }}" aria-hidden="true" title="{{ tenant.status }}"></span>
+                  <span class="tenant-selector-text">
+                    <span class="tenant-selector-name">{{ tenant.name }}</span>
+                    <span class="tenant-selector-slug muted">{{ tenant.id }}</span>
+                  </span>
                 </a>
               </li>
             {% endfor %}
