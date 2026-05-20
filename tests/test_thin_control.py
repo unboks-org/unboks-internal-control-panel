@@ -1,8 +1,7 @@
 """Invariants of the thin-control tenant workspace.
 
 The workspace stays at exactly five collapsed sections. Tenant-workspace
-buttons must post to real backend routes; placeholder modal buttons are
-kept out of the workspace.
+buttons must post to real backend routes.
 """
 import re
 
@@ -68,8 +67,7 @@ def test_channels_toggle_posts_to_real_backend(client):
         html,
     )
     assert len(posts) == 8
-    # The submit buttons must NOT carry data-action-backend="not_connected"
-    # -- they go through the real POST handler, not the modal.
+    # The submit buttons must go through the real POST handler.
     form_blocks = re.findall(
         r'<form method="post"[^>]+channels[^>]+toggle"[^>]*>.*?</form>',
         html, re.DOTALL,

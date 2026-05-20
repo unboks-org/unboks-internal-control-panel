@@ -78,7 +78,7 @@
               {% set tags = [] %}
               {% if tenant.status == 'active' %}{% set _ = tags.append('active') %}{% endif %}
               {% if tenant.status != 'active' %}{% set _ = tags.append('inactive') %}{% endif %}
-              {% set health_states = [tenant.health.inbox, tenant.health.ai_agent, tenant.health.channels, tenant.health.sot, tenant.health.escalations, tenant.health.billing] %}
+              {% set health_states = [tenant.health.inbox, tenant.health.ai_agent, tenant.health.channels, tenant.health.escalations] %}
               {% set has_bad_health = health_states | select('in', ['warn', 'down']) | list | length > 0 %}
               {% if has_bad_health or tenant.escalations.hard_count > 0 %}
                 {% set _ = tags.append('problem') %}
@@ -152,51 +152,4 @@
     </div>
   </div>
 
-  {# Owner action modal — used by all data-action buttons #}
-  <div
-    class="owner-modal"
-    data-owner-modal
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="owner-modal-title"
-    aria-describedby="owner-modal-body"
-    hidden
-  >
-    <div class="owner-modal-backdrop" data-owner-modal-close></div>
-    <div class="owner-modal-card" role="document">
-      <header class="owner-modal-head">
-        <h2 id="owner-modal-title" data-owner-modal-title>Action</h2>
-        <button
-          type="button"
-          class="owner-modal-x"
-          data-owner-modal-close
-          aria-label="Close"
-        >&times;</button>
-      </header>
-      <div class="owner-modal-body" id="owner-modal-body" data-owner-modal-body>
-        <p class="owner-modal-text" data-owner-modal-text></p>
-        <dl class="owner-modal-meta" data-owner-modal-meta hidden>
-          <div><dt>Tenant</dt><dd data-owner-modal-tenant>—</dd></div>
-          <div><dt>Action</dt><dd data-owner-modal-action>—</dd></div>
-          <div data-owner-modal-consequence-row hidden>
-            <dt>Consequence</dt><dd data-owner-modal-consequence>—</dd>
-          </div>
-        </dl>
-        <p class="owner-modal-result" data-owner-modal-result hidden></p>
-      </div>
-      <footer class="owner-modal-foot">
-        <button
-          type="button"
-          class="button-secondary"
-          data-owner-modal-cancel
-        >Cancel</button>
-        <button
-          type="button"
-          class="button-primary"
-          data-owner-modal-confirm
-          hidden
-        >Confirm</button>
-      </footer>
-    </div>
-  </div>
 {% endblock %}

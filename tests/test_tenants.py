@@ -96,7 +96,6 @@ def test_registry_tenants_are_visible_without_client_root(monkeypatch, tmp_path)
     by_id = {t.id: t for t in result}
     assert sorted(by_id) == ["pepe"]
     assert by_id["pepe"].name == "Pepe Test"
-    assert tenants.using_placeholder_tenants() is False
 
 
 def test_registry_does_not_replace_mounted_client_root(monkeypatch, tmp_path):
@@ -127,19 +126,17 @@ def test_registry_does_not_replace_mounted_client_root(monkeypatch, tmp_path):
     assert by_id["pepe"].status == "inactive"
 
 
-def test_empty_or_unset_dir_falls_back_to_placeholders(monkeypatch, tmp_path):
+def test_empty_or_unset_dir_falls_back_to_minimal_unboks(monkeypatch, tmp_path):
     """When the env var points at a missing/empty directory (or no
     parseable client.json files inside), the loader falls back to the
-    hard-coded placeholder tenant list. Local-dev path."""
+    minimal built-in Unboks row. Local-dev path."""
     # Case 1: directory exists but has no client.json files
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(empty_dir))
     result = tenants.list_tenants()
-    # Fallback to placeholders means the original 3 hard-coded tenants
     ids = [t.id for t in result]
-    assert "unboks" in ids, f"expected placeholder fallback; got {ids}"
-    assert tenants.using_placeholder_tenants() is True
+    assert ids == ["unboks"]
 
     # Case 2: env var points at a non-existent path
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "does_not_exist"))
@@ -149,7 +146,7 @@ def test_empty_or_unset_dir_falls_back_to_placeholders(monkeypatch, tmp_path):
 
     # Case 3: env var explicitly empty -> falls through to the default
     # _DEFAULT_TENANTS_CLIENT_DIR which (in test environment) doesn't exist
-    # -> placeholders kick in.
+    # -> built-in row kicks in.
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", "")
     # Force the default path to be one that doesn't exist
     monkeypatch.setattr(tenants, "_DEFAULT_TENANTS_CLIENT_DIR",

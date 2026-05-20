@@ -27,12 +27,6 @@
     </div>
   {% endif %}
 
-  {% if is_placeholder_tenants %}
-    <div class="alert alert-info demo-banner" role="note" data-demo-banner>
-      <strong>Demo data</strong> — this workspace will populate from live tenant backend once connected.
-    </div>
-  {% endif %}
-
   {# 1. Soft colored tenant header #}
   <header id="tenant-header-anchor" class="tenant-header tenant-header-{{ tenant.status }}" aria-label="Tenant header">
     <div>
@@ -185,16 +179,6 @@
   </section>
   </details>
 
-  {# 4b. Source of Truth / Data Room #}
-
-  {# 4d. Billing removed: tenants are active or inactive in Nr3. #}
-
-  {# 4e. Push changes #}
-
-  {# 4g. Operators / Access #}
-
-  {# 4i. Onboarding control #}
-
   {# 4h. Escalations #}
   <span id="escalations-section"></span>
   {% set esc = tenant.escalations %}
@@ -337,20 +321,6 @@
     {% endif %}
   </section>
   </details>
-
-  {# 4k. Contract removed from Nr3 workspace. #}
-
-  {# 4l. Feature toggles #}
-
-  {# 4m. Runtime status #}
-
-  {# 4n. Backup / export #}
-
-  {# 4o. Communication log #}
-
-  {# 4p. Invoice history #}
-
-  {# 5. Activity log / audit trail #}
 
   {# 6. Danger zone #}
   <span id="danger-section"></span>

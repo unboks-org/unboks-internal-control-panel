@@ -27,17 +27,16 @@ def test_env_example_has_one_tenant_client_dir() -> None:
 
     assert tenant_dir_lines == ["NR3_TENANTS_CLIENT_DIR=/app/tenant_root"]
 
-def test_owner_modal_js_wires_not_connected_actions() -> None:
+def test_owner_modal_and_not_wired_actions_removed() -> None:
     js = open("app/static/js/admin.js", encoding="utf-8").read()
     css = open("app/static/css/admin.css", encoding="utf-8").read()
+    base = open("app/templates/admin_base.html", encoding="utf-8").read()
 
-    assert "function initOwnerActionModal()" in js
-    assert "data-action-backend" in js
-    assert "not_connected" in js
-    assert "backend endpoint is not wired yet" in js
-    assert "initOwnerActionModal();" in js
-    assert ".owner-modal" in css
-    assert "[data-action-backend=\"not_connected\"].is-not-connected" in css
+    assert "initOwnerActionModal" not in js
+    assert "data-action-backend" not in js
+    assert "not_connected" not in js
+    assert ".owner-modal" not in css
+    assert "data-owner-modal" not in base
 
 def test_admin_redirects_unauthenticated(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -247,20 +246,8 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Tenant notes" in workspace.text
     assert "Internal only. Never shown to the tenant." in workspace.text
     assert "Last note:" in workspace.text
-    # Demo tenant has 2 seeded notes
-    assert "Reference tenant" in workspace.text
-    assert "Schedule quarterly review" in workspace.text
-    # Priority and pin chips
-    assert "Pinned" in workspace.text
-    for prio in ("Normal", "Important", "Critical"):
-        # Normal must appear (seed); Important/Critical may not on this tenant — skip strict
-        if prio == "Normal":
-            assert prio in workspace.text
-    # Actions
-    for action in ("Add note", "Pin note", "Unpin note", "Mark follow-up done"):
-        assert action in workspace.text
-    # Follow-up label appears for note-demo-2
-    assert "Follow-up:" in workspace.text
+    assert "No internal notes yet." in workspace.text
+    assert "Add note" in workspace.text
     # Escalations panel
     assert "escalations-panel" in workspace.text
     for label in ("Open", "Soft escalations", "Hard escalations", "Avg response time",
@@ -275,9 +262,7 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Danger zone
     assert "danger-zone" in workspace.text
     assert "The master Unboks tenant is protected from suspension." in workspace.text
-    # Thin-control rule (2026-05-20): no button is disabled. Stubs
-    # route to the not-wired modal via admin.js, which bails on
-    # disabled elements. Pinned by tests/test_thin_control.py.
+    # Thin-control rule: no fake disabled workspace controls.
     assert " disabled" not in workspace.text
     assert 'aria-current="page"' in workspace.text
 

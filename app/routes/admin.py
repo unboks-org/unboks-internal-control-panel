@@ -28,20 +28,15 @@ from app.security import (
 )
 from app.provisioning import auto_provision_tenant, queue_tenant_host_action
 from app.tenants import (
-    ACTIVITY_TYPES,
-    CLOUD_PROVIDERS,
     ESCALATION_MODES,
     NOTE_PRIORITIES,
-    UPLOAD_CATEGORIES,
     Tenant,
     TenantCreateError,
-    compute_setup_checklist,
     derive_slug_from_name,
     get_tenant,
     list_tenants,
     register_tenant,
     sorted_notes,
-    using_placeholder_tenants,
     validate_slug,
     RESERVED_SLUGS,
 )
@@ -913,155 +908,11 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "agent_feature_states": agent_feature_states,
             "agent_source": agent_source,
             "is_reserved_tenant": tenant.id in RESERVED_SLUGS,
-            "cloud_providers": CLOUD_PROVIDERS,
-            "upload_categories": UPLOAD_CATEGORIES,
             "escalation_modes": ESCALATION_MODES,
-            "activity_type_labels": dict(ACTIVITY_TYPES),
             "notes": notes,
             "note_priorities": NOTE_PRIORITIES,
-            "setup_checklist": compute_setup_checklist(tenant),
-            "contract": _build_contract(tenant),
-            "feature_toggles": _build_feature_toggles(tenant),
-            "runtime": _build_runtime(tenant),
-            "backup": _build_backup(tenant),
-            "comms_log": _build_comms_log(tenant),
-            "invoices": _build_invoices(tenant),
-            "is_placeholder_tenants": using_placeholder_tenants(),
         },
     )
-
-
-def _build_contract(tenant: Tenant) -> dict:
-    b = tenant.billing
-    contract_status_map = {
-        "active": ("Active", "ok"),
-        "inactive": ("Inactive", "unknown"),
-    }
-    contract_status, contract_class = contract_status_map.get(
-        b.status, ("Inactive", "unknown")
-    )
-    payment_status_map = {
-        "ok": ("Paid", "ok"),
-        "pending": ("Pending", "warn"),
-        "failed": ("Overdue", "down"),
-        "—": ("Not configured", "unknown"),
-    }
-    payment_status, payment_class = payment_status_map.get(
-        b.payment_status, ("Not configured", "unknown")
-    )
-    return {
-        "monthly_price": b.monthly_price,
-        "setup_fee": "—",
-        "contract_status": contract_status,
-        "contract_class": contract_class,
-        "payment_status": payment_status,
-        "payment_class": payment_class,
-    }
-
-
-_FEATURE_TOGGLE_DEFS: tuple[tuple[str, str], ...] = (
-    ("whatsapp_inbox", "WhatsApp inbox"),
-    ("email_inbox", "Email inbox"),
-    ("instagram_dms", "Instagram DMs"),
-    ("facebook_dms", "Facebook DMs"),
-    ("messenger_dms", "Messenger DMs"),
-    ("telegram_alerts", "Telegram alerts"),
-    ("tiktok_dms", "TikTok DMs"),
-    ("x_dms", "X DMs"),
-    ("ai_auto_reply", "AI auto-reply"),
-    ("soft_escalations", "Soft escalations"),
-    ("hard_escalations", "Hard escalations / human takeover"),
-    ("learning_from_operator", "Learning from operator answers"),
-    ("sot_sync", "Source of Truth sync"),
-    ("appointment_order_handling", "Appointment / order handling"),
-    ("analytics", "Analytics"),
-)
-
-
-def _build_feature_toggles(tenant: Tenant) -> list[dict]:
-    # Derive a few from real fields; the rest stay 'Not wired yet'.
-    derived: dict[str, bool] = {}
-    for ch in tenant.channels:
-        name = ch.name.lower()
-        if name == "whatsapp":
-            derived["whatsapp_inbox"] = ch.state == "connected"
-        elif name == "email":
-            derived["email_inbox"] = ch.state == "connected"
-        elif name == "instagram":
-            derived["instagram_dms"] = ch.state == "connected"
-        elif name == "facebook":
-            derived["facebook_dms"] = ch.state == "connected"
-        elif name == "messenger":
-            derived["messenger_dms"] = ch.state == "connected"
-        elif name == "telegram":
-            derived["telegram_alerts"] = ch.state == "connected"
-        elif name == "tiktok":
-            derived["tiktok_dms"] = ch.state == "connected"
-        elif name == "x":
-            derived["x_dms"] = ch.state == "connected"
-    if tenant.agent.auto_reply_enabled:
-        derived["ai_auto_reply"] = True
-    if tenant.agent.escalation_mode in ("soft", "both"):
-        derived["soft_escalations"] = True
-    if tenant.agent.escalation_mode in ("hard", "both"):
-        derived["hard_escalations"] = True
-    if tenant.agent.learning_enabled:
-        derived["learning_from_operator"] = True
-    if tenant.sot.cloud_status == "connected":
-        derived["sot_sync"] = True
-
-    items: list[dict] = []
-    for key, label in _FEATURE_TOGGLE_DEFS:
-        if key in derived:
-            state = "enabled" if derived[key] else "disabled"
-            wired = True
-        else:
-            state = "unknown"
-            wired = False
-        items.append({"key": key, "label": label, "state": state, "wired": wired})
-    return items
-
-
-def _build_runtime(tenant: Tenant) -> dict:
-    return {
-        "dashboard_status": ("Unknown", "unknown"),
-        "agent_status": (
-            ("Active", "ok") if tenant.agent.auto_reply_enabled else ("Inactive", "warn")
-        ),
-        "api_status": ("Unknown", "unknown"),
-        "webhook_status": ("Unknown", "unknown"),
-        "last_sync": "—",
-        "last_error": "—",
-        "uptime": "—",
-        "environment": "Not wired yet",
-    }
-
-
-def _build_backup(tenant: Tenant) -> dict:
-    return {
-        "last_backup": "—",
-        "status": ("Not wired yet", "unknown"),
-        "items": (
-            "Tenant config",
-            "Source of Truth",
-            "Activity log",
-            "Onboarding answers",
-        ),
-    }
-
-
-def _build_comms_log(tenant: Tenant) -> dict:
-    return {
-        "last_email_sent": "—",
-        "last_onboarding_link_sent": "—",
-        "last_operator_note": (tenant.notes[0].created_at if tenant.notes else "—"),
-        "last_client_reply": "—",
-    }
-
-
-def _build_invoices(tenant: Tenant) -> list[dict]:
-    # No payment integration. Empty by default.
-    return []
 
 
 @router.get("/admin/onboarding", response_class=HTMLResponse)
@@ -1267,60 +1118,6 @@ def onboarding_lead_setup_summary(request: Request, lead_id: int) -> Response:
 # ---------------------------------------------------------------------------
 # Render helpers
 # ---------------------------------------------------------------------------
-
-
-_ATTENTION_KIND_LABELS: tuple[tuple[str, str], ...] = (
-    ("problem", "Problem tenant"),
-    ("setup_incomplete", "Setup incomplete"),
-    ("channels_disconnected", "Channels disconnected"),
-    ("agent_inactive", "Agent inactive"),
-    ("sot_missing", "SOT missing"),
-)
-
-
-def _compute_attention_items(tenants) -> list[dict]:
-    items: list[dict] = []
-    for t in tenants:
-        # Problem (worst-case bucket): hard escalations.
-        if t.escalations.hard_count > 0:
-            items.append({
-                "tenant_id": t.id, "tenant_name": t.name,
-                "kind": "problem", "label": "Problem tenant", "severity": "P0",
-            })
-
-        # Setup incomplete
-        if t.onboarding.status != "ready":
-            items.append({
-                "tenant_id": t.id, "tenant_name": t.name,
-                "kind": "setup_incomplete", "label": "Setup incomplete", "severity": "P1",
-            })
-
-        # Channels disconnected
-        if t.health.channels in ("warn", "down") or (
-            t.channels and all(ch.state != "connected" for ch in t.channels)
-        ):
-            items.append({
-                "tenant_id": t.id, "tenant_name": t.name,
-                "kind": "channels_disconnected", "label": "Channels disconnected", "severity": "P2",
-            })
-
-        # Agent inactive (auto-reply off or human takeover active)
-        if not t.agent.auto_reply_enabled or t.agent.human_takeover_active:
-            items.append({
-                "tenant_id": t.id, "tenant_name": t.name,
-                "kind": "agent_inactive", "label": "Agent inactive", "severity": "P2",
-            })
-
-        # SOT missing
-        if t.sot.status not in ("ok",) or t.sot.files_count == 0:
-            items.append({
-                "tenant_id": t.id, "tenant_name": t.name,
-                "kind": "sot_missing", "label": "SOT missing", "severity": "P2",
-            })
-
-    severity_order = {"P0": 0, "P1": 1, "P2": 2}
-    items.sort(key=lambda i: (severity_order.get(i["severity"], 9), i["tenant_name"]))
-    return items
 
 
 def _pipeline_totals(leads) -> dict[str, int]:
