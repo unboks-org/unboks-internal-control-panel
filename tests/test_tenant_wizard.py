@@ -329,3 +329,99 @@ def test_derive_slug_from_name():
     assert tenants.derive_slug_from_name("Acme Charters!") == "acme-charters"
     assert tenants.derive_slug_from_name("  Multiple   Spaces ") == "multiple-spaces"
     assert tenants.derive_slug_from_name("123 Numbers First") == "numbers-first"
+
+
+
+# --- J3 provisioner artifacts -------------------------------------
+
+
+def _extract_block(rendered_html: str, dom_id: str) -> str:
+    """Pull the <pre id=...>...</pre> body for one artifact."""
+    m = re.search(
+        rf'<pre id="{re.escape(dom_id)}"[^>]*>([^<]+)</pre>',
+        rendered_html, re.DOTALL)
+    assert m, f"<pre id={dom_id!r}> not found"
+    return html.unescape(m.group(1))
+
+
+def test_success_page_renders_all_four_provisioner_files(client):
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Provisioner Demo", "slug": "prov-demo"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    for dom_id in ("ct-client-json", "ct-platform-env",
+                    "ct-docker-compose", "ct-nginx-snippet",
+                    "ct-deploy-script"):
+        assert f'id="{dom_id}"' in r.text, f"missing block: {dom_id}"
+    for fname in ("client.json", "platform.env", "docker-compose.yml",
+                   "prov-demo.nginx.conf", "deploy-prov-demo.sh"):
+        assert f'data-ct-download-filename="{fname}"' in r.text
+
+
+def test_client_json_carries_access_key(client):
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Acme", "slug": "acme"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    data = _extract_client_json(r.text)
+    assert "access_key" in data
+    assert isinstance(data["access_key"], str)
+    assert len(data["access_key"]) >= 30
+    assert data["password"] != data["access_key"]
+
+
+def test_platform_env_carries_dashboard_password(client):
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Acme", "slug": "acme"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    data = _extract_client_json(r.text)
+    env_text = _extract_block(r.text, "ct-platform-env")
+    assert "DASHBOARD_PASSWORD=" + data["password"] in env_text
+    assert "TENANT_SLUG=acme" in env_text
+
+
+def test_docker_compose_names_container_and_port(client):
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Acme", "slug": "acme"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    compose = _extract_block(r.text, "ct-docker-compose")
+    assert "container_name: wtyj-acme" in compose
+    assert "image: wtyj-agent:latest" in compose
+    assert re.search(r'"\d{4}:8000"', compose),         f"no host_port mapping in compose: {compose!r}"
+
+
+def test_nginx_snippet_routes_slug_to_proxy_pass(client):
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Acme", "slug": "acme"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    nginx = _extract_block(r.text, "ct-nginx-snippet")
+    assert "location /api/acme/" in nginx
+    assert "rewrite ^/api/acme/(.*) /$1 break;" in nginx
+    assert "proxy_pass http://127.0.0.1:" in nginx
+
+
+def test_host_port_is_deterministic_and_in_range(client):
+    """The slug-derived host port must be deterministic so the
+    operator can re-generate the artifacts and get the SAME port."""
+    r1 = client.post(
+        "/admin/tenants/create",
+        data={"name": "Stable A", "slug": "stable-a"},
+        follow_redirects=False)
+    r2 = client.post(
+        "/admin/tenants/create",
+        data={"name": "Stable B", "slug": "stable-b"},
+        follow_redirects=False)
+    assert r1.status_code == 200 and r2.status_code == 200
+    port_a = re.search(r'(\d{4}):8000', _extract_block(r1.text, "ct-docker-compose"))
+    port_b = re.search(r'(\d{4}):8000', _extract_block(r2.text, "ct-docker-compose"))
+    assert port_a and port_b
+    assert 8100 <= int(port_a.group(1)) <= 8199
+    assert 8100 <= int(port_b.group(1)) <= 8199

@@ -8,11 +8,16 @@
   <header class="create-tenant-header">
     <h2>Tenant created: <code>{{ slug }}</code></h2>
     <p class="muted">
-      Manual mode — Nr 3 did not write anything to the VPS. Place
-      the <code>client.json</code> below on the VPS at
-      <code>/root/wtyj/tenant_root/{{ slug }}/config/client.json</code>,
-      then the tenant can sign in at
+      Four files below are everything the VPS needs to bring this
+      tenant online. SSH to the VPS, run the deploy script, paste
+      each file at the destination it names, then
+      <code>docker compose up -d</code> + <code>nginx -s reload</code>.
+      Once that's done the tenant can sign in at
       <a href="{{ dashboard_url }}">{{ dashboard_url }}</a>.
+    </p>
+    <p class="muted">
+      Host port for this tenant (deterministic from the slug):
+      <code>{{ host_port }}</code>.
     </p>
   </header>
 
@@ -43,30 +48,115 @@
     </div>
   {% endif %}
 
+  <p class="ct-action-feedback" data-ct-copy-feedback aria-live="polite"></p>
+
   <fieldset class="ct-fieldset">
-    <legend>client.json</legend>
+    <legend>1. client.json</legend>
     <p class="ct-help muted">
-      The full JSON that should land at
-      <code>config/client.json</code> on the VPS.
+      Destination on VPS:
+      <code>/root/clients/{{ slug }}/config/client.json</code>
     </p>
     <pre id="ct-client-json"
-         class="ct-json-block"
-         data-tenant-slug="{{ slug }}">{{ client_json_text }}</pre>
+         class="ct-json-block">{{ client_json_text }}</pre>
     <div class="ct-actions">
-      <button type="button"
-              class="control-btn control-btn-primary"
-              data-ct-copy
-              data-ct-copy-target="ct-client-json">
-        Copy to clipboard
+      <button type="button" class="control-btn control-btn-primary"
+              data-ct-copy data-ct-copy-target="ct-client-json">
+        Copy
       </button>
-      <button type="button"
-              class="control-btn"
-              data-ct-download
-              data-ct-download-target="ct-client-json"
+      <button type="button" class="control-btn"
+              data-ct-download data-ct-download-target="ct-client-json"
               data-ct-download-filename="client.json">
         Download client.json
       </button>
-      <span class="ct-action-feedback" data-ct-copy-feedback aria-live="polite"></span>
+    </div>
+  </fieldset>
+
+  <fieldset class="ct-fieldset">
+    <legend>2. platform.env</legend>
+    <p class="ct-help muted">
+      Destination on VPS:
+      <code>/root/clients/{{ slug }}/platform.env</code>
+    </p>
+    <pre id="ct-platform-env"
+         class="ct-json-block">{{ platform_env_text }}</pre>
+    <div class="ct-actions">
+      <button type="button" class="control-btn control-btn-primary"
+              data-ct-copy data-ct-copy-target="ct-platform-env">
+        Copy
+      </button>
+      <button type="button" class="control-btn"
+              data-ct-download data-ct-download-target="ct-platform-env"
+              data-ct-download-filename="platform.env">
+        Download platform.env
+      </button>
+    </div>
+  </fieldset>
+
+  <fieldset class="ct-fieldset">
+    <legend>3. docker-compose.yml</legend>
+    <p class="ct-help muted">
+      Destination on VPS:
+      <code>/root/clients/{{ slug }}/docker-compose.yml</code>
+      &nbsp;&middot;&nbsp;
+      Container name: <code>wtyj-{{ slug }}</code>
+      &nbsp;&middot;&nbsp;
+      Host port: <code>{{ host_port }}</code>
+    </p>
+    <pre id="ct-docker-compose"
+         class="ct-json-block">{{ docker_compose_text }}</pre>
+    <div class="ct-actions">
+      <button type="button" class="control-btn control-btn-primary"
+              data-ct-copy data-ct-copy-target="ct-docker-compose">
+        Copy
+      </button>
+      <button type="button" class="control-btn"
+              data-ct-download data-ct-download-target="ct-docker-compose"
+              data-ct-download-filename="docker-compose.yml">
+        Download docker-compose.yml
+      </button>
+    </div>
+  </fieldset>
+
+  <fieldset class="ct-fieldset">
+    <legend>4. nginx snippet</legend>
+    <p class="ct-help muted">
+      Add inside the existing <code>api.unboks.org</code> server block
+      (or save as a snippet and <code>include</code> it). After the
+      paste, <code>nginx -t &amp;&amp; systemctl reload nginx</code>.
+    </p>
+    <pre id="ct-nginx-snippet"
+         class="ct-json-block">{{ nginx_snippet_text }}</pre>
+    <div class="ct-actions">
+      <button type="button" class="control-btn control-btn-primary"
+              data-ct-copy data-ct-copy-target="ct-nginx-snippet">
+        Copy
+      </button>
+      <button type="button" class="control-btn"
+              data-ct-download data-ct-download-target="ct-nginx-snippet"
+              data-ct-download-filename="{{ slug }}.nginx.conf">
+        Download nginx snippet
+      </button>
+    </div>
+  </fieldset>
+
+  <fieldset class="ct-fieldset">
+    <legend>Deploy script (run on VPS as root)</legend>
+    <p class="ct-help muted">
+      The order to do it in. Paste each file at the path it points to
+      between the three numbered placeholders.
+    </p>
+    <pre id="ct-deploy-script"
+         class="ct-json-block">{{ deploy_script_text }}</pre>
+    <div class="ct-actions">
+      <button type="button" class="control-btn control-btn-primary"
+              data-ct-copy data-ct-copy-target="ct-deploy-script">
+        Copy
+      </button>
+      <button type="button" class="control-btn"
+              data-ct-download data-ct-download-target="ct-deploy-script"
+              data-ct-download-filename="deploy-{{ slug }}.sh">
+        Download deploy script
+      </button>
     </div>
   </fieldset>
 
@@ -78,10 +168,11 @@
       Login URL: <a href="{{ dashboard_url }}">{{ dashboard_url }}</a>
     </p>
     <p class="ct-help muted">
-      The temporary password is in the JSON above under
-      <code>password</code>. Treat it as a one-shot secret — once the
-      tenant logs in and changes it, this page is no longer the
-      source of truth.
+      The temporary <code>password</code> and the
+      <code>access_key</code> are in <em>client.json</em> above.
+      Treat them as one-shot secrets — once the tenant logs in and
+      changes the password, this page is no longer the source of
+      truth.
     </p>
   </fieldset>
 
