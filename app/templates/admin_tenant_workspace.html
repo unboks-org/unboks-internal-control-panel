@@ -70,8 +70,7 @@
     </header>
 
     <ul class="channels-list" role="list">
-      {% if channel_keys is defined and channels is defined %}
-        {% for label, key in channel_keys %}
+      {% for label, key in channel_keys %}
         {% set is_on = channels.get(key, False) %}
         {% set status_label = 'Active' if is_on else 'Inactive' %}
         {% set status_class = 'ok' if is_on else 'unknown' %}
@@ -91,28 +90,7 @@
           </form>
           <button type="button" class="ch-configure" data-action="configure" data-action-name="Configure" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Configure</button>
         </li>
-        {% endfor %}
-      {% else %}
-        {% for ch in tenant.channels %}
-        {% set is_on = ch.state == 'connected' %}
-        {% set status_label = 'Active' if is_on else 'Inactive' %}
-        {% set status_class = 'ok' if is_on else 'unknown' %}
-        <li class="channel-item {% if is_on %}is-on{% else %}is-off{% endif %}">
-          <span class="ch-name">{{ ch.name }}</span>
-          <span class="status-chip status-{{ status_class }} ch-status">{{ status_label }}</span>
-          <span
-            class="ios-toggle {% if is_on %}is-on{% else %}is-off{% endif %}"
-            role="switch"
-            aria-checked="{{ 'true' if is_on else 'false' }}"
-            data-action="toggle-channel" data-action-name="Toggle channel" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}"
-            tabindex="0">
-            <span class="ios-toggle-knob" aria-hidden="true"></span>
-            <span class="sr-only">{{ ch.name }} {{ 'on' if is_on else 'off' }}</span>
-          </span>
-          <button type="button" class="ch-configure" data-action="configure" data-action-name="Configure" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Configure</button>
-        </li>
-        {% endfor %}
-      {% endif %}
+      {% endfor %}
     </ul>
     <p class="muted compact-note channels-foot">Toggle state publishes through the Nr3 internal bridge used by Nr2.</p>
   </section>
@@ -385,7 +363,7 @@
       <h3>Danger zone</h3>
       <p class="muted">Suspend cuts off the tenant from all channels and the AI agent. Used for non-payment, abuse, or emergency stop.</p>
     </div>
-    <button type="button" class="danger-btn" disabled title="Backend not connected yet" data-action="suspend-cut-off-tenant" data-action-name="Suspend / cut off tenant" data-action-type="dangerous" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}" data-action-consequence="Tenant immediately loses all channel access and AI processing.">Suspend / cut off tenant</button>
+    <button type="button" class="danger-btn" data-action="suspend-cut-off-tenant" data-action-name="Suspend / cut off tenant" data-action-type="dangerous" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}" data-action-consequence="Tenant immediately loses all channel access and AI processing.">Suspend / cut off tenant</button>
   </section>
   </details>
 {% endblock %}

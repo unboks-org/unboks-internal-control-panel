@@ -279,8 +279,10 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Danger zone
     assert "danger-zone" in workspace.text
     assert "Suspend / cut off tenant" in workspace.text
-    # All controls are still placeholders, must render disabled
-    assert "disabled" in workspace.text
+    # Thin-control rule (2026-05-20): no button is disabled. Stubs
+    # route to the not-wired modal via admin.js, which bails on
+    # disabled elements. Pinned by tests/test_thin_control.py.
+    assert " disabled" not in workspace.text
     assert 'aria-current="page"' in workspace.text
 
 def test_tenant_workspace_shows_no_activity_for_empty_tenant(monkeypatch, tmp_path) -> None:
