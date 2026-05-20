@@ -40,6 +40,7 @@ from app.tenants import (
     list_tenants,
     register_tenant,
     sorted_notes,
+    using_placeholder_tenants,
     validate_slug,
 )
 
@@ -675,6 +676,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "backup": _build_backup(tenant),
             "comms_log": _build_comms_log(tenant),
             "invoices": _build_invoices(tenant),
+            "is_placeholder_tenants": using_placeholder_tenants(),
         },
     )
 

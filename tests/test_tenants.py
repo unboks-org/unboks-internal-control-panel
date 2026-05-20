@@ -99,9 +99,9 @@ def test_registry_tenants_are_visible_without_client_root(monkeypatch, tmp_path)
 
     result = tenants.list_tenants()
     by_id = {t.id: t for t in result}
-    assert "unboks" in by_id
-    assert "pepe" in by_id
+    assert sorted(by_id) == ["pepe"]
     assert by_id["pepe"].name == "Pepe Test"
+    assert tenants.using_placeholder_tenants() is False
 
 
 def test_registry_does_not_replace_mounted_client_root(monkeypatch, tmp_path):
@@ -146,6 +146,7 @@ def test_empty_or_unset_dir_falls_back_to_placeholders(monkeypatch, tmp_path):
     # Fallback to placeholders means the original 3 hard-coded tenants
     ids = [t.id for t in result]
     assert "unboks" in ids, f"expected placeholder fallback; got {ids}"
+    assert tenants.using_placeholder_tenants() is True
 
     # Case 2: env var points at a non-existent path
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "does_not_exist"))

@@ -222,11 +222,120 @@
     });
   }
 
+  function initOwnerActionModal() {
+    var modal = document.querySelector("[data-owner-modal]");
+    if (!modal) {
+      return;
+    }
+    var titleEl = modal.querySelector("[data-owner-modal-title]");
+    var textEl = modal.querySelector("[data-owner-modal-text]");
+    var metaEl = modal.querySelector("[data-owner-modal-meta]");
+    var tenantEl = modal.querySelector("[data-owner-modal-tenant]");
+    var actionEl = modal.querySelector("[data-owner-modal-action]");
+    var consequenceRow = modal.querySelector("[data-owner-modal-consequence-row]");
+    var consequenceEl = modal.querySelector("[data-owner-modal-consequence]");
+    var resultEl = modal.querySelector("[data-owner-modal-result]");
+    var cancelBtn = modal.querySelector("[data-owner-modal-cancel]");
+    var confirmBtn = modal.querySelector("[data-owner-modal-confirm]");
+    var lastFocus = null;
+
+    function setHidden(el, hidden) {
+      if (!el) return;
+      if (hidden) {
+        el.setAttribute("hidden", "");
+      } else {
+        el.removeAttribute("hidden");
+      }
+    }
+
+    function closeModal() {
+      modal.setAttribute("hidden", "");
+      document.body.classList.remove("owner-modal-open");
+      if (lastFocus && typeof lastFocus.focus === "function") {
+        lastFocus.focus();
+      }
+    }
+
+    function openNotConnected(btn) {
+      var name = btn.getAttribute("data-action-name") || "Action";
+      var tenant = btn.getAttribute("data-action-tenant") || "Current tenant";
+      var action = btn.getAttribute("data-action") || "not connected";
+      var consequence = btn.getAttribute("data-action-consequence") || "";
+
+      lastFocus = btn;
+      if (titleEl) {
+        titleEl.textContent = name + " not connected yet";
+      }
+      if (textEl) {
+        textEl.textContent = "This control is visible in the internal control panel roadmap, but its backend endpoint is not wired yet. No tenant data was changed.";
+      }
+      if (tenantEl) {
+        tenantEl.textContent = tenant;
+      }
+      if (actionEl) {
+        actionEl.textContent = action;
+      }
+      setHidden(metaEl, false);
+      if (consequence && consequenceEl && consequenceRow) {
+        consequenceEl.textContent = consequence;
+        setHidden(consequenceRow, false);
+      } else {
+        setHidden(consequenceRow, true);
+      }
+      if (resultEl) {
+        resultEl.textContent = "Required next step: add and test the backend endpoint before enabling this action.";
+      }
+      setHidden(resultEl, false);
+      setHidden(confirmBtn, true);
+      if (cancelBtn) {
+        cancelBtn.textContent = "Close";
+      }
+
+      modal.removeAttribute("hidden");
+      document.body.classList.add("owner-modal-open");
+      if (cancelBtn && typeof cancelBtn.focus === "function") {
+        cancelBtn.focus();
+      }
+    }
+
+    document.querySelectorAll("[data-action-backend='not_connected']").forEach(function (btn) {
+      if (!btn.hasAttribute("title")) {
+        btn.setAttribute("title", "Backend not wired yet");
+      }
+      btn.classList.add("is-not-connected");
+    });
+
+    document.addEventListener("click", function (event) {
+      var action = event.target.closest("[data-action]");
+      if (!action || action.disabled) {
+        return;
+      }
+      if (action.getAttribute("data-action-backend") === "not_connected") {
+        event.preventDefault();
+        event.stopPropagation();
+        openNotConnected(action);
+      }
+    });
+
+    modal.querySelectorAll("[data-owner-modal-close]").forEach(function (btn) {
+      btn.addEventListener("click", closeModal);
+    });
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", closeModal);
+    }
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) {
+        closeModal();
+      }
+    });
+  }
+
   function init() {
     initSidebarDrawer();
     initTenantSelector();
     initCreateTenantWizard();
     initTenantCreatedActions();
+    initOwnerActionModal();
   }
 
   if (document.readyState === "loading") {

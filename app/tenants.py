@@ -684,9 +684,9 @@ def list_tenants() -> tuple[Tenant, ...]:
     - If a real client root is mounted, load every
       {root}/*/config/client.json folder dynamically.
     - Add tenants registered inside ICP.
-    - If no real client root is available, keep the built-in unboks
-      seed so a manually registered tenant such as pepe does not make
-      the main tenant disappear.
+    - Use built-in demo tenants only when no disk tenant and no registry
+      tenant exists. Demo data must not leak into a real registry-only
+      workspace.
     """
     registry = _load_tenants_from_registry()
     client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
@@ -697,11 +697,19 @@ def list_tenants() -> tuple[Tenant, ...]:
         by_id: dict[str, Tenant] = {tenant.id: tenant for tenant in registry}
         by_id.update({tenant.id: tenant for tenant in loaded})
         return tuple(sorted(by_id.values(), key=lambda t: t.id))
-    by_id = {tenant.id: tenant for tenant in _TENANTS}
-    by_id.update({tenant.id: tenant for tenant in registry})
-    if by_id:
-        return tuple(sorted(by_id.values(), key=lambda t: t.id))
+    if registry:
+        return registry
     return _TENANTS
+
+
+def using_placeholder_tenants() -> bool:
+    """True only when the UI is showing the built-in demo tenant seed."""
+    registry = _load_tenants_from_registry()
+    client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    loaded: tuple[Tenant, ...] = tuple()
+    if client_dir and os.path.isdir(client_dir):
+        loaded = _load_tenants_from_disk(client_dir)
+    return not loaded and not registry
 
 
 def get_tenant(tenant_id: str) -> Optional[Tenant]:

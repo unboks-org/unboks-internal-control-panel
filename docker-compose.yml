@@ -9,7 +9,7 @@ services:
       - ./data:/app/data
       # J3-BE-01: read-only mount of the tenant config root. Host path
       # configurable via NR3_TENANTS_CLIENT_HOST_DIR (default ./tenant_root
-      # for local dev; production typically /opt/wtyj/clients). Container
+      # for local dev; VPS production uses /root/clients). Container
       # mount path matches NR3_TENANTS_CLIENT_DIR in .env.example so
       # list_tenants() can discover real client.json files at runtime.
       - ${NR3_TENANTS_CLIENT_HOST_DIR:-./tenant_root}:/app/tenant_root:ro

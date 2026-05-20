@@ -18,6 +18,27 @@ def test_healthz_returns_ok() -> None:
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "wtyj-admin"}
 
+def test_env_example_has_one_tenant_client_dir() -> None:
+    env_example = open(".env.example", encoding="utf-8").read().splitlines()
+    tenant_dir_lines = [
+        line for line in env_example
+        if line.startswith("NR3_TENANTS_CLIENT_DIR=")
+    ]
+
+    assert tenant_dir_lines == ["NR3_TENANTS_CLIENT_DIR=/app/tenant_root"]
+
+def test_owner_modal_js_wires_not_connected_actions() -> None:
+    js = open("app/static/js/admin.js", encoding="utf-8").read()
+    css = open("app/static/css/admin.css", encoding="utf-8").read()
+
+    assert "function initOwnerActionModal()" in js
+    assert "data-action-backend" in js
+    assert "not_connected" in js
+    assert "backend endpoint is not wired yet" in js
+    assert "initOwnerActionModal();" in js
+    assert ".owner-modal" in css
+    assert "[data-action-backend=\"not_connected\"].is-not-connected" in css
+
 def test_admin_redirects_unauthenticated(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")

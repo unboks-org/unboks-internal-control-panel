@@ -508,6 +508,137 @@ button:hover {
   background: #f1f3f4;
 }
 
+[data-action-backend="not_connected"].is-not-connected {
+  border-color: #d9dde5;
+  color: var(--color-muted);
+}
+
+.owner-modal-open {
+  overflow: hidden;
+}
+
+.owner-modal[hidden] {
+  display: none;
+}
+
+.owner-modal {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.owner-modal-backdrop {
+  background: rgba(20, 26, 38, 0.42);
+  inset: 0;
+  position: absolute;
+}
+
+.owner-modal-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 22px 60px rgba(18, 24, 38, 0.18);
+  max-width: 520px;
+  position: relative;
+  width: min(520px, 100%);
+}
+
+.owner-modal-head {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 16px 18px;
+}
+
+.owner-modal-head h2 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.owner-modal-x {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-muted);
+  display: inline-flex;
+  font-size: 24px;
+  font-weight: 400;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+.owner-modal-x:hover {
+  background: #f1f3f4;
+  color: var(--color-text);
+}
+
+.owner-modal-body {
+  padding: 16px 18px 4px;
+}
+
+.owner-modal-text,
+.owner-modal-result {
+  color: var(--color-text);
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+
+.owner-modal-result {
+  background: #f6f7f9;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-muted);
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.owner-modal-meta {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin: 0 0 14px;
+  overflow: hidden;
+}
+
+.owner-modal-meta div {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 120px 1fr;
+  padding: 9px 12px;
+}
+
+.owner-modal-meta div + div {
+  border-top: 1px solid var(--color-border);
+}
+
+.owner-modal-meta dt {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.owner-modal-meta dd {
+  color: var(--color-text);
+  font-size: 13px;
+  margin: 0;
+}
+
+.owner-modal-foot {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 14px 18px 16px;
+}
+
 .button-link {
   align-items: center;
   background: #ffffff;

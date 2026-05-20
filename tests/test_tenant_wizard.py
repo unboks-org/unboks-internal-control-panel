@@ -186,8 +186,8 @@ def test_import_existing_tenant_registers_sidebar_row(client, tmp_path):
 
     sidebar = client.get("/admin/tenants/pepe")
     assert sidebar.status_code == 200
-    assert 'class="tenant-selector-name">Unboks<' in sidebar.text
-    assert 'class="tenant-selector-slug muted">unboks<' in sidebar.text
+    assert 'class="tenant-selector-name">Unboks<' not in sidebar.text
+    assert 'class="tenant-selector-slug muted">unboks<' not in sidebar.text
     assert 'class="tenant-selector-name">Pepe Test<' in sidebar.text
     assert 'class="tenant-selector-slug muted">pepe<' in sidebar.text
     assert "channels-section" in sidebar.text
