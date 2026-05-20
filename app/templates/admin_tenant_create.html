@@ -148,16 +148,8 @@
         <div>
           <label for="ct-existing-status">Status</label>
           <select id="ct-existing-status" name="status">
-            {% for opt in ["trial", "active", "paused", "suspended"] %}
-              <option value="{{ opt }}" {% if (form.existing_status or 'trial') == opt %}selected{% endif %}>{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label for="ct-existing-plan">Plan</label>
-          <select id="ct-existing-plan" name="plan">
-            {% for opt in ["trial", "demo", "paid"] %}
-              <option value="{{ opt }}" {% if (form.existing_plan or 'trial') == opt %}selected{% endif %}>{{ opt }}</option>
+            {% for opt in ["active", "inactive"] %}
+              <option value="{{ opt }}" {% if (form.existing_status or 'active') == opt %}selected{% endif %}>{{ opt }}</option>
             {% endfor %}
           </select>
         </div>

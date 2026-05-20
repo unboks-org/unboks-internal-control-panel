@@ -25,7 +25,7 @@ def client_dir(tmp_path):
 
 def _make(slug: str, client_dir: str, name: str = "Demo") -> str:
     return create_tenant_directory(
-        slug, {"name": name, "status": "active", "plan": "trial"},
+        slug, {"name": name, "status": "active"},
         client_dir=client_dir)
 
 
@@ -111,7 +111,7 @@ def test_delete_cleans_registry_and_state_files(client_dir, tmp_path, monkeypatc
 
     _make("ghost", client_dir, "Ghost")
     register_tenant({"slug": "ghost", "name": "Ghost",
-                     "status": "trial", "plan": "trial"})
+                     "status": "inactive"})
     channel_state.toggle_channel("ghost", "whatsapp")
     icp_overrides.set_feature_toggle("ghost", "email_inbox", True)
     tenant_notes.add_note("ghost", "Internal note")
@@ -148,7 +148,7 @@ def test_reserved_slug_blocks_state_cleanup_too(client_dir, tmp_path, monkeypatc
 
     _make("unboks", client_dir)
     register_tenant({"slug": "unboks", "name": "Unboks",
-                     "status": "active", "plan": "demo"})
+                     "status": "active"})
     icp_overrides.set_feature_toggle("unboks", "email_inbox", True)
     channel_state.toggle_channel("unboks", "whatsapp")
     tenant_notes.add_note("unboks", "Protected note")

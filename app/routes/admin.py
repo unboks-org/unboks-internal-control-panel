@@ -329,7 +329,7 @@ def admin_suspend_tenant(
         return _workspace_redirect(
             tenant_id,
             "danger-section",
-            message="The Unboks master tenant cannot be suspended from Nr 3.",
+            message="The Unboks master tenant cannot be made inactive from Nr 3.",
             level="warn",
         )
     expected = f"suspend {tenant_id}"
@@ -359,17 +359,17 @@ def admin_suspend_tenant(
         dashboard_url=f"https://dashboard.unboks.org/{tenant_id}",
     )
     if result.status == "succeeded":
-        message = "Tenant suspended: channels and AI disabled, container stopped."
+        message = "Tenant is inactive: channels and AI disabled, container stopped."
         level = "ok"
     elif result.status in {"queued", "disabled"}:
         message = (
-            "Tenant bridge overrides were suspended. Host container stop is "
+            "Tenant bridge overrides were set inactive. Host container stop is "
             f"{result.status}: {result.message}"
         )
         level = "warn"
     else:
         message = (
-            "Tenant bridge overrides were suspended, but host container stop "
+            "Tenant bridge overrides were set inactive, but host container stop "
             f"failed: {result.message}"
         )
         level = "warn"
@@ -386,8 +386,7 @@ def admin_tenant_import_existing(
     request: Request,
     slug: str = Form(default=""),
     name: str = Form(default=""),
-    status: str = Form(default="trial"),
-    plan: str = Form(default="trial"),
+    status: str = Form(default="active"),
 ) -> Response:
     """Register an existing tenant in the ICP sidebar.
 
@@ -411,20 +410,17 @@ def admin_tenant_import_existing(
                 "existing_slug": slug,
                 "existing_name": name,
                 "existing_status": status,
-                "existing_plan": plan,
             },
         )
 
     display_name = (name or "").strip() or safe_slug
-    normalized_status = (status or "trial").strip().lower()
-    if normalized_status not in ("active", "trial", "paused", "suspended"):
-        normalized_status = "trial"
-    normalized_plan = (plan or "trial").strip().lower() or "trial"
+    normalized_status = (status or "active").strip().lower()
+    if normalized_status not in ("active", "inactive"):
+        normalized_status = "inactive"
     register_tenant({
         "slug": safe_slug,
         "name": display_name,
         "status": normalized_status,
-        "plan": normalized_plan,
     })
     logger.info("tenant_import.registry_written slug=%s", safe_slug)
     return RedirectResponse(url=f"/admin/tenants/{safe_slug}", status_code=303)
@@ -459,8 +455,7 @@ async def admin_tenant_create_submit(
     contact_person: str = Form(default=""),
     contact_email: str = Form(default=""),
     phone: str = Form(default=""),
-    plan: str = Form(default="trial"),
-    status: str = Form(default="trial"),
+    status: str = Form(default="active"),
     tone: str = Form(default=""),
     notes: str = Form(default=""),
     send_welcome: str = Form(default=""),
@@ -531,8 +526,7 @@ async def admin_tenant_create_submit(
         "name": name,
         "password": initial_token,
         "access_key": access_key,
-        "status": status.strip().lower() or "trial",
-        "plan": plan.strip().lower() or "trial",
+        "status": "active" if status.strip().lower() == "active" else "inactive",
         "created_at": created_at,
     }
     if contact_person.strip():
@@ -861,7 +855,7 @@ def _create_error_response(request: Request, message: str, form_echo: dict) -> R
     so the operator does not retype everything."""
     safe_echo = {k: form_echo.get(k, "") for k in (
         "name", "slug", "contact_person", "contact_email", "phone",
-        "plan", "status", "tone", "notes", "send_welcome",
+        "status", "tone", "notes", "send_welcome",
     )}
     return templates.TemplateResponse(
         request,
@@ -939,18 +933,12 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
 
 def _build_contract(tenant: Tenant) -> dict:
     b = tenant.billing
-    plan_label = b.plan if b.plan and b.plan != "—" else (
-        "Trial" if b.status == "trial" else "—"
-    )
     contract_status_map = {
-        "trial": ("Draft", "warn"),
         "active": ("Active", "ok"),
-        "paused": ("Paused", "warn"),
-        "overdue": ("Active", "warn"),
-        "cancelled": ("Cancelled", "down"),
+        "inactive": ("Inactive", "unknown"),
     }
     contract_status, contract_class = contract_status_map.get(
-        b.status, ("Draft", "unknown")
+        b.status, ("Inactive", "unknown")
     )
     payment_status_map = {
         "ok": ("Paid", "ok"),
@@ -962,9 +950,6 @@ def _build_contract(tenant: Tenant) -> dict:
         b.payment_status, ("Not configured", "unknown")
     )
     return {
-        "plan_label": plan_label,
-        "trial_start": "—",
-        "trial_end": "—" if b.trial_days_left is None else f"in {b.trial_days_left} days",
         "monthly_price": b.monthly_price,
         "setup_fee": "—",
         "contract_status": contract_status,
@@ -1041,7 +1026,7 @@ def _build_runtime(tenant: Tenant) -> dict:
     return {
         "dashboard_status": ("Unknown", "unknown"),
         "agent_status": (
-            ("Active", "ok") if tenant.agent.auto_reply_enabled else ("Paused", "warn")
+            ("Active", "ok") if tenant.agent.auto_reply_enabled else ("Inactive", "warn")
         ),
         "api_status": ("Unknown", "unknown"),
         "webhook_status": ("Unknown", "unknown"),
@@ -1287,9 +1272,8 @@ def onboarding_lead_setup_summary(request: Request, lead_id: int) -> Response:
 _ATTENTION_KIND_LABELS: tuple[tuple[str, str], ...] = (
     ("problem", "Problem tenant"),
     ("setup_incomplete", "Setup incomplete"),
-    ("trial_ending_soon", "Trial ending soon"),
     ("channels_disconnected", "Channels disconnected"),
-    ("agent_paused", "Agent paused"),
+    ("agent_inactive", "Agent inactive"),
     ("sot_missing", "SOT missing"),
 )
 
@@ -1297,8 +1281,8 @@ _ATTENTION_KIND_LABELS: tuple[tuple[str, str], ...] = (
 def _compute_attention_items(tenants) -> list[dict]:
     items: list[dict] = []
     for t in tenants:
-        # Problem (worst-case bucket): hard escalations or billing overdue/cancelled
-        if t.escalations.hard_count > 0 or t.billing.status in ("overdue", "cancelled"):
+        # Problem (worst-case bucket): hard escalations.
+        if t.escalations.hard_count > 0:
             items.append({
                 "tenant_id": t.id, "tenant_name": t.name,
                 "kind": "problem", "label": "Problem tenant", "severity": "P0",
@@ -1311,15 +1295,6 @@ def _compute_attention_items(tenants) -> list[dict]:
                 "kind": "setup_incomplete", "label": "Setup incomplete", "severity": "P1",
             })
 
-        # Trial ending soon
-        days_left = t.billing.trial_days_left
-        if days_left is not None and days_left <= 7:
-            items.append({
-                "tenant_id": t.id, "tenant_name": t.name,
-                "kind": "trial_ending_soon", "label": "Trial ending soon",
-                "severity": "P0" if days_left <= 2 else "P1",
-            })
-
         # Channels disconnected
         if t.health.channels in ("warn", "down") or (
             t.channels and all(ch.state != "connected" for ch in t.channels)
@@ -1329,11 +1304,11 @@ def _compute_attention_items(tenants) -> list[dict]:
                 "kind": "channels_disconnected", "label": "Channels disconnected", "severity": "P2",
             })
 
-        # Agent paused (auto-reply off or human takeover active)
+        # Agent inactive (auto-reply off or human takeover active)
         if not t.agent.auto_reply_enabled or t.agent.human_takeover_active:
             items.append({
                 "tenant_id": t.id, "tenant_name": t.name,
-                "kind": "agent_paused", "label": "Agent paused", "severity": "P2",
+                "kind": "agent_inactive", "label": "Agent inactive", "severity": "P2",
             })
 
         # SOT missing

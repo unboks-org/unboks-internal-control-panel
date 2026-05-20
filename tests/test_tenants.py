@@ -22,19 +22,17 @@ def fake_client_dir(tmp_path):
 
 def test_load_tenants_from_disk_returns_two_real_tenants(monkeypatch, fake_client_dir):
     """tmp_path with two fake client.json files returns both tenants,
-    alphabetically sorted by id, with business.name/status/plan mapped."""
+    alphabetically sorted by id, with business.name/status mapped."""
     tmp_path, make = fake_client_dir
     make("unboks", {
         "slug": "unboks",
         "name": "Unboks AI",
         "status": "active",
-        "plan": "demo",
     })
     make("bluefinn-charters", {
         "slug": "bluefinn-charters",
         "name": "BlueFinn Charters",
-        "status": "paused",
-        "plan": "trial",
+        "status": "inactive",
     })
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path))
     result = tenants.list_tenants()
@@ -42,12 +40,10 @@ def test_load_tenants_from_disk_returns_two_real_tenants(monkeypatch, fake_clien
     # Alphabetical sort by id: bluefinn-charters < unboks
     assert result[0].id == "bluefinn-charters"
     assert result[0].name == "BlueFinn Charters"
-    assert result[0].status == "paused"
-    assert result[0].plan == "trial"
+    assert result[0].status == "inactive"
     assert result[1].id == "unboks"
     assert result[1].name == "Unboks AI"
     assert result[1].status == "active"
-    assert result[1].plan == "demo"
     # get_tenant pulls from list_tenants
     fetched = tenants.get_tenant("unboks")
     assert fetched is not None
@@ -89,8 +85,7 @@ def test_registry_tenants_are_visible_without_client_root(monkeypatch, tmp_path)
             "pepe": {
                 "slug": "pepe",
                 "name": "Pepe Test",
-                "status": "trial",
-                "plan": "trial",
+                "status": "inactive",
             }
         }
     }))
@@ -111,8 +106,7 @@ def test_registry_does_not_replace_mounted_client_root(monkeypatch, tmp_path):
             "pepe": {
                 "slug": "pepe",
                 "name": "Pepe Test",
-                "status": "trial",
-                "plan": "trial",
+                "status": "inactive",
             }
         }
     }))
@@ -122,7 +116,6 @@ def test_registry_does_not_replace_mounted_client_root(monkeypatch, tmp_path):
         "slug": "unboks",
         "name": "Unboks",
         "status": "active",
-        "plan": "demo",
     }))
     monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(registry_path))
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "clients"))
@@ -131,7 +124,7 @@ def test_registry_does_not_replace_mounted_client_root(monkeypatch, tmp_path):
     by_id = {t.id: t for t in result}
     assert sorted(by_id) == ["pepe", "unboks"]
     assert by_id["unboks"].status == "active"
-    assert by_id["pepe"].status == "trial"
+    assert by_id["pepe"].status == "inactive"
 
 
 def test_empty_or_unset_dir_falls_back_to_placeholders(monkeypatch, tmp_path):
@@ -172,7 +165,7 @@ def test_slug_missing_falls_back_to_directory_name(monkeypatch, tmp_path):
     d = tmp_path / "fallback-dir" / "config"
     d.mkdir(parents=True)
     (d / "client.json").write_text(json.dumps({
-        "business": {"name": "Fallback Tenant", "plan": "trial"}
+        "business": {"name": "Fallback Tenant"}
     }))
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path))
     result = tenants.list_tenants()
@@ -181,9 +174,9 @@ def test_slug_missing_falls_back_to_directory_name(monkeypatch, tmp_path):
     assert result[0].name == "Fallback Tenant"
 
 
-def test_invalid_status_falls_back_to_active(monkeypatch, tmp_path):
+def test_invalid_status_falls_back_to_inactive(monkeypatch, tmp_path):
     """Unknown status string must NOT propagate to the Tenant; default
-    to 'active'."""
+    to 'inactive'."""
     d = tmp_path / "weirdstatus" / "config"
     d.mkdir(parents=True)
     (d / "client.json").write_text(json.dumps({
@@ -196,4 +189,4 @@ def test_invalid_status_falls_back_to_active(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path))
     result = tenants.list_tenants()
     assert len(result) == 1
-    assert result[0].status == "active"
+    assert result[0].status == "inactive"

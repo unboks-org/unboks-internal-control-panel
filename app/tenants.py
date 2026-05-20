@@ -20,7 +20,7 @@ class TenantHealth:
     channels: str = "unknown"
     sot: str = "unknown"
     escalations: str = "unknown"
-    billing: str = "unknown"      # ok | trial | overdue | unknown
+    billing: str = "unknown"      # ok | inactive | unknown
 
 
 @dataclass(frozen=True)
@@ -110,7 +110,7 @@ ACTIVITY_TYPES: tuple[tuple[str, str], ...] = (
     ("channel_connected", "Channel connected"),
     ("onboarding_sent", "Onboarding sent"),
     ("review_approved", "Review approved"),
-    ("tenant_paused", "Tenant paused"),
+    ("tenant_inactive", "Tenant inactive"),
     ("changes_pushed", "Changes pushed"),
 )
 
@@ -172,9 +172,7 @@ class TenantPushState:
 
 @dataclass(frozen=True)
 class TenantBilling:
-    status: str = "trial"            # trial | active | overdue | paused | cancelled
-    trial_days_left: Optional[int] = None
-    plan: str = "—"
+    status: str = "inactive"         # active | inactive
     monthly_price: str = "—"
     next_billing_date: str = "—"
     payment_status: str = "—"        # ok | pending | failed | —
@@ -203,8 +201,7 @@ class TenantNote:
 class Tenant:
     id: str
     name: str
-    status: str  # active | paused | suspended
-    plan: str   # demo | trial | paid
+    status: str  # active | inactive
     health: TenantHealth = field(default_factory=TenantHealth)
     sot: TenantSourceOfTruth = field(default_factory=TenantSourceOfTruth)
     agent: TenantAgent = field(default_factory=TenantAgent)
@@ -223,7 +220,6 @@ _TENANTS: tuple[Tenant, ...] = (
         id="unboks",
         name="Unboks",
         status="active",
-        plan="demo",
         notes=(
             TenantNote(
                 id="note-demo-1",
@@ -289,8 +285,6 @@ _TENANTS: tuple[Tenant, ...] = (
         ),
         billing=TenantBilling(
             status="active",
-            trial_days_left=None,
-            plan="Demo",
             monthly_price="—",
             next_billing_date="—",
             payment_status="—",
@@ -370,7 +364,7 @@ def compute_setup_checklist(tenant: "Tenant") -> dict:
     items: list[dict] = []
 
     # 1. Tenant profile completed
-    profile_done = bool(tenant.id and tenant.name and tenant.status and tenant.plan)
+    profile_done = bool(tenant.id and tenant.name and tenant.status)
     items.append({
         "key": "profile",
         "label": "Tenant profile completed",
@@ -459,20 +453,12 @@ def compute_setup_checklist(tenant: "Tenant") -> dict:
         "anchor": "onboarding-section",
     })
 
-    # 9. Trial / payment configured
+    # 9. Tenant status configured
     bs = tenant.billing.status
-    ps = tenant.billing.payment_status
-    if bs == "active" and ps == "ok":
-        bill_state = "done"
-    elif bs == "trial":
-        bill_state = "needs_review"
-    elif bs in ("overdue", "cancelled", "paused"):
-        bill_state = "needs_review"
-    else:
-        bill_state = "missing"
+    bill_state = "done" if bs == "active" else "needs_review"
     items.append({
         "key": "billing",
-        "label": "Trial / payment configured",
+        "label": "Tenant status configured",
         "status": bill_state,
         "anchor": "billing-section",
     })
@@ -505,7 +491,7 @@ def sorted_notes(notes: tuple[TenantNote, ...]) -> tuple[TenantNote, ...]:
 
 _DEFAULT_TENANTS_CLIENT_DIR = "/root/clients"
 _DEFAULT_TENANT_REGISTRY_PATH = "data/tenant_registry.json"
-_ALLOWED_STATUSES = ("active", "trial", "paused", "suspended")
+_ALLOWED_STATUSES = ("active", "inactive")
 
 
 def _tenant_from_source(source: dict, fallback_id: str) -> Optional[Tenant]:
@@ -523,34 +509,27 @@ def _tenant_from_source(source: dict, fallback_id: str) -> Optional[Tenant]:
     else:
         name = tenant_id
     raw_status = source.get("status")
-    if isinstance(raw_status, str):
+    if isinstance(raw_status, str) and raw_status.strip():
         normalized = raw_status.strip().lower()
-        status = normalized if normalized in _ALLOWED_STATUSES else "active"
+        status = normalized if normalized in _ALLOWED_STATUSES else "inactive"
     else:
         status = "active"
-    raw_plan = source.get("plan")
-    if isinstance(raw_plan, str) and raw_plan.strip():
-        plan = raw_plan.strip()
-    else:
-        plan = "trial"
     return Tenant(
         id=tenant_id,
         name=name,
         status=status,
-        plan=plan,
     )
 
 
 def _load_tenants_from_disk(client_dir: str) -> tuple[Tenant, ...]:
     """J3-BE-01: discover tenants by globbing {client_dir}/*/config/client.json.
 
-    Mapping (only id/name/status/plan are pulled from disk for now; all other
+    Mapping (only id/name/status are pulled from disk for now; all other
     Tenant fields keep their placeholder defaults until subsequent J3 briefs
     wire them up):
       tenant.id     = business.slug, fallback to the parent directory name
       tenant.name   = business.name, fallback to tenant.id
-      tenant.status = business.status if in {active, paused, suspended}, else 'active'
-      tenant.plan   = business.plan, fallback to 'trial'
+      tenant.status = 'active' or 'inactive'
 
     Read-only: never writes to client.json. Invalid JSON, missing files, or
     files without a usable id are skipped without raising. Returns alphabetically
@@ -672,7 +651,6 @@ def register_tenant(client_data: dict) -> None:
         "slug": tenant.id,
         "name": tenant.name,
         "status": tenant.status,
-        "plan": tenant.plan,
     }
     _save_registry(data)
 

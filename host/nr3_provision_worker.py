@@ -183,14 +183,14 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
     if not tenant_dir.is_dir():
         raise RuntimeError(f"Tenant directory not found: {tenant_dir}")
     details: list[str] = []
-    update_client_status(tenant_dir, "suspended")
-    details.append("client.json status set to suspended")
+    update_client_status(tenant_dir, "inactive")
+    details.append("client.json status set to inactive")
     run(["docker", "compose", "stop"], cwd=tenant_dir)
     details.append(f"docker compose stop completed for {slug}")
     dashboard_url = str(job.get("dashboard_url") or f"https://dashboard.unboks.org/{slug}")
     write_result(job_id, {
         "status": "succeeded",
-        "message": f"Tenant {slug} was suspended on the VPS.",
+        "message": f"Tenant {slug} was made inactive on the VPS.",
         "details": details,
         "dashboard_url": dashboard_url,
     })

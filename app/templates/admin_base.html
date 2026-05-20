@@ -65,8 +65,7 @@
           <div class="tenant-filter-chips" role="group" aria-label="Filter tenants">
             <button type="button" class="tenant-filter-chip is-active" data-tenant-filter="all">All</button>
             <button type="button" class="tenant-filter-chip" data-tenant-filter="active">Active</button>
-            <button type="button" class="tenant-filter-chip" data-tenant-filter="trial">Trial</button>
-            <button type="button" class="tenant-filter-chip" data-tenant-filter="paused">Paused</button>
+            <button type="button" class="tenant-filter-chip" data-tenant-filter="inactive">Inactive</button>
             <button type="button" class="tenant-filter-chip" data-tenant-filter="problem">Problem</button>
           </div>
 
@@ -78,11 +77,10 @@
             {% for tenant in tenants %}
               {% set tags = [] %}
               {% if tenant.status == 'active' %}{% set _ = tags.append('active') %}{% endif %}
-              {% if tenant.status == 'paused' %}{% set _ = tags.append('paused') %}{% endif %}
-              {% if tenant.plan == 'trial' %}{% set _ = tags.append('trial') %}{% endif %}
+              {% if tenant.status != 'active' %}{% set _ = tags.append('inactive') %}{% endif %}
               {% set health_states = [tenant.health.inbox, tenant.health.ai_agent, tenant.health.channels, tenant.health.sot, tenant.health.escalations, tenant.health.billing] %}
               {% set has_bad_health = health_states | select('in', ['warn', 'down']) | list | length > 0 %}
-              {% if has_bad_health or tenant.billing.status in ('overdue', 'cancelled') or tenant.escalations.hard_count > 0 %}
+              {% if has_bad_health or tenant.escalations.hard_count > 0 %}
                 {% set _ = tags.append('problem') %}
               {% endif %}
               <li

@@ -2,7 +2,7 @@
 
 The wizard:
   - Validates name + slug.
-  - Builds a flat client.json (slug, name, password, status, plan,
+  - Builds a flat client.json (slug, name, password, status,
     created_at + optional wizard fields).
   - Optionally sends the welcome email.
   - Does NOT write to local disk.
@@ -97,13 +97,13 @@ def test_create_minimal_tenant_client_json_required_fields(client):
         follow_redirects=False)
     assert r.status_code == 200
     data = _extract_client_json(r.text)
-    for field in ("slug", "name", "password", "status", "plan", "created_at"):
+    for field in ("slug", "name", "password", "status", "created_at"):
         assert field in data, f"missing required field: {field}"
     assert data["slug"] == "acme-charters"
     assert data["name"] == "Acme Charters"
     assert isinstance(data["password"], str) and len(data["password"]) >= 12
-    assert data["plan"] == "trial"
-    assert data["status"] == "trial"
+    assert "plan" not in data
+    assert data["status"] == "active"
     assert "T" in data["created_at"]
     assert data["created_at"].endswith("+00:00")
 
@@ -117,8 +117,7 @@ def test_create_full_form_propagates_optional_fields(client):
             "contact_person": "Calvin",
             "contact_email": "calvin@example.com",
             "phone": "+1 555 4321",
-            "plan": "monthly",
-            "status": "active",
+            "status": "inactive",
             "tone": "Friendly",
             "notes": "Be brief.",
         },
@@ -127,8 +126,8 @@ def test_create_full_form_propagates_optional_fields(client):
     data = _extract_client_json(r.text)
     assert data["slug"] == "marina-bay"
     assert data["name"] == "Marina Bay"
-    assert data["plan"] == "monthly"
-    assert data["status"] == "active"
+    assert "plan" not in data
+    assert data["status"] == "inactive"
     assert data["contact_person"] == "Calvin"
     assert data["email"] == "calvin@example.com"
     assert data["whatsapp"] == "+1 555 4321"
@@ -174,8 +173,7 @@ def test_import_existing_tenant_registers_sidebar_row(client, tmp_path):
         data={
             "slug": "pepe",
             "name": "Pepe Test",
-            "status": "trial",
-            "plan": "trial",
+            "status": "inactive",
         },
         follow_redirects=False)
     assert r.status_code == 303

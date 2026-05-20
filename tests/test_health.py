@@ -118,7 +118,7 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert "data-tenant-search" in shell.text
     assert 'placeholder="Search tenants"' in shell.text
     assert "data-tenant-count" in shell.text
-    for f in ("All", "Active", "Trial", "Paused", "Problem"):
+    for f in ("All", "Active", "Inactive", "Problem"):
         assert 'data-tenant-filter="' + f.lower() + '"' in shell.text
         assert ">" + f + "<" in shell.text
     # Each tenant row carries filter metadata
@@ -183,19 +183,15 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "agent-panel" in workspace.text
     assert "Agent replies" in workspace.text
     assert "Auto-reply" in workspace.text
-    assert "Human takeover" in workspace.text
     assert "Learning from operator answers" in workspace.text
     assert "Escalation behavior" in workspace.text
     assert "Soft escalation allowed" in workspace.text
     assert "Hard escalation allowed" in workspace.text
     assert "Both allowed" in workspace.text
     assert "Tone / personality" in workspace.text
-    assert "Edit tone" in workspace.text
     assert "Escalation rules" in workspace.text
-    assert "Edit rules" in workspace.text
-    assert "Test Agent reply" in workspace.text
     # Each toggle must be a real disabled control, not a passive chip
-    assert workspace.text.count('class="agent-toggle"') >= 4
+    assert workspace.text.count('class="agent-toggle"') >= 3
     # Forbidden legacy terminology
     assert "Soft mode" not in workspace.text
     assert "Hard mode" not in workspace.text
@@ -216,7 +212,7 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         assert tone in workspace.text
     # One-line descriptions for the final 4 sections only.
     for desc in (
-        "Control replies, learning, escalation behavior, and tone.",
+        "Control replies, auto-reply, and learning.",
         "View escalation rules, open escalations, and alert routing.",
         "Keep private internal notes for the Unboks team.",
         "Suspend or cut off tenant access.",
@@ -261,7 +257,7 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         if prio == "Normal":
             assert prio in workspace.text
     # Actions
-    for action in ("Add note", "Edit note", "Pin note", "Unpin note", "Mark follow-up done"):
+    for action in ("Add note", "Pin note", "Unpin note", "Mark follow-up done"):
         assert action in workspace.text
     # Follow-up label appears for note-demo-2
     assert "Follow-up:" in workspace.text
@@ -272,13 +268,13 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         assert label in workspace.text
     for action in ("View escalations", "Edit escalation rules",
                    "Test escalation alert", "Assign operator"):
-        assert action in workspace.text
+        assert action not in workspace.text
     # Must use Soft escalation / Hard escalation terminology, not Soft mode / Hard mode
     assert "Soft mode" not in workspace.text
     assert "Hard mode" not in workspace.text
     # Danger zone
     assert "danger-zone" in workspace.text
-    assert "Suspend / cut off tenant" in workspace.text
+    assert "The master Unboks tenant is protected from suspension." in workspace.text
     # Thin-control rule (2026-05-20): no button is disabled. Stubs
     # route to the not-wired modal via admin.js, which bails on
     # disabled elements. Pinned by tests/test_thin_control.py.

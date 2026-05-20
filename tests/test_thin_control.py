@@ -1,8 +1,8 @@
 """Invariants of the thin-control tenant workspace.
 
-The workspace stays at exactly five collapsed sections. Buttons either
-post to a real backend route or explicitly carry the not-wired modal
-contract.
+The workspace stays at exactly five collapsed sections. Tenant-workspace
+buttons must post to real backend routes; placeholder modal buttons are
+kept out of the workspace.
 """
 import re
 
@@ -78,9 +78,8 @@ def test_channels_toggle_posts_to_real_backend(client):
         assert "not_connected" not in blk, "channel toggle form has not_connected stub"
 
 
-def test_every_workspace_button_is_real_or_not_wired_modal(client):
-    """Every workspace button must either submit a real form endpoint
-    or route to the not-wired modal."""
+def test_workspace_has_no_not_wired_modal_buttons(client):
+    """Every workspace button must submit a real form endpoint."""
     html = _html(client)
     # Scope to the <main class="page-content">...</main> block. Buttons
     # from admin_base chrome (sidebar drawer, menu toggle, logout) live
@@ -105,26 +104,15 @@ def test_every_workspace_button_is_real_or_not_wired_modal(client):
     for action in real_forms:
         assert action.startswith(expected_real_prefixes), action
 
-    plain_buttons = re.findall(r'<button\b(?![^>]*type="submit")[^>]*>', workspace)
-    missing_modal = [
-        button for button in plain_buttons
-        if 'data-action-backend="not_connected"' not in button
-    ]
-    assert missing_modal == []
+    assert 'data-action-backend="not_connected"' not in workspace
 
 
-def test_suspend_button_is_clickable_not_disabled(client):
-    """The old Suspend button was `disabled`, which made admin.js
-    bail out before opening the modal -- so clicking it did nothing.
-    It must be enabled so the modal fires with the 'dangerous'
-    consequence text."""
+def test_reserved_tenant_has_no_fake_suspend_button(client):
+    """The master tenant is protected with text, not a fake modal button."""
     html = _html(client)
     suspend = re.search(
         r'<button[^>]*data-action="suspend-cut-off-tenant"[^>]*>',
         html,
     )
-    assert suspend, "suspend button missing"
-    btn = suspend.group(0)
-    assert " disabled" not in btn, "Suspend button still disabled"
-    assert 'data-action-backend="not_connected"' in btn
-    assert "data-action-consequence=" in btn
+    assert suspend is None
+    assert "The master Unboks tenant is protected from suspension." in html

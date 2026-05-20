@@ -301,7 +301,7 @@ h3 {
   background: var(--color-green);
 }
 
-.tenant-selector-dot.tenant-status-paused {
+.tenant-selector-dot.tenant-status-inactive {
   background: var(--color-yellow);
 }
 
@@ -1167,14 +1167,9 @@ button.button-disabled,
   padding: 14px 18px;
 }
 
-.tenant-header-paused {
+.tenant-header-inactive {
   background: #fff8e1;
   border-color: #f4e3a8;
-}
-
-.tenant-header-suspended {
-  background: var(--color-red-soft);
-  border-color: #f6c6c2;
 }
 
 .tenant-header-name {
@@ -1228,7 +1223,7 @@ button.button-disabled,
 
 .health-ok .health-dot { background: var(--color-green); }
 .health-warn .health-dot { background: var(--color-yellow); }
-.health-trial .health-dot { background: var(--color-yellow); }
+.health-inactive .health-dot { background: var(--color-yellow); }
 .health-down .health-dot { background: var(--color-red); }
 .health-overdue .health-dot { background: var(--color-red); }
 
@@ -2448,7 +2443,7 @@ button.button-disabled,
   }
 }
 
-/* Billing / Trial */
+/* Billing */
 .billing-panel {
   background: var(--color-surface);
   border: 1px solid var(--color-border);

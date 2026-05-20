@@ -5,7 +5,7 @@
 {% block page_title %}{{ tenant.name }}{% endblock %}
 {% block page_subtitle %}
   <p class="muted">
-    <code>{{ tenant.id }}</code> &middot; {{ tenant.plan }} &middot; {{ tenant.status }}
+    <code>{{ tenant.id }}</code> &middot; {{ tenant.status }}
   </p>
 {% endblock %}
 
@@ -39,8 +39,6 @@
       <h2 class="tenant-header-name">{{ tenant.name }}</h2>
       <p class="tenant-header-meta">
         <code>{{ tenant.id }}</code>
-        <span class="dot-sep">&middot;</span>
-        Plan: <strong>{{ tenant.plan }}</strong>
         <span class="dot-sep">&middot;</span>
         Status: <strong>{{ tenant.status }}</strong>
       </p>
@@ -94,7 +92,6 @@
               <span class="sr-only">{{ label }} {{ 'on' if is_on else 'off' }}</span>
             </button>
           </form>
-          <button type="button" class="ch-configure" data-action="configure" data-action-name="Configure" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Configure</button>
         </li>
       {% endfor %}
     </ul>
@@ -106,7 +103,7 @@
   <details class="ws-section ws-tone-violet">
     <summary class="ws-summary">
       <span class="ws-title">AI Agent</span>
-      <span class="ws-desc muted">Control replies, learning, escalation behavior, and tone.</span>
+      <span class="ws-desc muted">Control replies, auto-reply, and learning.</span>
       <span class="ws-chevron" aria-hidden="true">&#9662;</span>
     </summary>
 
@@ -114,7 +111,7 @@
     <header class="agent-panel-header">
       <div>
         <h3>AI Agent</h3>
-        <p class="muted compact-note">Per-tenant agent behavior. Replies, auto-reply, escalation behavior, takeover, and learning.</p>
+        <p class="muted compact-note">Per-tenant agent behavior. Replies, auto-reply, and learning.</p>
       </div>
       <span class="source-badge source-{{ agent_source or state_source['ai_agent'] }}" data-source-area="ai_agent" title="Effective state source">
         Source: {{ 'ICP override' if (agent_source or state_source['ai_agent']) == 'icp_override' else 'backend' }}
@@ -135,10 +132,6 @@
           <span class="status-chip status-{{ 'ok' if agent_feature_states.auto_reply else 'unknown' }}">{{ 'ON' if agent_feature_states.auto_reply else 'OFF' }}</span>
         </button>
       </form>
-      <button type="button" class="agent-toggle" data-action="human-takeover" data-action-name="Human takeover" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">
-        <span class="agent-toggle-label">Human takeover</span>
-        <span class="status-chip status-{{ 'warn' if tenant.agent.human_takeover_active else 'unknown' }}">{{ 'Active' if tenant.agent.human_takeover_active else 'Not active' }}</span>
-      </button>
       <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/learning-from-operator-answers/toggle" class="agent-toggle-form">
         <button type="submit" class="agent-toggle">
           <span class="agent-toggle-label">Learning from operator answers</span>
@@ -169,18 +162,12 @@
       <div class="agent-block">
         <h4>Tone / personality</h4>
         <p class="agent-summary">{{ tenant.agent.tone_summary }}</p>
-        <button type="button" class="control-btn" data-action="edit-tone" data-action-name="Edit tone" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Edit tone</button>
       </div>
 
       <div class="agent-block">
         <h4>Escalation rules</h4>
         <p class="agent-summary">{{ tenant.agent.escalation_rules_summary }}</p>
-        <button type="button" class="control-btn" data-action="edit-rules" data-action-name="Edit rules" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Edit rules</button>
       </div>
-    </div>
-
-    <div class="agent-actions">
-      <button type="button" class="control-btn" data-action="test-agent-reply" data-action-name="Test agent reply" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Test Agent reply</button>
     </div>
 
     <div class="agent-replies">
@@ -200,7 +187,7 @@
 
   {# 4b. Source of Truth / Data Room #}
 
-  {# 4d. Billing / Trial #}
+  {# 4d. Billing removed: tenants are active or inactive in Nr3. #}
 
   {# 4e. Push changes #}
 
@@ -274,13 +261,6 @@
         </div>
       </div>
     </div>
-
-    <div class="escalations-actions">
-      <button type="button" class="control-btn" data-action="view-escalations" data-action-name="View escalations" data-action-type="read" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">View escalations</button>
-      <button type="button" class="control-btn" data-action="edit-escalation-rules" data-action-name="Edit escalation rules" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Edit escalation rules</button>
-      <button type="button" class="control-btn" data-action="test-escalation-alert" data-action-name="Test escalation alert" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Test escalation alert</button>
-      <button type="button" class="control-btn" data-action="assign-operator" data-action-name="Assign operator" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Assign operator</button>
-    </div>
   </section>
   </details>
 
@@ -340,7 +320,6 @@
             </div>
             <p class="note-body">{{ note.body }}</p>
             <div class="note-actions">
-              <button type="button" class="control-btn" data-action="edit-note" data-action-name="Edit note" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Edit note</button>
               <form method="post" action="/admin/tenants/{{ tenant.id }}/notes/{{ note.id }}/pin">
                 <button type="submit" class="control-btn">{{ "Unpin note" if note.pinned else "Pin note" }}</button>
               </form>
@@ -359,7 +338,7 @@
   </section>
   </details>
 
-  {# 4k. Contract / plan #}
+  {# 4k. Contract removed from Nr3 workspace. #}
 
   {# 4l. Feature toggles #}
 
@@ -388,7 +367,7 @@
       <p class="muted">Suspend cuts off the tenant from all channels and the AI agent. Used for non-payment, abuse, or emergency stop.</p>
     </div>
     {% if is_reserved_tenant %}
-      <button type="button" class="danger-btn" data-action="suspend-cut-off-tenant" data-action-name="Suspend / cut off tenant" data-action-type="dangerous" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}" data-action-consequence="The master Unboks tenant is protected from suspension.">Suspend / cut off tenant</button>
+      <p class="muted compact-note">The master Unboks tenant is protected from suspension.</p>
     {% else %}
       <form method="post" action="/admin/tenants/{{ tenant.id }}/suspend" class="danger-form">
         <label for="suspend-confirm-{{ tenant.id }}">Type <code>suspend {{ tenant.id }}</code></label>
