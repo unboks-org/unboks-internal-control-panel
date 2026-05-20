@@ -7,17 +7,71 @@
 <section class="page-card create-tenant">
   <header class="create-tenant-header">
     <h2>Tenant created: <code>{{ slug }}</code></h2>
-    <p class="muted">
-      Use the first button below. It copies one complete VPS script.
-      SSH into the VPS, paste the script once, press Enter, and wait for
-      it to finish. Once that's done the tenant can sign in at
-      <a href="{{ dashboard_url }}">{{ dashboard_url }}</a>.
-    </p>
+    {% if provision_result and provision_result.status == 'succeeded' %}
+      <p class="muted">
+        Nr 3 provisioned this tenant on the VPS automatically. The tenant can
+        sign in at <a href="{{ provision_result.dashboard_url or dashboard_url }}">{{ provision_result.dashboard_url or dashboard_url }}</a>.
+      </p>
+    {% else %}
+      <p class="muted">
+        Automatic provisioning did not finish. Use the first button below as
+        the fallback: it copies one complete VPS script. SSH into the VPS,
+        paste the script once, press Enter, and wait for it to finish.
+      </p>
+    {% endif %}
     <p class="muted">
       Host port for this tenant (deterministic from the slug):
       <code>{{ host_port }}</code>.
     </p>
   </header>
+
+  {% if provision_result and provision_result.status == 'succeeded' %}
+    <div class="form-feedback form-feedback-success">
+      <strong>Automatic VPS provisioning succeeded.</strong>
+      <p>
+        Files were written, Docker was started, nginx was reloaded, and the
+        health check passed.
+      </p>
+      {% if provision_result.details %}
+        <ul class="provision-details">
+          {% for detail in provision_result.details %}
+            <li>{{ detail }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      <div class="ct-actions">
+        <a class="button-primary" href="{{ provision_result.dashboard_url or dashboard_url }}">
+          Open tenant dashboard
+        </a>
+        <a class="button-secondary" href="/admin/tenants/{{ slug }}">
+          Open tenant workspace
+        </a>
+      </div>
+    </div>
+  {% elif provision_result and provision_result.status == 'queued' %}
+    <div class="form-feedback form-feedback-warn">
+      <strong>Automatic provisioning was queued but not confirmed yet.</strong>
+      <p>{{ provision_result.message }}</p>
+      {% if provision_result.job_id %}
+        <p class="ct-help muted">Job: <code>{{ provision_result.job_id }}</code></p>
+      {% endif %}
+      <p>Use the manual fallback script below if the tenant is not available shortly.</p>
+    </div>
+  {% elif provision_result and provision_result.status == 'failed' %}
+    <div class="form-feedback form-feedback-warn">
+      <strong>Automatic provisioning failed.</strong>
+      <p>{{ provision_result.message }}</p>
+      {% if provision_result.job_id %}
+        <p class="ct-help muted">Job: <code>{{ provision_result.job_id }}</code></p>
+      {% endif %}
+      <p>No success was faked. Use the manual fallback script below or inspect the provisioning worker logs.</p>
+    </div>
+  {% elif provision_result and provision_result.status == 'disabled' %}
+    <div class="form-feedback form-feedback-info">
+      <strong>Automatic provisioning is disabled.</strong>
+      <p>{{ provision_result.message }}</p>
+    </div>
+  {% endif %}
 
   {% if welcome_status == 'sent' %}
     <div class="form-feedback form-feedback-success">

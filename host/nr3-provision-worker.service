@@ -1,0 +1,21 @@
+[Unit]
+Description=Nr3 tenant provisioning worker
+After=docker.service nginx.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/unboks-internal-control-panel
+Environment=NR3_PROVISION_QUEUE_DIR=/root/unboks-internal-control-panel/data/provisioning/jobs
+Environment=NR3_PROVISION_RESULT_DIR=/root/unboks-internal-control-panel/data/provisioning/results
+Environment=NR3_PROVISION_FAILED_DIR=/root/unboks-internal-control-panel/data/provisioning/failed
+Environment=NR3_PROVISION_CLIENTS_ROOT=/root/clients
+Environment=NR3_PROVISION_NGINX_SITE=/etc/nginx/sites-enabled/api-unboks
+Environment=NR3_PROVISION_BRIDGE_TOKEN_FILE=/root/clients/_shared/nr3_internal_api_token
+ExecStart=/usr/bin/python3 /root/unboks-internal-control-panel/host/nr3_provision_worker.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

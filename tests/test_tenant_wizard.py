@@ -12,6 +12,7 @@ The wizard:
 import html
 import json
 import re
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -506,3 +507,54 @@ def test_full_vps_setup_script_is_ready_to_paste(client):
     assert "nginx -t" in script
     assert "systemctl reload nginx" in script
     assert "https://dashboard.unboks.org/one-paste" in script
+
+
+def test_create_shows_auto_provision_success_when_worker_succeeds(client, monkeypatch):
+    from app.routes import admin
+
+    def fake_auto_provision_tenant(**kwargs):
+        return SimpleNamespace(
+            status="succeeded",
+            message="Tenant was provisioned.",
+            job_id="job-123",
+            details=("wrote tenant files", "nginx config tested and reloaded"),
+            dashboard_url=kwargs["dashboard_url"],
+            health_url="http://127.0.0.1:8123/health",
+        )
+
+    monkeypatch.setattr(admin, "auto_provision_tenant", fake_auto_provision_tenant)
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Auto Provision", "slug": "auto-provision"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    assert "Automatic VPS provisioning succeeded" in r.text
+    assert "Open tenant dashboard" in r.text
+    assert "wrote tenant files" in r.text
+    # Manual fallback stays available even after a successful automatic run.
+    assert "ct-full-vps-setup" in r.text
+
+
+def test_create_shows_auto_provision_failure_without_fake_success(client, monkeypatch):
+    from app.routes import admin
+
+    def fake_auto_provision_tenant(**kwargs):
+        return SimpleNamespace(
+            status="failed",
+            message="nginx config test failed",
+            job_id="job-456",
+            details=(),
+            dashboard_url=kwargs["dashboard_url"],
+            health_url="",
+        )
+
+    monkeypatch.setattr(admin, "auto_provision_tenant", fake_auto_provision_tenant)
+    r = client.post(
+        "/admin/tenants/create",
+        data={"name": "Failed Auto", "slug": "failed-auto"},
+        follow_redirects=False)
+    assert r.status_code == 200
+    assert "Automatic provisioning failed" in r.text
+    assert "nginx config test failed" in r.text
+    assert "No success was faked" in r.text
+    assert "ct-full-vps-setup" in r.text

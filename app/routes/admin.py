@@ -26,6 +26,7 @@ from app.security import (
     set_session_cookie,
     verify_admin_password,
 )
+from app.provisioning import auto_provision_tenant
 from app.tenants import (
     ACTIVITY_TYPES,
     CLOUD_PROVIDERS,
@@ -604,6 +605,21 @@ async def admin_tenant_create_submit(
         f"echo \"ICP bridge token loaded from $BRIDGE_TOKEN_FILE. No manual token paste was needed.\"\n"
     )
 
+    provision_result = auto_provision_tenant(
+        slug=safe_slug,
+        host_port=host_port,
+        client_data=client_data,
+        docker_compose_text=docker_compose_text,
+        managed_nginx_block_text=managed_nginx_block_text,
+        dashboard_url=dashboard_url,
+    )
+    logger.info(
+        "tenant_create.auto_provision slug=%s status=%s job_id=%s",
+        safe_slug,
+        provision_result.status,
+        provision_result.job_id,
+    )
+
     return templates.TemplateResponse(
         request,
         "admin_tenant_created.html",
@@ -622,6 +638,7 @@ async def admin_tenant_create_submit(
             "nginx_snippet_text": nginx_snippet_text,
             "deploy_script_text": deploy_script_text,
             "full_vps_setup_script_text": full_vps_setup_script_text,
+            "provision_result": provision_result,
         },
     )
 
