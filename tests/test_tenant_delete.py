@@ -97,26 +97,30 @@ def test_delete_cleans_registry_and_state_files(client_dir, tmp_path, monkeypatc
     ghost entries in tenant_registry.json, icp_overrides.json, and
     channel_state.json -- so the sidebar still listed the dead tenant.
     delete_tenant_directory() must wipe every place a tenant lives."""
-    from app import channel_state, icp_overrides
+    from app import channel_state, icp_overrides, tenant_notes
     from app.tenants import register_tenant
 
     registry_path = tmp_path / "tenant_registry.json"
     overrides_path = tmp_path / "icp_overrides.json"
     channels_path = tmp_path / "channel_state.json"
+    notes_path = tmp_path / "tenant_notes.json"
     monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(registry_path))
     monkeypatch.setenv("NR3_ICP_STATE_PATH", str(overrides_path))
     monkeypatch.setenv("NR3_CHANNEL_STATE_PATH", str(channels_path))
+    monkeypatch.setenv("NR3_TENANT_NOTES_PATH", str(notes_path))
 
     _make("ghost", client_dir, "Ghost")
     register_tenant({"slug": "ghost", "name": "Ghost",
                      "status": "trial", "plan": "trial"})
     channel_state.toggle_channel("ghost", "whatsapp")
     icp_overrides.set_feature_toggle("ghost", "email_inbox", True)
+    tenant_notes.add_note("ghost", "Internal note")
 
     # Sanity: ghost is in all three state files.
     assert json.loads(registry_path.read_text())["tenants"].get("ghost")
     assert "ghost" in json.loads(overrides_path.read_text())["tenants"]
     assert "ghost" in json.loads(channels_path.read_text())
+    assert "ghost" in json.loads(notes_path.read_text())["tenants"]
 
     delete_tenant_directory("ghost", client_dir=client_dir)
 
@@ -124,26 +128,30 @@ def test_delete_cleans_registry_and_state_files(client_dir, tmp_path, monkeypatc
     assert "ghost" not in json.loads(registry_path.read_text())["tenants"]
     assert "ghost" not in json.loads(overrides_path.read_text())["tenants"]
     assert "ghost" not in json.loads(channels_path.read_text())
+    assert "ghost" not in json.loads(notes_path.read_text())["tenants"]
 
 
 def test_reserved_slug_blocks_state_cleanup_too(client_dir, tmp_path, monkeypatch):
     """The reserved-slug guard must fire before ANY cleanup -- a
     blocked delete must not even touch the state files."""
-    from app import channel_state, icp_overrides
+    from app import channel_state, icp_overrides, tenant_notes
     from app.tenants import register_tenant
 
     registry_path = tmp_path / "tenant_registry.json"
     overrides_path = tmp_path / "icp_overrides.json"
     channels_path = tmp_path / "channel_state.json"
+    notes_path = tmp_path / "tenant_notes.json"
     monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(registry_path))
     monkeypatch.setenv("NR3_ICP_STATE_PATH", str(overrides_path))
     monkeypatch.setenv("NR3_CHANNEL_STATE_PATH", str(channels_path))
+    monkeypatch.setenv("NR3_TENANT_NOTES_PATH", str(notes_path))
 
     _make("unboks", client_dir)
     register_tenant({"slug": "unboks", "name": "Unboks",
                      "status": "active", "plan": "demo"})
     icp_overrides.set_feature_toggle("unboks", "email_inbox", True)
     channel_state.toggle_channel("unboks", "whatsapp")
+    tenant_notes.add_note("unboks", "Protected note")
 
     with pytest.raises(TenantDeleteError, match="reserved"):
         delete_tenant_directory("unboks", client_dir=client_dir)
@@ -152,3 +160,4 @@ def test_reserved_slug_blocks_state_cleanup_too(client_dir, tmp_path, monkeypatc
     assert json.loads(registry_path.read_text())["tenants"].get("unboks")
     assert json.loads(overrides_path.read_text())["tenants"].get("unboks")
     assert json.loads(channels_path.read_text()).get("unboks")
+    assert json.loads(notes_path.read_text())["tenants"].get("unboks")

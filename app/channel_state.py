@@ -107,6 +107,47 @@ def toggle_channel(slug: str, channel: str) -> dict[str, bool]:
     return {key: bool(tenant_state.get(key, False)) for _, key in CHANNEL_KEYS}
 
 
+def set_channel(slug: str, channel: str, value: bool) -> dict[str, bool]:
+    """Set one channel to an explicit on/off value."""
+    if channel not in _VALID_KEYS:
+        logger.warning(
+            "channel_state.set_unknown_key slug=%s channel=%r", slug, channel)
+        return read_channels(slug)
+    all_state = _load_all()
+    tenant_state = dict(all_state.get(slug) or {})
+    tenant_state[channel] = bool(value)
+    all_state[slug] = tenant_state
+    try:
+        _save_all(all_state)
+        icp_overrides.set_channel_visibility(slug, channel, bool(value))
+        logger.info(
+            "channel_state.set slug=%s channel=%s value=%s",
+            slug, channel, bool(value))
+    except OSError as exc:
+        logger.warning(
+            "channel_state.set_failed slug=%s channel=%s err=%r",
+            slug, channel, exc)
+    return {key: bool(tenant_state.get(key, False)) for _, key in CHANNEL_KEYS}
+
+
+def set_all_channels(slug: str, value: bool) -> dict[str, bool]:
+    """Set every known channel to the same explicit on/off value."""
+    all_state = _load_all()
+    tenant_state = dict(all_state.get(slug) or {})
+    for _, key in CHANNEL_KEYS:
+        tenant_state[key] = bool(value)
+    all_state[slug] = tenant_state
+    try:
+        _save_all(all_state)
+        for _, key in CHANNEL_KEYS:
+            icp_overrides.set_channel_visibility(slug, key, bool(value))
+        logger.info("channel_state.set_all slug=%s value=%s", slug, bool(value))
+    except OSError as exc:
+        logger.warning(
+            "channel_state.set_all_failed slug=%s err=%r", slug, exc)
+    return {key: bool(tenant_state.get(key, False)) for _, key in CHANNEL_KEYS}
+
+
 def forget_tenant(slug: str) -> bool:
     """Drop every channel toggle for ``slug``.
 
@@ -123,4 +164,3 @@ def forget_tenant(slug: str) -> bool:
     except OSError as exc:
         logger.warning("channel_state.forget_failed slug=%s err=%r", slug, exc)
     return True
-

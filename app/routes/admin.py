@@ -26,7 +26,7 @@ from app.security import (
     set_session_cookie,
     verify_admin_password,
 )
-from app.provisioning import auto_provision_tenant
+from app.provisioning import auto_provision_tenant, queue_tenant_host_action
 from app.tenants import (
     ACTIVITY_TYPES,
     CLOUD_PROVIDERS,
@@ -43,6 +43,7 @@ from app.tenants import (
     sorted_notes,
     using_placeholder_tenants,
     validate_slug,
+    RESERVED_SLUGS,
 )
 
 import hashlib
@@ -64,6 +65,12 @@ templates = Jinja2Templates(directory="app/templates")
 
 REVIEW_AWAITING_STATUSES = {"form_submitted"}
 REVIEW_DECIDED_STATUSES = {"review_needs_changes", "review_approved", "tenant_ready"}
+
+AGENT_FEATURE_ACTIONS: dict[str, str] = {
+    "agent-replies": "agent_replies_enabled",
+    "auto-reply": "ai_auto_reply",
+    "learning-from-operator-answers": "learning_from_operator",
+}
 
 
 def _shell_context(active: str, active_tenant: Optional[Tenant] = None) -> dict:
@@ -165,6 +172,212 @@ def admin_toggle_channel(
     return RedirectResponse(
         url=f"/admin/tenants/{tenant_id}#channels-section",
         status_code=303,
+    )
+
+
+def _workspace_redirect(
+    tenant_id: str,
+    anchor: str = "tenant-header-anchor",
+    *,
+    message: str = "",
+    level: str = "ok",
+) -> RedirectResponse:
+    suffix = f"#{anchor}" if anchor else ""
+    query = ""
+    if message:
+        query = (
+            f"?action_message={quote_plus(message)}"
+            f"&action_level={quote_plus(level)}"
+        )
+    return RedirectResponse(
+        url=f"/admin/tenants/{tenant_id}{query}{suffix}",
+        status_code=303,
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/agent/{feature}/toggle")
+def admin_toggle_agent_feature(
+    request: Request,
+    tenant_id: str,
+    feature: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    feature_key = AGENT_FEATURE_ACTIONS.get(feature)
+    if not feature_key:
+        return _workspace_redirect(
+            tenant_id,
+            "agent-section",
+            message="That AI Agent control is not wired yet.",
+            level="warn",
+        )
+    from app import icp_overrides
+    toggles = icp_overrides.feature_toggles_for_tenant(tenant_id)
+    current = toggles.get(feature_key, {}).get("value")
+    if current is None:
+        defaults = {
+            "agent_replies_enabled": tenant.agent.replies_enabled,
+            "ai_auto_reply": tenant.agent.auto_reply_enabled,
+            "learning_from_operator": tenant.agent.learning_enabled,
+        }
+        current = defaults.get(feature_key, False)
+    next_value = not bool(current)
+    icp_overrides.set_feature_toggle(tenant_id, feature_key, next_value)
+    label = feature.replace("-", " ")
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message=f"{label} set to {'ON' if next_value else 'OFF'}.",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/notes")
+def admin_add_tenant_note(
+    request: Request,
+    tenant_id: str,
+    body: str = Form(default=""),
+    priority: str = Form(default="normal"),
+    follow_up_date: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app import tenant_notes
+    try:
+        tenant_notes.add_note(
+            tenant_id,
+            body,
+            priority=priority,
+            follow_up_date=follow_up_date,
+        )
+    except ValueError as exc:
+        return _workspace_redirect(
+            tenant_id,
+            "notes-section",
+            message=str(exc),
+            level="warn",
+        )
+    return _workspace_redirect(
+        tenant_id,
+        "notes-section",
+        message="Tenant note added.",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/notes/{note_id}/pin")
+def admin_toggle_tenant_note_pin(
+    request: Request,
+    tenant_id: str,
+    note_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    from app import tenant_notes
+    changed = tenant_notes.toggle_pin(tenant_id, note_id)
+    return _workspace_redirect(
+        tenant_id,
+        "notes-section",
+        message="Note pin updated." if changed else "Note was not found.",
+        level="ok" if changed else "warn",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/notes/{note_id}/follow-up-done")
+def admin_mark_tenant_note_follow_up_done(
+    request: Request,
+    tenant_id: str,
+    note_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    from app import tenant_notes
+    changed = tenant_notes.mark_follow_up_done(tenant_id, note_id)
+    return _workspace_redirect(
+        tenant_id,
+        "notes-section",
+        message="Follow-up marked done." if changed else "Note was not found.",
+        level="ok" if changed else "warn",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/suspend")
+def admin_suspend_tenant(
+    request: Request,
+    tenant_id: str,
+    confirmation: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    if tenant_id in RESERVED_SLUGS:
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message="The Unboks master tenant cannot be suspended from Nr 3.",
+            level="warn",
+        )
+    expected = f"suspend {tenant_id}"
+    if (confirmation or "").strip() != expected:
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message=f"Type exactly '{expected}' to suspend this tenant.",
+            level="warn",
+        )
+    from app import channel_state, icp_overrides
+    channel_state.set_all_channels(tenant_id, False)
+    for feature_key in (
+        "agent_replies_enabled",
+        "ai_auto_reply",
+        "learning_from_operator",
+        "tenant_suspended",
+    ):
+        icp_overrides.set_feature_toggle(
+            tenant_id,
+            feature_key,
+            feature_key == "tenant_suspended",
+        )
+    result = queue_tenant_host_action(
+        slug=tenant_id,
+        action="suspend_tenant",
+        dashboard_url=f"https://dashboard.unboks.org/{tenant_id}",
+    )
+    if result.status == "succeeded":
+        message = "Tenant suspended: channels and AI disabled, container stopped."
+        level = "ok"
+    elif result.status in {"queued", "disabled"}:
+        message = (
+            "Tenant bridge overrides were suspended. Host container stop is "
+            f"{result.status}: {result.message}"
+        )
+        level = "warn"
+    else:
+        message = (
+            "Tenant bridge overrides were suspended, but host container stop "
+            f"failed: {result.message}"
+        )
+        level = "warn"
+    return _workspace_redirect(
+        tenant_id,
+        "danger-section",
+        message=message,
+        level=level,
     )
 
 
@@ -672,6 +885,27 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     if tenant is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
     from app import channel_state as _channel_state
+    from app import icp_overrides as _icp_overrides
+    from app import tenant_notes as _tenant_notes
+    override_toggles = _icp_overrides.feature_toggles_for_tenant(tenant.id)
+    agent_feature_states = {
+        "agent_replies": override_toggles.get(
+            "agent_replies_enabled", {}
+        ).get("value", tenant.agent.replies_enabled),
+        "auto_reply": override_toggles.get(
+            "ai_auto_reply", {}
+        ).get("value", tenant.agent.auto_reply_enabled),
+        "learning": override_toggles.get(
+            "learning_from_operator", {}
+        ).get("value", tenant.agent.learning_enabled),
+    }
+    agent_source = (
+        "icp_override"
+        if any(key in override_toggles for key in AGENT_FEATURE_ACTIONS.values())
+        else "backend"
+    )
+    stored_notes = _tenant_notes.list_notes(tenant.id)
+    notes = sorted_notes(stored_notes + tenant.notes)
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
@@ -680,11 +914,16 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "channel_keys": _channel_state.CHANNEL_KEYS,
             **_shell_context("tenants", active_tenant=tenant),
             "tenant": tenant,
+            "action_message": request.query_params.get("action_message", ""),
+            "action_level": request.query_params.get("action_level", "ok"),
+            "agent_feature_states": agent_feature_states,
+            "agent_source": agent_source,
+            "is_reserved_tenant": tenant.id in RESERVED_SLUGS,
             "cloud_providers": CLOUD_PROVIDERS,
             "upload_categories": UPLOAD_CATEGORIES,
             "escalation_modes": ESCALATION_MODES,
             "activity_type_labels": dict(ACTIVITY_TYPES),
-            "notes": sorted_notes(tenant.notes),
+            "notes": notes,
             "note_priorities": NOTE_PRIORITIES,
             "setup_checklist": compute_setup_checklist(tenant),
             "contract": _build_contract(tenant),

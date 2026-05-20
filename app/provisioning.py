@@ -133,3 +133,90 @@ def auto_provision_tenant(
         job_id=job_id,
         dashboard_url=dashboard_url,
     )
+
+
+def queue_tenant_host_action(
+    *,
+    slug: str,
+    action: str,
+    dashboard_url: str = "",
+) -> AutoProvisionResult:
+    """Queue a privileged host action such as suspending a tenant.
+
+    The web app still performs immediate bridge-state changes itself;
+    this queues the Docker/client.json host operation for the root
+    worker.
+    """
+    if not _enabled():
+        return AutoProvisionResult(
+            status="disabled",
+            message="Host action worker is disabled.",
+            dashboard_url=dashboard_url,
+        )
+    if action not in {"suspend_tenant"}:
+        return AutoProvisionResult(
+            status="failed",
+            message=f"Unsupported host action: {action}",
+            dashboard_url=dashboard_url,
+        )
+
+    jobs_dir = _path_env("NR3_PROVISION_QUEUE_DIR", "data/provisioning/jobs")
+    results_dir = _path_env("NR3_PROVISION_RESULT_DIR", "data/provisioning/results")
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    job_id = f"{stamp}-{slug}-{action}-{secrets.token_hex(4)}"
+    job_path = jobs_dir / f"{job_id}.json"
+    tmp_path = jobs_dir / f".{job_id}.tmp"
+    result_path = results_dir / f"{job_id}.json"
+
+    payload = {
+        "job_id": job_id,
+        "job_type": "tenant_action",
+        "action": action,
+        "requested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "slug": slug,
+        "dashboard_url": dashboard_url,
+    }
+    tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp_path, job_path)
+
+    timeout = _timeout_seconds()
+    if timeout <= 0:
+        return AutoProvisionResult(
+            status="queued",
+            message="Host action queued; worker result was not awaited.",
+            job_id=job_id,
+            dashboard_url=dashboard_url,
+        )
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if result_path.exists():
+            try:
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return AutoProvisionResult(
+                    status="failed",
+                    message="Host action worker wrote an unreadable result.",
+                    job_id=job_id,
+                    dashboard_url=dashboard_url,
+                )
+            details_raw = result.get("details")
+            details = tuple(str(item) for item in details_raw) if isinstance(details_raw, list) else tuple()
+            return AutoProvisionResult(
+                status=str(result.get("status") or "failed"),
+                message=str(result.get("message") or "Host action finished."),
+                job_id=job_id,
+                details=details,
+                dashboard_url=str(result.get("dashboard_url") or dashboard_url),
+                health_url=str(result.get("health_url") or ""),
+            )
+        time.sleep(1.0)
+
+    return AutoProvisionResult(
+        status="queued",
+        message="Host action queued, but the worker did not finish before the UI timeout.",
+        job_id=job_id,
+        dashboard_url=dashboard_url,
+    )

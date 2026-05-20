@@ -1,10 +1,8 @@
-"""Invariants of the v0.1-clean-thin-control workspace.
+"""Invariants of the thin-control tenant workspace.
 
-Calvin's brief (2026-05-20): exactly 5 sections, all closed by
-default, only channel toggles connected to a real backend, every
-other button shows the 'Not wired yet' modal. These tests pin that
-state so future commits can't quietly re-introduce dead UI or
-half-finished features.
+The workspace stays at exactly five collapsed sections. Buttons either
+post to a real backend route or explicitly carry the not-wired modal
+contract.
 """
 import re
 
@@ -80,11 +78,9 @@ def test_channels_toggle_posts_to_real_backend(client):
         assert "not_connected" not in blk, "channel toggle form has not_connected stub"
 
 
-def test_every_non_channel_button_routes_to_the_not_wired_modal(client):
-    """Rule 1 + the modal contract: every button inside the workspace
-    content (other than the channel-toggle <form>) carries
-    data-action-backend='not_connected', so the existing admin.js
-    handler will catch it and show the modal."""
+def test_every_workspace_button_is_real_or_not_wired_modal(client):
+    """Every workspace button must either submit a real form endpoint
+    or route to the not-wired modal."""
     html = _html(client)
     # Scope to the <main class="page-content">...</main> block. Buttons
     # from admin_base chrome (sidebar drawer, menu toggle, logout) live
@@ -96,16 +92,25 @@ def test_every_non_channel_button_routes_to_the_not_wired_modal(client):
     assert main_m, "page-content <main> block not found"
     workspace = main_m.group(1)
 
-    btn_blocks = re.findall(r'<button\b[^>]*>', workspace)
-    # Drop the channel-toggle submit button (real backend, not a stub).
-    btn_blocks = [b for b in btn_blocks if "ios-toggle" not in b]
-
-    unwired = [b for b in btn_blocks
-               if 'data-action-backend="not_connected"' not in b]
-    assert unwired == [], (
-        "workspace buttons missing the not_connected hook (would "
-        f"silently do nothing on click): {unwired}"
+    real_forms = re.findall(
+        r'<form method="post" action="([^"]+)"[^>]*>.*?</form>',
+        workspace,
+        re.DOTALL,
     )
+    expected_real_prefixes = (
+        "/admin/tenants/unboks/channels/",
+        "/admin/tenants/unboks/agent/",
+        "/admin/tenants/unboks/notes",
+    )
+    for action in real_forms:
+        assert action.startswith(expected_real_prefixes), action
+
+    plain_buttons = re.findall(r'<button\b(?![^>]*type="submit")[^>]*>', workspace)
+    missing_modal = [
+        button for button in plain_buttons
+        if 'data-action-backend="not_connected"' not in button
+    ]
+    assert missing_modal == []
 
 
 def test_suspend_button_is_clickable_not_disabled(client):

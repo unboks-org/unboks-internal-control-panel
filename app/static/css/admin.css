@@ -1463,6 +1463,10 @@ button.button-disabled,
   overflow: hidden;
 }
 
+.agent-toggle-form {
+  display: contents;
+}
+
 .agent-toggle {
   align-items: center;
   background: transparent;
@@ -1485,6 +1489,10 @@ button.button-disabled,
 }
 
 .agent-toggle:first-child {
+  border-left: 0;
+}
+
+.agent-toggle-form:first-child .agent-toggle {
   border-left: 0;
 }
 
@@ -2111,10 +2119,41 @@ button.button-disabled,
   word-wrap: break-word;
 }
 
+.note-create-form {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 12px;
+}
+
+.note-create-form label {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.note-create-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.note-create-actions select,
+.note-create-actions input {
+  max-width: 180px;
+}
+
 .note-actions {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.note-actions form {
+  margin: 0;
 }
 
 .notes-empty {
@@ -2658,6 +2697,18 @@ button.button-disabled,
   font-weight: 650;
   min-height: 34px;
   padding: 6px 14px;
+}
+
+.danger-form {
+  display: grid;
+  gap: 8px;
+  max-width: 360px;
+}
+
+.danger-form label {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .danger-btn[disabled],

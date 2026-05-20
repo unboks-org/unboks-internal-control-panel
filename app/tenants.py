@@ -873,9 +873,9 @@ def delete_tenant_directory(slug: str,
     # succeeded and a single ghost JSON row must not raise.
     unregister_tenant(safe_slug)
     try:
-        from app import channel_state, icp_overrides
+        from app import channel_state, icp_overrides, tenant_notes
         channel_state.forget_tenant(safe_slug)
         icp_overrides.forget_tenant(safe_slug)
+        tenant_notes.forget_tenant(safe_slug)
     except Exception:  # pragma: no cover -- defensive
         pass
-

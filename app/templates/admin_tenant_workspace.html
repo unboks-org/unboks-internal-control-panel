@@ -21,6 +21,12 @@
   {% set open_push_count = pending_open_count if pending_open_count is defined else 0 %}
   {% set push_audit = recent_push_audit if recent_push_audit is defined else [] %}
 
+  {% if action_message %}
+    <div class="form-feedback form-feedback-{{ 'warn' if action_level == 'warn' else 'success' }}" role="status">
+      {{ action_message }}
+    </div>
+  {% endif %}
+
   {% if is_placeholder_tenants %}
     <div class="alert alert-info demo-banner" role="note" data-demo-banner>
       <strong>Demo data</strong> — this workspace will populate from live tenant backend once connected.
@@ -110,29 +116,35 @@
         <h3>AI Agent</h3>
         <p class="muted compact-note">Per-tenant agent behavior. Replies, auto-reply, escalation behavior, takeover, and learning.</p>
       </div>
-      <span class="source-badge source-{{ state_source['ai_agent'] }}" data-source-area="ai_agent" title="Effective state source">
-        Source: {{ 'ICP override' if state_source['ai_agent'] == 'icp_override' else 'backend' }}
+      <span class="source-badge source-{{ agent_source or state_source['ai_agent'] }}" data-source-area="ai_agent" title="Effective state source">
+        Source: {{ 'ICP override' if (agent_source or state_source['ai_agent']) == 'icp_override' else 'backend' }}
       </span>
       <span class="status-chip status-{{ 'ok' if tenant.health.ai_agent == 'ok' else 'unknown' }}">{{ tenant.health.ai_agent }}</span>
     </header>
 
     <div class="agent-toggle-row">
-      <button type="button" class="agent-toggle" data-action="agent-replies" data-action-name="Agent replies" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">
-        <span class="agent-toggle-label">Agent replies</span>
-        <span class="status-chip status-{{ 'ok' if tenant.agent.replies_enabled else 'unknown' }}">{{ 'ON' if tenant.agent.replies_enabled else 'OFF' }}</span>
-      </button>
-      <button type="button" class="agent-toggle" data-action="auto-reply" data-action-name="Auto-reply" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">
-        <span class="agent-toggle-label">Auto-reply</span>
-        <span class="status-chip status-{{ 'ok' if tenant.agent.auto_reply_enabled else 'unknown' }}">{{ 'ON' if tenant.agent.auto_reply_enabled else 'OFF' }}</span>
-      </button>
+      <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/agent-replies/toggle" class="agent-toggle-form">
+        <button type="submit" class="agent-toggle">
+          <span class="agent-toggle-label">Agent replies</span>
+          <span class="status-chip status-{{ 'ok' if agent_feature_states.agent_replies else 'unknown' }}">{{ 'ON' if agent_feature_states.agent_replies else 'OFF' }}</span>
+        </button>
+      </form>
+      <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/auto-reply/toggle" class="agent-toggle-form">
+        <button type="submit" class="agent-toggle">
+          <span class="agent-toggle-label">Auto-reply</span>
+          <span class="status-chip status-{{ 'ok' if agent_feature_states.auto_reply else 'unknown' }}">{{ 'ON' if agent_feature_states.auto_reply else 'OFF' }}</span>
+        </button>
+      </form>
       <button type="button" class="agent-toggle" data-action="human-takeover" data-action-name="Human takeover" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">
         <span class="agent-toggle-label">Human takeover</span>
         <span class="status-chip status-{{ 'warn' if tenant.agent.human_takeover_active else 'unknown' }}">{{ 'Active' if tenant.agent.human_takeover_active else 'Not active' }}</span>
       </button>
-      <button type="button" class="agent-toggle" data-action="learning-from-operator-answers" data-action-name="Learning from operator answers" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">
-        <span class="agent-toggle-label">Learning from operator answers</span>
-        <span class="status-chip status-{{ 'ok' if tenant.agent.learning_enabled else 'unknown' }}">{{ 'ON' if tenant.agent.learning_enabled else 'OFF' }}</span>
-      </button>
+      <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/learning-from-operator-answers/toggle" class="agent-toggle-form">
+        <button type="submit" class="agent-toggle">
+          <span class="agent-toggle-label">Learning from operator answers</span>
+          <span class="status-chip status-{{ 'ok' if agent_feature_states.learning else 'unknown' }}">{{ 'ON' if agent_feature_states.learning else 'OFF' }}</span>
+        </button>
+      </form>
     </div>
 
     <div class="agent-grid">
@@ -280,6 +292,7 @@
       <span class="ws-chevron" aria-hidden="true">&#9662;</span>
     </summary>
 
+  <span id="notes-section"></span>
   <section class="notes-panel" aria-label="Tenant notes">
     <header class="notes-panel-header">
       <div>
@@ -291,11 +304,21 @@
           Last note:
           <strong>{{ notes[0].created_at if notes else '—' }}</strong>
         </span>
-        <button type="button" class="control-btn" data-action="add-note" data-action-name="Add note" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">
-          Add note
-        </button>
       </div>
     </header>
+    <form method="post" action="/admin/tenants/{{ tenant.id }}/notes" class="note-create-form">
+      <label for="note-body-{{ tenant.id }}">Add note</label>
+      <textarea id="note-body-{{ tenant.id }}" name="body" rows="3" maxlength="1200" placeholder="Internal note for this tenant"></textarea>
+      <div class="note-create-actions">
+        <select name="priority" aria-label="Priority">
+          {% for key, label in note_priorities %}
+            <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <input type="date" name="follow_up_date" aria-label="Follow-up date">
+        <button type="submit" class="control-btn control-btn-primary">Add note</button>
+      </div>
+    </form>
     {% if notes %}
       <ul class="notes-list">
         {% for note in notes %}
@@ -318,13 +341,13 @@
             <p class="note-body">{{ note.body }}</p>
             <div class="note-actions">
               <button type="button" class="control-btn" data-action="edit-note" data-action-name="Edit note" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">Edit note</button>
-              <button type="button" class="control-btn" data-action="pin-note" data-action-name="Pin note" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">
-                {{ "Unpin note" if note.pinned else "Pin note" }}
-              </button>
+              <form method="post" action="/admin/tenants/{{ tenant.id }}/notes/{{ note.id }}/pin">
+                <button type="submit" class="control-btn">{{ "Unpin note" if note.pinned else "Pin note" }}</button>
+              </form>
               {% if note.follow_up_date and not note.follow_up_done %}
-                <button type="button" class="control-btn" data-action="mark-follow-up-done" data-action-name="Mark follow-up done" data-action-type="edit" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}">
-                  Mark follow-up done
-                </button>
+                <form method="post" action="/admin/tenants/{{ tenant.id }}/notes/{{ note.id }}/follow-up-done">
+                  <button type="submit" class="control-btn">Mark follow-up done</button>
+                </form>
               {% endif %}
             </div>
           </li>
@@ -351,6 +374,7 @@
   {# 5. Activity log / audit trail #}
 
   {# 6. Danger zone #}
+  <span id="danger-section"></span>
   <details class="ws-section ws-tone-danger">
     <summary class="ws-summary">
       <span class="ws-title">Danger zone</span>
@@ -363,7 +387,15 @@
       <h3>Danger zone</h3>
       <p class="muted">Suspend cuts off the tenant from all channels and the AI agent. Used for non-payment, abuse, or emergency stop.</p>
     </div>
-    <button type="button" class="danger-btn" data-action="suspend-cut-off-tenant" data-action-name="Suspend / cut off tenant" data-action-type="dangerous" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}" data-action-consequence="Tenant immediately loses all channel access and AI processing.">Suspend / cut off tenant</button>
+    {% if is_reserved_tenant %}
+      <button type="button" class="danger-btn" data-action="suspend-cut-off-tenant" data-action-name="Suspend / cut off tenant" data-action-type="dangerous" data-action-backend="not_connected" data-action-tenant="{{ tenant.name }}" data-action-consequence="The master Unboks tenant is protected from suspension.">Suspend / cut off tenant</button>
+    {% else %}
+      <form method="post" action="/admin/tenants/{{ tenant.id }}/suspend" class="danger-form">
+        <label for="suspend-confirm-{{ tenant.id }}">Type <code>suspend {{ tenant.id }}</code></label>
+        <input id="suspend-confirm-{{ tenant.id }}" name="confirmation" type="text" autocomplete="off" placeholder="suspend {{ tenant.id }}">
+        <button type="submit" class="danger-btn">Suspend / cut off tenant</button>
+      </form>
+    {% endif %}
   </section>
   </details>
 {% endblock %}

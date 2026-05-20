@@ -24,6 +24,7 @@ from typing import Any
 
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,49}$")
+RESERVED_SLUGS = {"unboks"}
 
 
 def env_path(name: str, default: str) -> Path:
@@ -148,6 +149,53 @@ def wait_for_health(host_port: int, timeout: int = 45) -> str:
     raise RuntimeError(f"Tenant health check timed out for {url}: {last_error}")
 
 
+def validate_slug(raw: object) -> str:
+    slug = str(raw or "")
+    if not SLUG_RE.match(slug):
+        raise RuntimeError(f"Invalid slug in provisioning job: {slug!r}")
+    return slug
+
+
+def update_client_status(tenant_dir: Path, status: str) -> None:
+    client_path = tenant_dir / "config" / "client.json"
+    data = json.loads(client_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise RuntimeError(f"client.json is not an object: {client_path}")
+    business = data.get("business")
+    if isinstance(business, dict) and business:
+        business["status"] = status
+    data["status"] = status
+    client_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
+    action = str(job.get("action") or "")
+    slug = validate_slug(job.get("slug"))
+    if slug in RESERVED_SLUGS:
+        raise RuntimeError(f"Tenant {slug!r} is reserved and cannot be changed by host action.")
+    if action != "suspend_tenant":
+        raise RuntimeError(f"Unsupported tenant action: {action!r}")
+
+    tenant_dir = CLIENTS_ROOT / slug
+    if not tenant_dir.is_dir():
+        raise RuntimeError(f"Tenant directory not found: {tenant_dir}")
+    details: list[str] = []
+    update_client_status(tenant_dir, "suspended")
+    details.append("client.json status set to suspended")
+    run(["docker", "compose", "stop"], cwd=tenant_dir)
+    details.append(f"docker compose stop completed for {slug}")
+    dashboard_url = str(job.get("dashboard_url") or f"https://dashboard.unboks.org/{slug}")
+    write_result(job_id, {
+        "status": "succeeded",
+        "message": f"Tenant {slug} was suspended on the VPS.",
+        "details": details,
+        "dashboard_url": dashboard_url,
+    })
+
+
 def process_job(job_path: Path) -> None:
     processing_path = job_path.with_suffix(".processing")
     try:
@@ -160,9 +208,11 @@ def process_job(job_path: Path) -> None:
     try:
         job = json.loads(processing_path.read_text(encoding="utf-8"))
         job_id = str(job.get("job_id") or job_id)
-        slug = str(job.get("slug") or "")
-        if not SLUG_RE.match(slug):
-            raise RuntimeError(f"Invalid slug in provisioning job: {slug!r}")
+        if job.get("job_type") == "tenant_action":
+            process_tenant_action(job_id, job)
+            processing_path.unlink(missing_ok=True)
+            return
+        slug = validate_slug(job.get("slug"))
         host_port = int(job["host_port"])
         if host_port < 1 or host_port > 65535:
             raise RuntimeError(f"Invalid host port in provisioning job: {host_port}")
