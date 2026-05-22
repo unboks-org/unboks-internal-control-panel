@@ -12,8 +12,13 @@ from pydantic import BaseModel
 from app import audit_log
 from app import channel_connections
 from app.config import get_settings
+from app.emailer import (
+    build_whatsapp_connection_email,
+    send_email,
+    smtp_is_configured,
+)
 from app.security import is_authenticated
-from app.tenants import get_tenant
+from app.tenants import get_tenant, tenant_contact_details
 from app.zernio import (
     ZernioAccountSummary,
     ZernioAPIError,
@@ -303,6 +308,89 @@ def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
         "connectedAt": connection.connected_at,
         "lastUpdatedAt": connection.updated_at,
         "lastError": connection.last_error,
+    }
+
+
+@router.post("/tenants/{tenant_id}/channels/whatsapp/connect/send-link")
+def send_whatsapp_connection_link(tenant_id: str, request: Request) -> dict:
+    """Send the latest generated WhatsApp authorization link to the tenant."""
+    _require_operator_json(request)
+    settings = get_settings()
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found.")
+
+    contact = tenant_contact_details(tenant.id)
+    to_email = contact.get("email", "")
+    if not to_email:
+        raise HTTPException(
+            status_code=409,
+            detail="Tenant contact email is missing.",
+        )
+
+    latest = channel_connections.get_latest_connection_request_for_tenant(
+        tenant.id
+    )
+    if latest is None or not latest.auth_url:
+        raise HTTPException(
+            status_code=409,
+            detail="Generate an authorization link first.",
+        )
+    if latest.status in {"connected", "failed", "expired", "cancelled"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Generate a fresh authorization link first.",
+        )
+    if _is_expired(latest):
+        channel_connections.update_connection_request(
+            latest.id,
+            status="expired",
+            error_summary="WhatsApp authorization link expired.",
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="Authorization link expired. Generate a fresh link first.",
+        )
+    if not smtp_is_configured(settings):
+        raise HTTPException(status_code=503, detail="SMTP is not configured.")
+
+    draft = build_whatsapp_connection_email(
+        client_first_name=contact.get("first_name", ""),
+        authorization_link=latest.auth_url,
+    )
+    try:
+        send_email(
+            to_email=to_email,
+            subject=draft.subject,
+            body=draft.body,
+            settings=settings,
+        )
+    except Exception as exc:
+        audit_log.record_event(
+            tenant_id=tenant.id,
+            action="whatsapp.connect_email_failed",
+            result="failed",
+            safe_summary="WhatsApp connection email failed to send.",
+            metadata={"request_id": latest.id},
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="WhatsApp connection email failed to send.",
+        ) from exc
+
+    audit_log.record_event(
+        tenant_id=tenant.id,
+        action="whatsapp.connect_email_sent",
+        result="ok",
+        safe_summary="WhatsApp connection email sent.",
+        metadata={"request_id": latest.id},
+    )
+    return {
+        "success": True,
+        "tenantId": tenant.id,
+        "sent": True,
+        "email": to_email,
+        "message": f"Email sent successfully to {to_email}",
     }
 
 

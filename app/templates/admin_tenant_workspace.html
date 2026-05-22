@@ -108,14 +108,15 @@
         </div>
       </dl>
       <div class="whatsapp-connect-actions">
-        <button type="button" class="button-secondary" data-wa-start>Generate authorization link</button>
+        <button type="button" class="button-secondary" data-wa-start>Generate Authorization Link</button>
+        <button type="button" data-wa-send data-wa-send-ready="false">Send Link to Client</button>
         <button type="button" class="button-secondary" data-wa-refresh>Refresh status</button>
       </div>
       <div class="whatsapp-auth-link" data-wa-link-box hidden>
         <label for="wa-auth-url-{{ tenant.id }}">Client authorization link</label>
         <div class="whatsapp-auth-copy">
           <input id="wa-auth-url-{{ tenant.id }}" data-wa-auth-url readonly>
-          <button type="button" class="button-secondary" data-wa-copy>Copy</button>
+          <button type="button" class="button-secondary" data-wa-copy>Copy Link</button>
         </div>
         <p class="muted compact-note">Send this link separately to the client when you are ready to connect WhatsApp.</p>
       </div>

@@ -322,6 +322,51 @@ def get_tenant(tenant_id: str) -> Optional[Tenant]:
     return None
 
 
+def get_tenant_client_data(tenant_id: str) -> dict:
+    """Return raw client.json data for a tenant when the client root is mounted.
+
+    This is read-only and used for operator workflows that need safe tenant
+    contact metadata such as email/name. Returns an empty dict when the runtime
+    config file is unavailable.
+    """
+    safe_id = tenant_id.strip()
+    client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    if not safe_id or not client_dir:
+        return {}
+    path = os.path.join(client_dir, safe_id, "config", "client.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def tenant_contact_details(tenant_id: str) -> dict[str, str]:
+    data = get_tenant_client_data(tenant_id)
+    business = data.get("business")
+    source = business if isinstance(business, dict) and business else data
+
+    def first_text(*keys: str) -> str:
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    email = first_text("email", "contact_email", "owner_email")
+    contact_name = first_text("contact_person", "contact_name", "owner_name", "name")
+    first_name = contact_name.split()[0] if contact_name.split() else ""
+    return {
+        "email": email,
+        "contact_name": contact_name,
+        "first_name": first_name,
+    }
+
+
 # Tenant creation (used by the Add-New-Tenant wizard).
 #
 # Pure filesystem operation — writes <client_dir>/<slug>/config/client.json

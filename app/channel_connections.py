@@ -289,6 +289,26 @@ def get_connection_request(request_id: str) -> ConnectionRequest | None:
     return row_to_connection_request(row) if row is not None else None
 
 
+def get_latest_connection_request_for_tenant(
+    tenant_id: str,
+    *,
+    channel: str = "whatsapp",
+    provider: str = "zernio",
+) -> ConnectionRequest | None:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM connection_requests
+            WHERE tenant_id = ? AND channel = ? AND provider = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (tenant_id, channel, provider),
+        ).fetchone()
+    return row_to_connection_request(row) if row is not None else None
+
+
 def find_connection_request_by_state_token(
     state_token: str,
 ) -> ConnectionRequest | None:

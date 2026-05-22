@@ -28,7 +28,9 @@ def test_workspace_renders_whatsapp_business_connection_card(client):
     assert response.status_code == 200
     assert 'data-whatsapp-connect data-tenant-id="unboks"' in response.text
     assert "WhatsApp Business" in response.text
-    assert "Generate authorization link" in response.text
+    assert "Generate Authorization Link" in response.text
+    assert "Send Link to Client" in response.text
+    assert "Copy Link" in response.text
     assert "Refresh status" in response.text
     assert "Client authorization link" in response.text
 
@@ -39,4 +41,5 @@ def test_admin_js_contains_whatsapp_connection_handlers():
     assert "initWhatsAppConnectionCard" in js
     assert "/channels/whatsapp/status" in js
     assert "/channels/whatsapp/connect/start" in js
+    assert "/channels/whatsapp/connect/send-link" in js
     assert "/channels/whatsapp/phone-numbers/select" in js

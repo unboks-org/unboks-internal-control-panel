@@ -237,12 +237,16 @@
     var phoneEl = card.querySelector("[data-wa-phone]");
     var accountEl = card.querySelector("[data-wa-account]");
     var startBtn = card.querySelector("[data-wa-start]");
+    var sendBtn = card.querySelector("[data-wa-send]");
     var refreshBtn = card.querySelector("[data-wa-refresh]");
     var linkBox = card.querySelector("[data-wa-link-box]");
     var linkInput = card.querySelector("[data-wa-auth-url]");
     var copyBtn = card.querySelector("[data-wa-copy]");
     var feedbackEl = card.querySelector("[data-wa-feedback]");
     var phoneOptionsEl = card.querySelector("[data-wa-phone-options]");
+    if (sendBtn) {
+      sendBtn.disabled = true;
+    }
 
     function setFeedback(message) {
       if (feedbackEl) {
@@ -361,6 +365,10 @@
           if (linkBox) {
             linkBox.removeAttribute("hidden");
           }
+          if (sendBtn) {
+            sendBtn.setAttribute("data-wa-send-ready", "true");
+            sendBtn.disabled = false;
+          }
           setStatus("Link generated", "warn");
           if (summaryEl) summaryEl.textContent = "Send the link to the client separately.";
           setFeedback("Authorization link ready.");
@@ -370,6 +378,24 @@
         })
         .finally(function () {
           if (startBtn) startBtn.disabled = false;
+        });
+    }
+
+    function sendConnectionEmail() {
+      if (sendBtn && sendBtn.getAttribute("data-wa-send-ready") !== "true") {
+        setFeedback("Generate an authorization link first.");
+        return;
+      }
+      setFeedback("Sending WhatsApp connection email...");
+      if (sendBtn) sendBtn.disabled = true;
+      requestJson(endpoint("/channels/whatsapp/connect/send-link"), { method: "POST" })
+        .then(function (payload) {
+          setFeedback(payload.message || ("Email sent successfully to " + (payload.email || "client") + "."));
+          if (sendBtn) sendBtn.disabled = false;
+        })
+        .catch(function (error) {
+          setFeedback(error.message);
+          if (sendBtn) sendBtn.disabled = false;
         });
     }
 
@@ -394,6 +420,9 @@
 
     if (startBtn) {
       startBtn.addEventListener("click", startConnection);
+    }
+    if (sendBtn) {
+      sendBtn.addEventListener("click", sendConnectionEmail);
     }
     if (refreshBtn) {
       refreshBtn.addEventListener("click", loadStatus);

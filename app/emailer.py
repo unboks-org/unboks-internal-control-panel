@@ -182,3 +182,37 @@ The Unboks team
 """
     subject = f"Welcome to Unboks \u2014 {tenant_name} is ready"
     return TenantWelcomeDraft(subject=subject, body=body)
+
+
+def build_whatsapp_connection_email(
+    *,
+    client_first_name: str,
+    authorization_link: str,
+) -> TenantWelcomeDraft:
+    name = client_first_name.strip() or "there"
+    body = f"""Hi {name},
+
+Great to have you on board.
+
+To enable us to receive and reply to your client messages automatically, please connect your WhatsApp Business number.
+
+Please click the secure link below:
+
+{authorization_link}
+
+This will take you to Meta's secure page. Log in with your own Meta account, select your Business Portfolio, and approve the connection.
+
+It only takes 1-2 minutes.
+
+Once completed, we will be notified immediately and your WhatsApp will be live.
+
+Let me know if you have any questions.
+
+Best regards,
+Calvin Adamus
+Unboks Team
+"""
+    return TenantWelcomeDraft(
+        subject="Next Step: Connect Your WhatsApp Business Number",
+        body=body,
+    )
