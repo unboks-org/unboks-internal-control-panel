@@ -189,6 +189,52 @@ def start_whatsapp_connection(tenant_id: str, request: Request) -> dict:
     }
 
 
+@router.get("/tenants/{tenant_id}/channels/whatsapp/status")
+def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
+    """Return the safe WhatsApp/Zernio connection state for a tenant."""
+    _require_operator_json(request)
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found.")
+
+    connection = channel_connections.get_tenant_channel_connection(tenant.id)
+    if connection is None:
+        zernio_profile_id = channel_connections.get_tenant_zernio_profile_id(
+            tenant.id
+        )
+        return {
+            "success": True,
+            "tenantId": tenant.id,
+            "channel": "whatsapp",
+            "provider": "zernio",
+            "status": "not_connected",
+            "connected": False,
+            "displayPhoneNumber": None,
+            "phoneNumberId": None,
+            "providerAccountId": None,
+            "zernioProfileId": zernio_profile_id,
+            "connectedAt": None,
+            "lastUpdatedAt": None,
+            "lastError": None,
+        }
+
+    return {
+        "success": True,
+        "tenantId": tenant.id,
+        "channel": connection.channel,
+        "provider": connection.provider,
+        "status": connection.status,
+        "connected": connection.status == "connected",
+        "displayPhoneNumber": connection.display_phone_number,
+        "phoneNumberId": connection.phone_number_id,
+        "providerAccountId": connection.zernio_account_id,
+        "zernioProfileId": connection.zernio_profile_id,
+        "connectedAt": connection.connected_at,
+        "lastUpdatedAt": connection.updated_at,
+        "lastError": connection.last_error,
+    }
+
+
 @router.get("/connect/whatsapp/callback")
 def whatsapp_connection_callback(request: Request):
     """Receive the public Zernio redirect and update Nr3 connection state.
