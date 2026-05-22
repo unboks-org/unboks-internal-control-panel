@@ -27,6 +27,7 @@ from app.config import get_settings
 
 CONNECTION_REQUEST_STATUSES = {
     "pending",
+    "link_generated",
     "auth_started",
     "callback_received",
     "pending_number",
@@ -128,6 +129,7 @@ def init_db() -> None:
                 CHECK (
                     status IN (
                         'pending',
+                        'link_generated',
                         'auth_started',
                         'callback_received',
                         'pending_number',
@@ -218,14 +220,18 @@ def create_connection_request(
     tenant_id: str,
     auth_url: str | None = None,
     zernio_profile_id: str | None = None,
+    state_token: str | None = None,
+    status: str = "pending",
     channel: str = "whatsapp",
     provider: str = "zernio",
     expires_in_minutes: int = 60,
 ) -> CreatedConnectionRequest:
+    if status not in CONNECTION_REQUEST_STATUSES:
+        raise ValueError("Invalid connection request status.")
     init_db()
     now = utc_now()
     request_id = f"cr_{secrets.token_urlsafe(18)}"
-    state_token = secrets.token_urlsafe(48)
+    state_token = state_token or secrets.token_urlsafe(48)
     expires_at = (
         datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
     ).isoformat(timespec="seconds")
@@ -246,13 +252,14 @@ def create_connection_request(
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 request_id,
                 tenant_id,
                 channel,
                 provider,
+                status,
                 hash_state_token(state_token),
                 now,
                 expires_at,

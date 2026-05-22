@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.routes import admin, health, internal, onboarding
+from app.routes import admin, connect, health, internal, onboarding
 
 
 def create_app() -> FastAPI:
@@ -10,6 +10,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(onboarding.router)
     app.include_router(internal.router)
+    app.include_router(connect.router)
     app.include_router(admin.router)
     return app
 

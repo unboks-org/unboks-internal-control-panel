@@ -36,6 +36,13 @@ class ZernioConnectUrl:
 
 
 @dataclass(frozen=True)
+class ZernioProfile:
+    id: str
+    name: str
+    raw: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class ZernioAccountSummary:
     id: str
     platform: str
@@ -97,6 +104,32 @@ class ZernioService:
             raw=payload,
         )
 
+    def create_profile(
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        color: str | None = None,
+    ) -> ZernioProfile:
+        body: dict[str, str] = {"name": name}
+        if description:
+            body["description"] = description
+        if color:
+            body["color"] = color
+        payload = self._request("POST", "/profiles", json_body=body)
+        profile = payload.get("profile")
+        if not isinstance(profile, dict):
+            profile = payload
+        profile_id = _first_string(profile, "_id", "id") if isinstance(profile, dict) else None
+        profile_name = _first_string(profile, "name") if isinstance(profile, dict) else None
+        if not profile_id:
+            raise ZernioAPIError(502, "Zernio did not return a profile id.")
+        return ZernioProfile(
+            id=profile_id,
+            name=profile_name or name,
+            raw=profile if isinstance(profile, dict) else payload,
+        )
+
     def list_profiles(self) -> list[dict[str, Any]]:
         payload = self._request("GET", "/profiles")
         profiles = payload.get("profiles")
@@ -137,6 +170,7 @@ class ZernioService:
         path: str,
         *,
         query: dict[str, str] | None = None,
+        json_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.require_configured()
         url = _join_url(self.settings.zernio_api_base_url, path)
@@ -152,6 +186,7 @@ class ZernioService:
                     "Authorization": f"Bearer {self.settings.zernio_api_key}",
                     "Accept": "application/json",
                 },
+                json=json_body,
             )
         finally:
             if close_client:

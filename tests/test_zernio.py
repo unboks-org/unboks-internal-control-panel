@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -79,6 +81,48 @@ def test_get_connect_url_calls_zernio_without_exposing_key(monkeypatch):
     assert "profileId=profile_123" in seen["url"]
     assert "redirect_url=https%3A%2F%2Funboks.org%2Finternal%2Fapi%2Fconnect%2Fwhatsapp%2Fcallback" in seen["url"]
     assert "sk_test_secret" not in result.auth_url
+
+
+def test_create_profile_posts_safe_body(monkeypatch):
+    monkeypatch.setenv("ZERNIO_API_KEY", "sk_test_secret")
+    monkeypatch.setenv("ZERNIO_API_BASE_URL", "https://zernio.example/api/v1")
+    settings = get_settings()
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["url"] = str(request.url)
+        seen["authorization"] = request.headers.get("authorization", "")
+        seen["body"] = request.read().decode("utf-8")
+        return httpx.Response(
+            201,
+            json={
+                "message": "Profile created successfully",
+                "profile": {
+                    "_id": "profile_123",
+                    "name": "Lawyer",
+                },
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    service = ZernioService(settings=settings, client=client)
+
+    profile = service.create_profile(
+        name="Lawyer",
+        description="Unboks tenant workspace: lawyer",
+    )
+
+    assert profile.id == "profile_123"
+    assert profile.name == "Lawyer"
+    assert seen["method"] == "POST"
+    assert seen["url"] == "https://zernio.example/api/v1/profiles"
+    assert seen["authorization"] == "Bearer sk_test_secret"
+    assert "sk_test_secret" not in str(seen["body"])
+    assert json.loads(str(seen["body"])) == {
+        "name": "Lawyer",
+        "description": "Unboks tenant workspace: lawyer",
+    }
 
 
 def test_zernio_service_summarizes_whatsapp_accounts(monkeypatch):
