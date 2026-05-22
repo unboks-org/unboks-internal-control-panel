@@ -2223,6 +2223,63 @@ button.button-disabled,
   margin-top: 1px;
 }
 
+.tenant-whatsapp-badge {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 5px;
+  padding: 4px 7px;
+  width: max-content;
+}
+
+.tenant-wa-connected {
+  background: var(--color-green-soft);
+  color: var(--color-green);
+}
+
+.tenant-wa-pending {
+  background: var(--color-yellow-soft);
+  color: var(--color-yellow);
+}
+
+.tenant-wa-failed {
+  background: var(--color-red-soft);
+  color: var(--color-red);
+}
+
+.tenant-wa-muted {
+  background: #eef0f2;
+  color: var(--color-muted);
+}
+
+.tenant-whatsapp-header {
+  margin-top: 0;
+}
+
+.whatsapp-connected-toast {
+  background: #ffffff;
+  border: 1px solid #c7e6cf;
+  border-left: 4px solid var(--color-green);
+  border-radius: 8px;
+  bottom: 18px;
+  box-shadow: 0 12px 28px rgba(60, 64, 67, 0.18);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 650;
+  max-width: 360px;
+  padding: 12px 14px;
+  position: fixed;
+  right: 18px;
+  z-index: 30;
+}
+
+.whatsapp-connected-toast.is-hiding {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
 .channels-panel .channel-toggle-form {
   margin: 0;
 }

@@ -70,11 +70,75 @@ AGENT_FEATURE_ACTIONS: dict[str, str] = {
 
 def _shell_context(active: str, active_tenant: Optional[Tenant] = None) -> dict:
     """Context every admin template needs so the sidebar renders."""
+    tenants = list_tenants()
     return {
         "active": active,
-        "tenants": list_tenants(),
+        "tenants": tenants,
         "active_tenant": active_tenant,
+        "tenant_whatsapp_statuses": _tenant_whatsapp_statuses(tenants),
     }
+
+
+def _tenant_whatsapp_statuses(tenants: tuple[Tenant, ...]) -> dict[str, dict]:
+    from app import channel_connections
+
+    statuses: dict[str, dict] = {}
+    pending_request_statuses = {
+        "pending",
+        "link_generated",
+        "auth_started",
+        "callback_received",
+        "pending_number",
+    }
+    for tenant in tenants:
+        connection = channel_connections.get_tenant_channel_connection(tenant.id)
+        latest = channel_connections.get_latest_connection_request_for_tenant(
+            tenant.id
+        )
+        if connection and connection.status == "connected":
+            statuses[tenant.id] = {
+                "status": "connected",
+                "label": "Connected",
+                "badge_class": "tenant-wa-connected",
+                "chip_class": "status-ok",
+                "visible": True,
+                "phone": connection.display_phone_number or "",
+            }
+        elif (
+            (connection and connection.status == "pending")
+            or (latest and latest.status in pending_request_statuses)
+        ):
+            statuses[tenant.id] = {
+                "status": "pending",
+                "label": "Pending",
+                "badge_class": "tenant-wa-pending",
+                "chip_class": "status-warn",
+                "visible": True,
+                "phone": (
+                    connection.display_phone_number
+                    if connection and connection.display_phone_number
+                    else ""
+                ),
+            }
+        elif connection and connection.status == "failed":
+            statuses[tenant.id] = {
+                "status": "failed",
+                "label": "Failed",
+                "badge_class": "tenant-wa-failed",
+                "chip_class": "status-error",
+                "visible": True,
+                "phone": connection.display_phone_number or "",
+            }
+        else:
+            statuses[tenant.id] = {
+                "status": "not_connected",
+                "label": "Not connected",
+                "badge_class": "tenant-wa-muted",
+                "chip_class": "status-unknown",
+                "visible": False,
+                "phone": "",
+            }
+    return statuses
 
 
 @router.get("/", include_in_schema=False)

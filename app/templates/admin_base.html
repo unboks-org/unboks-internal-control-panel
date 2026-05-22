@@ -76,8 +76,10 @@
           >
             {% for tenant in tenants %}
               {% set tags = [] %}
+              {% set wa_status = tenant_whatsapp_statuses.get(tenant.id) if tenant_whatsapp_statuses is defined else None %}
               {% if tenant.status == 'active' %}{% set _ = tags.append('active') %}{% endif %}
               {% if tenant.status != 'active' %}{% set _ = tags.append('inactive') %}{% endif %}
+              {% if wa_status and wa_status.visible %}{% set _ = tags.append('whatsapp') %}{% endif %}
               {% set health_states = [tenant.health.inbox, tenant.health.ai_agent, tenant.health.channels, tenant.health.escalations] %}
               {% set has_bad_health = health_states | select('in', ['warn', 'down']) | list | length > 0 %}
               {% if has_bad_health or tenant.escalations.hard_count > 0 %}
@@ -97,6 +99,11 @@
                   <span class="tenant-selector-text">
                     <span class="tenant-selector-name">{{ tenant.name }}</span>
                     <span class="tenant-selector-slug muted">{{ tenant.id }}</span>
+                    {% if wa_status and wa_status.visible %}
+                      <span class="tenant-whatsapp-badge {{ wa_status.badge_class }}">
+                        WhatsApp: {{ wa_status.label }}{% if wa_status.status == 'connected' %} &#10003;{% endif %}
+                      </span>
+                    {% endif %}
                   </span>
                 </a>
               </li>

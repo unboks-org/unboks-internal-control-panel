@@ -20,10 +20,24 @@
   {% set pending_changes = pending_for_tenant if pending_for_tenant is defined else [] %}
   {% set open_push_count = pending_open_count if pending_open_count is defined else 0 %}
   {% set push_audit = recent_push_audit if recent_push_audit is defined else [] %}
+  {% set active_whatsapp_status = tenant_whatsapp_statuses.get(tenant.id) if tenant_whatsapp_statuses is defined else None %}
 
   {% if action_message %}
     <div class="form-feedback form-feedback-{{ 'warn' if action_level == 'warn' else 'success' }}" role="status">
       {{ action_message }}
+    </div>
+  {% endif %}
+
+  {% if active_whatsapp_status and active_whatsapp_status.status == 'connected' %}
+    <div
+      class="whatsapp-connected-toast"
+      data-wa-connected-toast
+      data-tenant-id="{{ tenant.id }}"
+      data-tenant-name="{{ tenant.name }}"
+      data-phone="{{ active_whatsapp_status.phone }}"
+      hidden
+    >
+      WhatsApp connected: {{ tenant.name }}{% if active_whatsapp_status.phone %} ({{ active_whatsapp_status.phone }}){% endif %}
     </div>
   {% endif %}
 
@@ -41,6 +55,11 @@
       <span class="source-badge source-{{ display_source }}" data-source-area="display_metadata" title="Display metadata source">
         Source: {{ 'ICP override' if display_source == 'icp_override' else 'Backend' }}
       </span>
+      {% if active_whatsapp_status and active_whatsapp_status.visible %}
+        <span class="tenant-whatsapp-badge tenant-whatsapp-header {{ active_whatsapp_status.badge_class }}">
+          WhatsApp: {{ active_whatsapp_status.label }}{% if active_whatsapp_status.status == 'connected' %} &#10003;{% endif %}
+        </span>
+      {% endif %}
       <span class="status-chip status-{{ 'ok' if tenant.status == 'active' else 'unknown' }}">{{ tenant.status }}</span>
     </div>
   </header>

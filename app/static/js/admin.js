@@ -451,12 +451,41 @@
     loadStatus();
   }
 
+  function initWhatsAppConnectedToast() {
+    var toast = document.querySelector("[data-wa-connected-toast]");
+    if (!toast) {
+      return;
+    }
+    var tenantId = toast.getAttribute("data-tenant-id") || "tenant";
+    var phone = toast.getAttribute("data-phone") || "";
+    var key = "nr3-wa-connected-toast:" + tenantId + ":" + phone;
+    try {
+      if (window.sessionStorage && sessionStorage.getItem(key)) {
+        return;
+      }
+      if (window.sessionStorage) {
+        sessionStorage.setItem(key, "1");
+      }
+    } catch (_) {
+      // Ignore private-mode storage failures; the toast is still safe.
+    }
+    toast.removeAttribute("hidden");
+    window.setTimeout(function () {
+      toast.classList.add("is-hiding");
+      window.setTimeout(function () {
+        toast.setAttribute("hidden", "");
+        toast.classList.remove("is-hiding");
+      }, 250);
+    }, 5500);
+  }
+
   function init() {
     initSidebarDrawer();
     initTenantSelector();
     initCreateTenantWizard();
     initTenantCreatedActions();
     initWhatsAppConnectionCard();
+    initWhatsAppConnectedToast();
   }
 
   if (document.readyState === "loading") {
