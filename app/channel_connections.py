@@ -523,6 +523,23 @@ def get_tenant_zernio_profile_id(tenant_id: str) -> str | None:
     return str(value) if value else None
 
 
+def forget_tenant(tenant_id: str) -> None:
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM connection_requests WHERE tenant_id = ?",
+            (tenant_id,),
+        )
+        conn.execute(
+            "DELETE FROM tenant_channel_connections WHERE tenant_id = ?",
+            (tenant_id,),
+        )
+        conn.execute(
+            "DELETE FROM tenants WHERE slug = ?",
+            (tenant_id,),
+        )
+
+
 def hash_state_token(state_token: str) -> str:
     return hashlib.sha256(state_token.encode("utf-8")).hexdigest()
 

@@ -1904,13 +1904,13 @@ button.button-disabled,
 }
 
 .danger-zone {
-  align-items: center;
+  align-items: stretch;
   background: #fff5f5;
   border: 1px solid #f6c6c2;
   border-radius: var(--radius);
   display: flex;
+  flex-direction: column;
   gap: 16px;
-  justify-content: space-between;
   padding: 14px 18px;
 }
 
@@ -1953,6 +1953,72 @@ button.button-disabled,
   background: #fbeae8;
   color: #c98a85;
   cursor: not-allowed;
+}
+
+.danger-delete {
+  border-top: 1px solid #efd7da;
+  margin-top: 18px;
+  padding-top: 16px;
+}
+
+.danger-delete h4 {
+  color: var(--color-red);
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+.danger-delete-list {
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 10px 0;
+  padding-left: 18px;
+}
+
+.danger-delete-btn {
+  display: block;
+  margin-top: 10px;
+  width: 100%;
+}
+
+.delete-modal {
+  align-items: center;
+  background: rgba(32, 33, 36, 0.46);
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  padding: 20px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 40;
+}
+
+.delete-modal[hidden] {
+  display: none;
+}
+
+.delete-modal-panel {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(32, 33, 36, 0.26);
+  max-width: 460px;
+  padding: 20px;
+  width: 100%;
+}
+
+.delete-modal-panel h4 {
+  color: var(--color-red);
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+
+.delete-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 
 @media (max-width: 720px) {

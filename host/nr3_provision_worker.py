@@ -53,6 +53,14 @@ NGINX_BACKUP_DIR = env_path(
     "NR3_PROVISION_NGINX_BACKUP_DIR",
     "/root/nginx-sites-enabled-backups",
 )
+DELETED_TENANTS_ROOT = env_path(
+    "NR3_DELETED_TENANTS_ROOT",
+    "/root/_deleted_tenants",
+)
+ICP_DATA_DIR = env_path(
+    "NR3_ICP_DATA_DIR",
+    "/root/unboks-internal-control-panel/data",
+)
 POLL_SECONDS = float(os.getenv("NR3_PROVISION_POLL_SECONDS", "2"))
 
 
@@ -133,6 +141,36 @@ def insert_nginx_block(slug: str, block: str) -> None:
         raise
 
 
+def remove_nginx_block(slug: str) -> str:
+    text = NGINX_SITE.read_text(encoding="utf-8")
+    NGINX_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup = NGINX_BACKUP_DIR / (
+        f"{NGINX_SITE.name}.bak-nr3-delete-{slug}-"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    )
+    shutil.copy2(NGINX_SITE, backup)
+
+    start = f"# BEGIN UNBOKS TENANT {slug}"
+    end = f"# END UNBOKS TENANT {slug}"
+    removed = 0
+    while start in text and end in text:
+        before, rest = text.split(start, 1)
+        _, after = rest.split(end, 1)
+        text = before.rstrip() + "\n" + after.lstrip("\n")
+        removed += 1
+    if removed == 0:
+        return "nginx tenant block was not present"
+
+    NGINX_SITE.write_text(text, encoding="utf-8")
+    try:
+        run(["nginx", "-t"])
+    except subprocess.CalledProcessError:
+        shutil.copy2(backup, NGINX_SITE)
+        raise
+    run(["systemctl", "reload", "nginx"])
+    return f"removed {removed} nginx tenant block(s)"
+
+
 def wait_for_health(host_port: int, timeout: int = 45) -> str:
     url = f"http://127.0.0.1:{host_port}/health"
     deadline = time.monotonic() + timeout
@@ -171,11 +209,75 @@ def update_client_status(tenant_dir: Path, status: str) -> None:
     )
 
 
+def backup_tenant_before_delete(slug: str, tenant_dir: Path) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    backup_dir = DELETED_TENANTS_ROOT / f"{slug}-{stamp}"
+    backup_dir.mkdir(parents=True, exist_ok=False)
+    shutil.copytree(tenant_dir, backup_dir / "client")
+    if ICP_DATA_DIR.exists():
+        shutil.copytree(
+            ICP_DATA_DIR,
+            backup_dir / "icp-data",
+            ignore=shutil.ignore_patterns("provisioning"),
+        )
+    manifest = {
+        "slug": slug,
+        "deleted_at": utc_now(),
+        "tenant_dir": str(tenant_dir),
+        "backup_dir": str(backup_dir),
+    }
+    (backup_dir / "DELETE_MANIFEST.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return backup_dir
+
+
+def process_delete_tenant(job_id: str, job: dict[str, Any], slug: str) -> None:
+    if str(job.get("typed_slug") or "") != slug:
+        raise RuntimeError("Typed slug confirmation does not match tenant slug.")
+    if str(job.get("final_confirmation") or "") != "DELETE FOREVER":
+        raise RuntimeError("Final delete confirmation text is invalid.")
+
+    tenant_dir = CLIENTS_ROOT / slug
+    if not tenant_dir.is_dir():
+        raise RuntimeError(f"Tenant directory not found: {tenant_dir}")
+
+    details: list[str] = []
+    backup_dir = backup_tenant_before_delete(slug, tenant_dir)
+    details.append(f"backup created at {backup_dir}")
+
+    if (tenant_dir / "docker-compose.yml").exists():
+        down = run(
+            ["docker", "compose", "down", "-v", "--remove-orphans"],
+            cwd=tenant_dir,
+            check=False,
+        )
+        details.append(f"docker compose down returned {down.returncode}")
+    rm = run(["docker", "rm", "-f", f"wtyj-{slug}"], check=False)
+    if rm.returncode == 0:
+        details.append(f"removed container wtyj-{slug}")
+
+    shutil.rmtree(tenant_dir)
+    details.append(f"deleted tenant folder {tenant_dir}")
+    details.append(remove_nginx_block(slug))
+
+    write_result(job_id, {
+        "status": "succeeded",
+        "message": f"Tenant {slug} was permanently deleted on the VPS.",
+        "details": details,
+        "backup_path": str(backup_dir),
+    })
+
+
 def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
     action = str(job.get("action") or "")
     slug = validate_slug(job.get("slug"))
     if slug in RESERVED_SLUGS:
         raise RuntimeError(f"Tenant {slug!r} is reserved and cannot be changed by host action.")
+    if action == "delete_tenant":
+        process_delete_tenant(job_id, job, slug)
+        return
     if action != "suspend_tenant":
         raise RuntimeError(f"Unsupported tenant action: {action!r}")
 

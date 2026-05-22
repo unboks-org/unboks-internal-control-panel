@@ -479,6 +479,129 @@
     }, 5500);
   }
 
+  function initTenantPermanentDelete() {
+    var root = document.querySelector("[data-delete-tenant]");
+    if (!root || !window.fetch) {
+      return;
+    }
+    var tenantId = root.getAttribute("data-tenant-id") || "";
+    var slugInput = root.querySelector("[data-delete-slug]");
+    var openBtn = root.querySelector("[data-delete-open]");
+    var modal = root.querySelector("[data-delete-modal]");
+    var finalInput = root.querySelector("[data-delete-final]");
+    var cancelBtn = root.querySelector("[data-delete-cancel]");
+    var confirmBtn = root.querySelector("[data-delete-confirm]");
+    var feedback = root.querySelector("[data-delete-feedback]");
+
+    function setFeedback(message) {
+      if (feedback) {
+        feedback.textContent = message || "";
+      }
+    }
+
+    function setOpenReady() {
+      var ready = slugInput && slugInput.value === tenantId;
+      if (openBtn) {
+        openBtn.disabled = !ready;
+        openBtn.setAttribute("data-delete-ready", ready ? "true" : "false");
+      }
+    }
+
+    function setFinalReady() {
+      var ready = finalInput && finalInput.value === "DELETE FOREVER";
+      if (confirmBtn) {
+        confirmBtn.disabled = !ready;
+        confirmBtn.setAttribute("data-delete-final-ready", ready ? "true" : "false");
+      }
+    }
+
+    function closeModal() {
+      if (modal) {
+        modal.setAttribute("hidden", "");
+      }
+      if (finalInput) {
+        finalInput.value = "";
+      }
+      setFinalReady();
+    }
+
+    if (openBtn) {
+      openBtn.disabled = true;
+      openBtn.addEventListener("click", function () {
+        if (!slugInput || slugInput.value !== tenantId) {
+          setFeedback("Type the tenant slug exactly first.");
+          return;
+        }
+        setFeedback("");
+        if (modal) {
+          modal.removeAttribute("hidden");
+        }
+        if (finalInput) {
+          finalInput.focus();
+        }
+      });
+    }
+    if (slugInput) {
+      slugInput.addEventListener("input", setOpenReady);
+    }
+    if (finalInput) {
+      finalInput.addEventListener("input", setFinalReady);
+    }
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", closeModal);
+    }
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.addEventListener("click", function () {
+        if (!slugInput || slugInput.value !== tenantId) {
+          closeModal();
+          setFeedback("Typed tenant slug does not match.");
+          return;
+        }
+        if (!finalInput || finalInput.value !== "DELETE FOREVER") {
+          setFeedback("Type DELETE FOREVER in the final warning first.");
+          return;
+        }
+        confirmBtn.disabled = true;
+        setFeedback("Deleting tenant. Backup runs first...");
+        fetch("/internal/api/tenants/" + encodeURIComponent(tenantId), {
+          method: "DELETE",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            typedSlug: slugInput.value,
+            finalConfirmation: finalInput.value
+          })
+        })
+          .then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (body) {
+              if (!response.ok) {
+                throw new Error(body.detail || "Tenant delete failed.");
+              }
+              return body;
+            });
+          })
+          .then(function (body) {
+            if (body.status === "deleted") {
+              setFeedback("Tenant deleted. Redirecting to tenant list...");
+              window.setTimeout(function () {
+                window.location.href = "/admin/tenants";
+              }, 800);
+            } else {
+              setFeedback(body.message || "Delete job queued.");
+              closeModal();
+            }
+          })
+          .catch(function (error) {
+            setFeedback(error.message);
+            setFinalReady();
+          });
+      });
+    }
+    setOpenReady();
+    setFinalReady();
+  }
+
   function init() {
     initSidebarDrawer();
     initTenantSelector();
@@ -486,6 +609,7 @@
     initTenantCreatedActions();
     initWhatsAppConnectionCard();
     initWhatsAppConnectedToast();
+    initTenantPermanentDelete();
   }
 
   if (document.readyState === "loading") {

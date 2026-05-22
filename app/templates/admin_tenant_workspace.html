@@ -497,6 +497,37 @@
         <input id="suspend-confirm-{{ tenant.id }}" name="confirmation" type="text" autocomplete="off" placeholder="suspend {{ tenant.id }}">
         <button type="submit" class="danger-btn">Suspend / cut off tenant</button>
       </form>
+      <div class="danger-delete" data-delete-tenant data-tenant-id="{{ tenant.id }}">
+        <h4>Delete Tenant (Permanent Wipe)</h4>
+        <p>This action is irreversible and will permanently delete the tenant and all its data.</p>
+        <ul class="danger-delete-list">
+          <li>Docker container <code>wtyj-{{ tenant.id }}</code></li>
+          <li>Entire folder <code>/root/clients/{{ tenant.id }}</code></li>
+          <li>Nr3 database records, bridge state, notes, connections, and logs for this tenant</li>
+          <li>WhatsApp / Zernio connection state</li>
+          <li>Nginx tenant configuration</li>
+        </ul>
+        <p class="muted compact-note">Current tenant slug: <code>{{ tenant.id }}</code></p>
+        <label for="delete-slug-{{ tenant.id }}">Type the tenant slug to confirm</label>
+        <input id="delete-slug-{{ tenant.id }}" data-delete-slug type="text" autocomplete="off" placeholder="{{ tenant.id }}">
+        <button type="button" class="danger-btn danger-delete-btn" data-delete-open data-delete-ready="false">DELETE TENANT FOREVER</button>
+        <p class="muted compact-note" data-delete-feedback></p>
+
+        <div class="delete-modal" data-delete-modal hidden role="dialog" aria-modal="true" aria-labelledby="delete-modal-title-{{ tenant.id }}">
+          <div class="delete-modal-panel">
+            <h4 id="delete-modal-title-{{ tenant.id }}">FINAL WARNING</h4>
+            <p>You are about to permanently delete the tenant:</p>
+            <p><strong>"{{ tenant.id }}"</strong></p>
+            <p>This action cannot be undone.</p>
+            <label for="delete-final-{{ tenant.id }}">Type <code>DELETE FOREVER</code> to confirm</label>
+            <input id="delete-final-{{ tenant.id }}" data-delete-final type="text" autocomplete="off" placeholder="DELETE FOREVER">
+            <div class="delete-modal-actions">
+              <button type="button" class="button-secondary" data-delete-cancel>Cancel</button>
+              <button type="button" class="danger-btn" data-delete-confirm data-delete-final-ready="false">YES, DELETE TENANT FOREVER</button>
+            </div>
+          </div>
+        </div>
+      </div>
     {% endif %}
   </section>
   </details>

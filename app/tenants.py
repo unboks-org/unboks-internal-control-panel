@@ -291,6 +291,23 @@ def unregister_tenant(slug: str) -> bool:
     return True
 
 
+def forget_tenant_state(slug: str) -> None:
+    """Best-effort cleanup of every local Nr3 state store for a tenant."""
+    unregister_tenant(slug)
+    try:
+        from app import channel_state, icp_overrides, tenant_notes
+        channel_state.forget_tenant(slug)
+        icp_overrides.forget_tenant(slug)
+        tenant_notes.forget_tenant(slug)
+    except Exception:  # pragma: no cover -- defensive
+        pass
+    try:
+        from app import channel_connections
+        channel_connections.forget_tenant(slug)
+    except Exception:  # pragma: no cover -- defensive
+        pass
+
+
 def list_tenants() -> tuple[Tenant, ...]:
     """Return every tenant Nr3 can know about.
 
@@ -485,11 +502,4 @@ def delete_tenant_directory(slug: str,
     # Belt-and-braces cleanup of every other place a tenant leaves
     # state. Each call is best-effort: the on-disk delete already
     # succeeded and a single ghost JSON row must not raise.
-    unregister_tenant(safe_slug)
-    try:
-        from app import channel_state, icp_overrides, tenant_notes
-        channel_state.forget_tenant(safe_slug)
-        icp_overrides.forget_tenant(safe_slug)
-        tenant_notes.forget_tenant(safe_slug)
-    except Exception:  # pragma: no cover -- defensive
-        pass
+    forget_tenant_state(safe_slug)
