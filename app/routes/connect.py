@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
 from app import channel_connections
 from app.config import get_settings
 from app.security import is_authenticated
 from app.tenants import get_tenant
-from app.zernio import ZernioAPIError, ZernioNotConfigured, ZernioService
+from app.zernio import (
+    ZernioAccountSummary,
+    ZernioAPIError,
+    ZernioNotConfigured,
+    ZernioService,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -52,6 +59,11 @@ SAFE_CALLBACK_KEYS = {
     "error_description",
     "message",
 }
+
+
+class WhatsAppPhoneSelection(BaseModel):
+    phoneNumberId: str
+    accountId: Optional[str] = None
 
 
 def _require_operator_json(request: Request) -> None:
@@ -116,6 +128,44 @@ def _is_expired(connection_request: channel_connections.ConnectionRequest) -> bo
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed < datetime.now(timezone.utc)
+
+
+def _safe_phone_option(account: ZernioAccountSummary) -> dict[str, object]:
+    return {
+        "accountId": account.id,
+        "profileId": account.profile_id,
+        "displayName": account.display_name,
+        "username": account.username,
+        "displayPhoneNumber": account.display_phone_number,
+        "phoneNumberId": account.phone_number_id,
+        "wabaId": account.waba_id,
+        "enabled": account.enabled,
+        "isActive": account.is_active,
+        "platformStatus": account.platform_status,
+    }
+
+
+def _tenant_zernio_profile_id(tenant_id: str) -> str | None:
+    connection = channel_connections.get_tenant_channel_connection(tenant_id)
+    if connection and connection.zernio_profile_id:
+        return connection.zernio_profile_id
+    return channel_connections.get_tenant_zernio_profile_id(tenant_id)
+
+
+def _load_whatsapp_phone_options(
+    tenant_id: str,
+) -> tuple[str | None, list[ZernioAccountSummary]]:
+    zernio_profile_id = _tenant_zernio_profile_id(tenant_id)
+    if not zernio_profile_id:
+        return None, []
+    service = ZernioService()
+    accounts = service.list_accounts(platform="whatsapp")
+    return zernio_profile_id, [
+        account
+        for account in accounts
+        if account.platform.lower() == "whatsapp"
+        and account.profile_id == zernio_profile_id
+    ]
 
 
 @router.post("/tenants/{tenant_id}/channels/whatsapp/connect/start")
@@ -225,6 +275,128 @@ def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
         "provider": connection.provider,
         "status": connection.status,
         "connected": connection.status == "connected",
+        "displayPhoneNumber": connection.display_phone_number,
+        "phoneNumberId": connection.phone_number_id,
+        "providerAccountId": connection.zernio_account_id,
+        "zernioProfileId": connection.zernio_profile_id,
+        "connectedAt": connection.connected_at,
+        "lastUpdatedAt": connection.updated_at,
+        "lastError": connection.last_error,
+    }
+
+
+@router.get("/tenants/{tenant_id}/channels/whatsapp/phone-numbers")
+def whatsapp_phone_numbers(tenant_id: str, request: Request) -> dict:
+    """Return safe WhatsApp phone number options for this tenant."""
+    _require_operator_json(request)
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found.")
+
+    try:
+        zernio_profile_id, accounts = _load_whatsapp_phone_options(tenant.id)
+    except ZernioNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ZernioAPIError as exc:
+        raise HTTPException(status_code=502, detail=exc.message) from exc
+
+    connection = channel_connections.get_tenant_channel_connection(tenant.id)
+    if len(accounts) == 1:
+        status = "single_phone"
+    elif len(accounts) > 1:
+        status = "multiple_phone"
+    elif zernio_profile_id:
+        status = "no_phone_numbers"
+    else:
+        status = "not_connected"
+
+    return {
+        "success": True,
+        "tenantId": tenant.id,
+        "channel": "whatsapp",
+        "provider": "zernio",
+        "status": status,
+        "zernioProfileId": zernio_profile_id,
+        "selectedPhoneNumberId": (
+            connection.phone_number_id if connection is not None else None
+        ),
+        "phoneNumbers": [_safe_phone_option(account) for account in accounts],
+    }
+
+
+@router.post("/tenants/{tenant_id}/channels/whatsapp/phone-numbers/select")
+def select_whatsapp_phone_number(
+    tenant_id: str,
+    selection: WhatsAppPhoneSelection,
+    request: Request,
+) -> dict:
+    """Persist the operator-confirmed WhatsApp phone number for a tenant."""
+    _require_operator_json(request)
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found.")
+
+    try:
+        zernio_profile_id, accounts = _load_whatsapp_phone_options(tenant.id)
+    except ZernioNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ZernioAPIError as exc:
+        raise HTTPException(status_code=502, detail=exc.message) from exc
+    if not zernio_profile_id:
+        raise HTTPException(status_code=409, detail="WhatsApp connection not started.")
+
+    selected = next(
+        (
+            account
+            for account in accounts
+            if account.phone_number_id == selection.phoneNumberId
+            and (
+                selection.accountId is None
+                or account.id == selection.accountId
+            )
+        ),
+        None,
+    )
+    if selected is None:
+        raise HTTPException(status_code=400, detail="Invalid WhatsApp phone selection.")
+
+    existing_connection = channel_connections.get_tenant_channel_connection(
+        tenant.id
+    )
+    last_request_id = (
+        existing_connection.last_request_id if existing_connection else None
+    )
+    if last_request_id:
+        channel_connections.update_connection_request(
+            last_request_id,
+            status="connected",
+            zernio_account_id=selected.id,
+            selected_phone_number_id=selected.phone_number_id,
+            display_phone_number=selected.display_phone_number,
+            callback_payload={"selected_via": "operator_phone_selection"},
+            error_summary=None,
+        )
+
+    connection = channel_connections.upsert_tenant_channel_connection(
+        tenant_id=tenant.id,
+        status="connected",
+        zernio_profile_id=zernio_profile_id,
+        zernio_account_id=selected.id,
+        phone_number_id=selected.phone_number_id,
+        display_phone_number=selected.display_phone_number,
+        waba_id=selected.waba_id,
+        metadata={"selectedPhone": _safe_phone_option(selected)},
+        last_request_id=last_request_id,
+        last_error=None,
+    )
+
+    return {
+        "success": True,
+        "tenantId": tenant.id,
+        "channel": connection.channel,
+        "provider": connection.provider,
+        "status": connection.status,
+        "connected": True,
         "displayPhoneNumber": connection.display_phone_number,
         "phoneNumberId": connection.phone_number_id,
         "providerAccountId": connection.zernio_account_id,
