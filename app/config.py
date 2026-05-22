@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -18,6 +18,10 @@ class Settings:
     smtp_password: Optional[str]
     smtp_use_tls: bool
     internal_api_token: Optional[str]
+    zernio_api_key: Optional[str] = field(repr=False)
+    zernio_api_base_url: str
+    unboks_public_url: str
+    unboks_admin_api_url: str
 
 
 def get_settings() -> Settings:
@@ -45,6 +49,19 @@ def get_settings() -> Settings:
         smtp_use_tls=os.getenv("NR3_SMTP_USE_TLS", "true").strip().lower()
         not in {"0", "false", "no", "off"},
         internal_api_token=_clean_env("NR3_INTERNAL_API_TOKEN"),
+        zernio_api_key=_clean_env("ZERNIO_API_KEY"),
+        zernio_api_base_url=os.getenv(
+            "ZERNIO_API_BASE_URL",
+            "https://zernio.com/api/v1",
+        ).strip().rstrip("/"),
+        unboks_public_url=os.getenv(
+            "UNBOKS_PUBLIC_URL",
+            "https://unboks.org",
+        ).strip().rstrip("/"),
+        unboks_admin_api_url=os.getenv(
+            "UNBOKS_ADMIN_API_URL",
+            "https://api.wetakeyourjob.com/internal/api",
+        ).strip().rstrip("/"),
     )
 
 
