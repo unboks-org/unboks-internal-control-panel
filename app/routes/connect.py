@@ -1,6 +1,11 @@
+from __future__ import annotations
+
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 
 from app import channel_connections
 from app.config import get_settings
@@ -12,6 +17,41 @@ from app.zernio import ZernioAPIError, ZernioNotConfigured, ZernioService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/internal/api", tags=["internal-api"])
+public_router = APIRouter(tags=["connect"])
+templates = Jinja2Templates(directory="app/templates")
+
+CALLBACK_RESULT_PATH = "/connect/whatsapp/result"
+FAILED_STATUSES = {"failed", "failure", "error", "cancelled", "canceled", "denied"}
+PENDING_NUMBER_STATUSES = {
+    "pending",
+    "pending-number",
+    "pending_number",
+    "number-selection",
+    "number-selection-required",
+}
+SAFE_CALLBACK_KEYS = {
+    "state",
+    "status",
+    "connection_status",
+    "accountId",
+    "account_id",
+    "zernioAccountId",
+    "zernio_account_id",
+    "profileId",
+    "profile_id",
+    "phoneNumberId",
+    "phone_number_id",
+    "selectedPhoneNumberId",
+    "selected_phone_number_id",
+    "displayPhoneNumber",
+    "display_phone_number",
+    "wabaId",
+    "waba_id",
+    "platform",
+    "error",
+    "error_description",
+    "message",
+}
 
 
 def _require_operator_json(request: Request) -> None:
@@ -23,6 +63,59 @@ def _require_operator_json(request: Request) -> None:
 def _whatsapp_callback_url() -> str:
     settings = get_settings()
     return f"{settings.unboks_admin_api_url}/connect/whatsapp/callback"
+
+
+def _result_redirect(status: str, *, tenant_id: str | None = None) -> RedirectResponse:
+    url = f"{CALLBACK_RESULT_PATH}?status={status}"
+    if tenant_id:
+        url = f"{url}&tenantId={tenant_id}"
+    return RedirectResponse(url=url, status_code=303)
+
+
+def _first_query_value(request: Request, *names: str) -> str | None:
+    for name in names:
+        value = request.query_params.get(name)
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def _safe_callback_payload(request: Request) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    for key, value in request.query_params.multi_items():
+        if key in SAFE_CALLBACK_KEYS and value:
+            payload[key] = value[:500]
+    return payload
+
+
+def _safe_error_summary(request: Request) -> str:
+    error = _first_query_value(
+        request,
+        "error_description",
+        "error",
+        "message",
+    )
+    return (error or "WhatsApp authorization failed.")[:500]
+
+
+def _normalized_callback_status(request: Request) -> str:
+    raw = _first_query_value(request, "status", "connection_status")
+    if not raw:
+        return ""
+    return raw.strip().lower().replace(" ", "-")
+
+
+def _is_expired(connection_request: channel_connections.ConnectionRequest) -> bool:
+    expires_at = connection_request.state_token_expires_at
+    if not expires_at:
+        return False
+    try:
+        parsed = datetime.fromisoformat(expires_at)
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed < datetime.now(timezone.utc)
 
 
 @router.post("/tenants/{tenant_id}/channels/whatsapp/connect/start")
@@ -94,3 +187,200 @@ def start_whatsapp_connection(tenant_id: str, request: Request) -> dict:
         "expiresAt": created.request.state_token_expires_at,
         "requestId": created.request.id,
     }
+
+
+@router.get("/connect/whatsapp/callback")
+def whatsapp_connection_callback(request: Request):
+    """Receive the public Zernio redirect and update Nr3 connection state.
+
+    This endpoint is intentionally unauthenticated because the browser returns
+    here from Meta/Zernio. The random callback state is the trust anchor.
+    """
+    state_token = _first_query_value(request, "state")
+    if not state_token:
+        logger.warning("whatsapp_connect_callback_missing_state")
+        return _result_redirect("failed")
+
+    connection_request = channel_connections.find_connection_request_by_state_token(
+        state_token
+    )
+    if connection_request is None:
+        logger.warning("whatsapp_connect_callback_invalid_state")
+        return _result_redirect("failed")
+
+    tenant_id = connection_request.tenant_id
+    callback_payload = _safe_callback_payload(request)
+    if _is_expired(connection_request):
+        channel_connections.update_connection_request(
+            connection_request.id,
+            status="expired",
+            callback_payload=callback_payload,
+            error_summary="WhatsApp authorization link expired.",
+        )
+        channel_connections.upsert_tenant_channel_connection(
+            tenant_id=tenant_id,
+            status="failed",
+            zernio_profile_id=connection_request.zernio_profile_id,
+            last_request_id=connection_request.id,
+            last_error="WhatsApp authorization link expired.",
+        )
+        logger.info(
+            "whatsapp_connect_callback_expired tenant=%s request_id=%s",
+            tenant_id,
+            connection_request.id,
+        )
+        return _result_redirect("failed", tenant_id=tenant_id)
+
+    status = _normalized_callback_status(request)
+    if status in FAILED_STATUSES or _first_query_value(
+        request,
+        "error",
+        "error_description",
+    ):
+        error_summary = _safe_error_summary(request)
+        channel_connections.update_connection_request(
+            connection_request.id,
+            status="failed",
+            callback_payload=callback_payload,
+            error_summary=error_summary,
+        )
+        channel_connections.upsert_tenant_channel_connection(
+            tenant_id=tenant_id,
+            status="failed",
+            zernio_profile_id=connection_request.zernio_profile_id,
+            last_request_id=connection_request.id,
+            last_error=error_summary,
+        )
+        logger.info(
+            "whatsapp_connect_callback_failed tenant=%s request_id=%s",
+            tenant_id,
+            connection_request.id,
+        )
+        return _result_redirect("failed", tenant_id=tenant_id)
+
+    zernio_account_id = _first_query_value(
+        request,
+        "accountId",
+        "account_id",
+        "zernioAccountId",
+        "zernio_account_id",
+    )
+    phone_number_id = _first_query_value(
+        request,
+        "phoneNumberId",
+        "phone_number_id",
+        "selectedPhoneNumberId",
+        "selected_phone_number_id",
+    )
+    display_phone_number = _first_query_value(
+        request,
+        "displayPhoneNumber",
+        "display_phone_number",
+    )
+    waba_id = _first_query_value(request, "wabaId", "waba_id")
+
+    if (
+        status in PENDING_NUMBER_STATUSES
+        or not zernio_account_id
+        or not phone_number_id
+        or not display_phone_number
+    ):
+        channel_connections.update_connection_request(
+            connection_request.id,
+            status="pending_number",
+            zernio_account_id=zernio_account_id,
+            selected_phone_number_id=phone_number_id,
+            display_phone_number=display_phone_number,
+            callback_payload=callback_payload,
+            error_summary=None,
+        )
+        channel_connections.upsert_tenant_channel_connection(
+            tenant_id=tenant_id,
+            status="pending",
+            zernio_profile_id=connection_request.zernio_profile_id,
+            zernio_account_id=zernio_account_id,
+            phone_number_id=phone_number_id,
+            display_phone_number=display_phone_number,
+            waba_id=waba_id,
+            metadata={"callback": callback_payload},
+            last_request_id=connection_request.id,
+            last_error=None,
+        )
+        logger.info(
+            "whatsapp_connect_callback_pending_number tenant=%s request_id=%s",
+            tenant_id,
+            connection_request.id,
+        )
+        return _result_redirect("pending-number", tenant_id=tenant_id)
+
+    channel_connections.update_connection_request(
+        connection_request.id,
+        status="connected",
+        zernio_account_id=zernio_account_id,
+        selected_phone_number_id=phone_number_id,
+        display_phone_number=display_phone_number,
+        callback_payload=callback_payload,
+        error_summary=None,
+    )
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id=tenant_id,
+        status="connected",
+        zernio_profile_id=connection_request.zernio_profile_id,
+        zernio_account_id=zernio_account_id,
+        phone_number_id=phone_number_id,
+        display_phone_number=display_phone_number,
+        waba_id=waba_id,
+        metadata={"callback": callback_payload},
+        last_request_id=connection_request.id,
+        last_error=None,
+    )
+    logger.info(
+        "whatsapp_connect_callback_connected tenant=%s request_id=%s",
+        tenant_id,
+        connection_request.id,
+    )
+    return _result_redirect("success", tenant_id=tenant_id)
+
+
+@public_router.get("/connect/whatsapp/result", response_class=HTMLResponse)
+def whatsapp_connection_result(request: Request, status: str = "failed"):
+    safe_status = (
+        status if status in {"success", "pending-number", "failed"} else "failed"
+    )
+    content: dict[str, dict[str, str]] = {
+        "success": {
+            "eyebrow": "WhatsApp connection",
+            "title": "Connection received",
+            "message": (
+                "Your WhatsApp authorization was received. "
+                "You can close this window."
+            ),
+            "chip": "Success",
+            "chip_class": "status-ok",
+        },
+        "pending-number": {
+            "eyebrow": "WhatsApp connection",
+            "title": "Phone number needs review",
+            "message": (
+                "Authorization was received. The Unboks team will confirm "
+                "the phone number before activating WhatsApp."
+            ),
+            "chip": "Pending",
+            "chip_class": "status-warn",
+        },
+        "failed": {
+            "eyebrow": "WhatsApp connection",
+            "title": "Connection not completed",
+            "message": (
+                "We could not complete the WhatsApp connection. "
+                "Please contact the Unboks team for a new secure link."
+            ),
+            "chip": "Failed",
+            "chip_class": "status-error",
+        },
+    }
+    return templates.TemplateResponse(
+        request,
+        "whatsapp_connect_result.html",
+        {"result": content[safe_status]},
+    )

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}WhatsApp Connection | Unboks{% endblock %}
+{% block body_class %}public-body{% endblock %}
+
+{% block body %}
+  <main class="nr3-shell">
+    <section class="login-panel onboarding-panel">
+      <p class="eyebrow">{{ result.eyebrow }}</p>
+      <h1>{{ result.title }}</h1>
+      <p class="muted">{{ result.message }}</p>
+      <p class="placeholder-detail">
+        <span class="status-chip {{ result.chip_class }}">{{ result.chip }}</span>
+      </p>
+    </section>
+  </main>
+{% endblock %}

@@ -11,6 +11,7 @@ def create_app() -> FastAPI:
     app.include_router(onboarding.router)
     app.include_router(internal.router)
     app.include_router(connect.router)
+    app.include_router(connect.public_router)
     app.include_router(admin.router)
     return app
 
