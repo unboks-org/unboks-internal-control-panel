@@ -2277,6 +2277,94 @@ button.button-disabled,
   justify-self: end;
 }
 
+.whatsapp-connect-card {
+  background: #fbfcfd;
+  border: 1px solid #e7e9ef;
+  border-radius: 8px;
+  margin-top: 10px;
+  padding: 12px;
+}
+
+.whatsapp-connect-head,
+.whatsapp-connect-actions,
+.whatsapp-auth-copy,
+.whatsapp-phone-option {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.whatsapp-connect-head {
+  justify-content: space-between;
+}
+
+.whatsapp-connect-head h4 {
+  font-size: 13px;
+  margin: 0 0 2px;
+}
+
+.whatsapp-connect-meta {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 10px 0;
+}
+
+.whatsapp-connect-meta div {
+  background: #ffffff;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.whatsapp-connect-meta dt {
+  color: var(--color-muted);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.whatsapp-connect-meta dd {
+  color: var(--color-text);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.whatsapp-connect-actions {
+  flex-wrap: wrap;
+}
+
+.whatsapp-auth-link {
+  margin-top: 10px;
+}
+
+.whatsapp-auth-link label {
+  color: var(--color-muted);
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.whatsapp-auth-copy input {
+  flex: 1;
+  min-width: 0;
+}
+
+.whatsapp-phone-options {
+  border-top: 1px solid #edf0f4;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.whatsapp-phone-option {
+  background: #ffffff;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding: 8px;
+}
+
 /* ---------------------------------------------------------------- */
 /* iOS Settings-style toggle (Refero compact)                       */
 /*   ON  : iOS system green (#34C759), white knob                    */

@@ -89,6 +89,39 @@
         </li>
       {% endfor %}
     </ul>
+    <div class="whatsapp-connect-card" data-whatsapp-connect data-tenant-id="{{ tenant.id }}">
+      <div class="whatsapp-connect-head">
+        <div>
+          <h4>WhatsApp Business</h4>
+          <p class="muted compact-note" data-wa-summary>Checking connection status.</p>
+        </div>
+        <span class="status-chip status-unknown" data-wa-status>Unknown</span>
+      </div>
+      <dl class="whatsapp-connect-meta">
+        <div>
+          <dt>Phone</dt>
+          <dd data-wa-phone>Not connected</dd>
+        </div>
+        <div>
+          <dt>Provider account</dt>
+          <dd data-wa-account>Not connected</dd>
+        </div>
+      </dl>
+      <div class="whatsapp-connect-actions">
+        <button type="button" class="button-secondary" data-wa-start>Generate authorization link</button>
+        <button type="button" class="button-secondary" data-wa-refresh>Refresh status</button>
+      </div>
+      <div class="whatsapp-auth-link" data-wa-link-box hidden>
+        <label for="wa-auth-url-{{ tenant.id }}">Client authorization link</label>
+        <div class="whatsapp-auth-copy">
+          <input id="wa-auth-url-{{ tenant.id }}" data-wa-auth-url readonly>
+          <button type="button" class="button-secondary" data-wa-copy>Copy</button>
+        </div>
+        <p class="muted compact-note">Send this link separately to the client when you are ready to connect WhatsApp.</p>
+      </div>
+      <div class="whatsapp-phone-options" data-wa-phone-options hidden></div>
+      <p class="muted compact-note" data-wa-feedback></p>
+    </div>
     <p class="muted compact-note channels-foot">Toggle state publishes through the Nr3 internal bridge used by Nr2.</p>
   </section>
   </details>
