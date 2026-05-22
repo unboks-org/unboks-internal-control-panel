@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from app import audit_log
 from app import channel_connections
 from app.config import get_settings
 from app.security import is_authenticated
@@ -218,7 +219,20 @@ def start_whatsapp_connection(tenant_id: str, request: Request) -> dict:
             tenant.id,
             created.request.id,
         )
+        audit_log.record_event(
+            tenant_id=tenant.id,
+            action="whatsapp.connect_link_generated",
+            result="ok",
+            safe_summary="WhatsApp authorization link generated.",
+            metadata={"request_id": created.request.id},
+        )
     except ZernioNotConfigured as exc:
+        audit_log.record_event(
+            tenant_id=tenant.id,
+            action="whatsapp.connect_link_failed",
+            result="failed",
+            safe_summary="Zernio API key is not configured.",
+        )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ZernioAPIError as exc:
         logger.warning(
@@ -226,6 +240,13 @@ def start_whatsapp_connection(tenant_id: str, request: Request) -> dict:
             tenant.id,
             exc.status_code,
             exc.message,
+        )
+        audit_log.record_event(
+            tenant_id=tenant.id,
+            action="whatsapp.connect_link_failed",
+            result="failed",
+            safe_summary=exc.message,
+            metadata={"status_code": exc.status_code},
         )
         raise HTTPException(status_code=502, detail=exc.message) from exc
 
@@ -389,6 +410,17 @@ def select_whatsapp_phone_number(
         last_request_id=last_request_id,
         last_error=None,
     )
+    audit_log.record_event(
+        tenant_id=tenant.id,
+        action="whatsapp.phone_selected",
+        result="ok",
+        safe_summary="WhatsApp phone number selected.",
+        metadata={
+            "request_id": last_request_id,
+            "account_id": selected.id,
+            "phone_number_id": selected.phone_number_id,
+        },
+    )
 
     return {
         "success": True,
@@ -447,6 +479,13 @@ def whatsapp_connection_callback(request: Request):
             tenant_id,
             connection_request.id,
         )
+        audit_log.record_event(
+            tenant_id=tenant_id,
+            action="whatsapp.callback_expired",
+            result="failed",
+            safe_summary="WhatsApp authorization link expired.",
+            metadata={"request_id": connection_request.id},
+        )
         return _result_redirect("failed", tenant_id=tenant_id)
 
     status = _normalized_callback_status(request)
@@ -473,6 +512,13 @@ def whatsapp_connection_callback(request: Request):
             "whatsapp_connect_callback_failed tenant=%s request_id=%s",
             tenant_id,
             connection_request.id,
+        )
+        audit_log.record_event(
+            tenant_id=tenant_id,
+            action="whatsapp.callback_failed",
+            result="failed",
+            safe_summary=error_summary,
+            metadata={"request_id": connection_request.id},
         )
         return _result_redirect("failed", tenant_id=tenant_id)
 
@@ -529,6 +575,16 @@ def whatsapp_connection_callback(request: Request):
             tenant_id,
             connection_request.id,
         )
+        audit_log.record_event(
+            tenant_id=tenant_id,
+            action="whatsapp.callback_pending_number",
+            result="pending",
+            safe_summary="WhatsApp authorization received; phone number pending.",
+            metadata={
+                "request_id": connection_request.id,
+                "account_id": zernio_account_id,
+            },
+        )
         return _result_redirect("pending-number", tenant_id=tenant_id)
 
     channel_connections.update_connection_request(
@@ -556,6 +612,17 @@ def whatsapp_connection_callback(request: Request):
         "whatsapp_connect_callback_connected tenant=%s request_id=%s",
         tenant_id,
         connection_request.id,
+    )
+    audit_log.record_event(
+        tenant_id=tenant_id,
+        action="whatsapp.callback_connected",
+        result="ok",
+        safe_summary="WhatsApp connection completed.",
+        metadata={
+            "request_id": connection_request.id,
+            "account_id": zernio_account_id,
+            "phone_number_id": phone_number_id,
+        },
     )
     return _result_redirect("success", tenant_id=tenant_id)
 

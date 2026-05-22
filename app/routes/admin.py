@@ -1071,12 +1071,22 @@ def admin_settings(request: Request) -> Response:
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
+    from app import audit_log as _audit_log
+    audit_events = [
+        {
+            "time": event.created_at,
+            "actor": event.actor,
+            "tenant": event.tenant_id or "—",
+            "action": f"{event.action} ({event.result})",
+        }
+        for event in _audit_log.list_events(limit=50)
+    ]
     return templates.TemplateResponse(
         request,
         "admin_settings.html",
         {
             **_shell_context("settings"),
-            "audit_events": (),
+            "audit_events": audit_events,
             "admin_users": (
                 {
                     "name": "Internal admin",
