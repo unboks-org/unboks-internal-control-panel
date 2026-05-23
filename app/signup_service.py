@@ -157,7 +157,7 @@ def create_public_signup_tenant(
     created = _now()
     trial_ends = created + timedelta(days=14)
     host_port = _host_port(slug)
-    dashboard_url = f"https://dashboard.unboks.org/{slug}"
+    dashboard_url = f"https://dashboard.unboks.org/login?workspace={slug}"
 
     client_data: dict[str, Any] = {
         "slug": slug,

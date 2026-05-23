@@ -30,7 +30,9 @@ def test_public_signup_creates_trial_tenant_and_redirects(monkeypatch, tmp_path)
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "https://dashboard.unboks.org/lovelace-law"
+    assert response.headers["location"] == (
+        "https://dashboard.unboks.org/login?workspace=lovelace-law"
+    )
     cfg = tmp_path / "clients" / "lovelace-law" / "config" / "client.json"
     data = json.loads(cfg.read_text(encoding="utf-8"))
     assert data["status"] == "active"

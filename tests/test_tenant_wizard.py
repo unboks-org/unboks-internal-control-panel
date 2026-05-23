@@ -84,7 +84,7 @@ def test_create_minimal_tenant_renders_success_page(client):
     assert r.status_code == 200, r.text
     assert "Tenant created" in r.text
     assert "acme-charters" in r.text
-    assert "https://dashboard.unboks.org/acme-charters" in r.text
+    assert "https://dashboard.unboks.org/login?workspace=acme-charters" in r.text
     assert "data-ct-copy" in r.text
     assert "data-ct-download" in r.text
     assert 'data-ct-download-filename="client.json"' in r.text
@@ -280,7 +280,7 @@ def test_welcome_email_sent_when_checked(client, email_capture):
     msg = email_capture[0]
     assert msg["to"] == "ops@acme.test"
     assert "Acme" in msg["subject"]
-    assert "https://dashboard.unboks.org/acme" in msg["body"]
+    assert "https://dashboard.unboks.org/login?workspace=acme" in msg["body"]
     data = _extract_client_json(r.text)
     assert data["password"] in msg["body"]
     assert "Welcome email sent to" in r.text
@@ -504,7 +504,7 @@ def test_full_vps_setup_script_is_ready_to_paste(client):
     assert "docker compose up -d" in script
     assert "nginx -t" in script
     assert "systemctl reload nginx" in script
-    assert "https://dashboard.unboks.org/one-paste" in script
+    assert "https://dashboard.unboks.org/login?workspace=one-paste" in script
 
 
 def test_create_shows_auto_provision_success_when_worker_succeeds(client, monkeypatch):

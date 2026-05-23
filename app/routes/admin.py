@@ -534,7 +534,7 @@ def admin_suspend_tenant(
     result = queue_tenant_host_action(
         slug=tenant_id,
         action="suspend_tenant",
-        dashboard_url=f"https://dashboard.unboks.org/{tenant_id}",
+        dashboard_url=f"https://dashboard.unboks.org/login?workspace={tenant_id}",
     )
     if result.status == "succeeded":
         message = "Tenant is inactive: channels and AI disabled, container stopped."
@@ -689,7 +689,7 @@ async def admin_tenant_create_submit(
     access_key = secrets.token_urlsafe(24)
     whatsapp_connect_token = secrets.token_urlsafe(32)
     created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    dashboard_url = f"https://dashboard.unboks.org/{safe_slug}"
+    dashboard_url = f"https://dashboard.unboks.org/login?workspace={safe_slug}"
 
     # Deterministic host port derived from the slug (range 8100-8199).
     # Sha256 keeps it stable across processes (unlike Python's hash()),
@@ -991,7 +991,7 @@ async def admin_tenant_create_submit(
         f"nginx -t\n"
         f"systemctl reload nginx\n"
         f"\n"
-        f"echo \"Done. Test login: https://dashboard.unboks.org/{safe_slug}\"\n"
+        f"echo \"Done. Test login: https://dashboard.unboks.org/login?workspace={safe_slug}\"\n"
         f"echo \"Direct health check: curl -s http://127.0.0.1:{host_port}/health\"\n"
         f"echo \"ICP bridge token loaded from $BRIDGE_TOKEN_FILE. No manual token paste was needed.\"\n"
     )
