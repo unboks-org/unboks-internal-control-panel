@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import hmac
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,7 +19,7 @@ from app.emailer import (
     smtp_is_configured,
 )
 from app.security import is_authenticated
-from app.tenants import get_tenant, tenant_contact_details
+from app.tenants import get_tenant, get_tenant_client_data, tenant_contact_details
 from app.zernio import (
     ZernioAccountSummary,
     ZernioAPIError,
@@ -158,6 +159,67 @@ def _tenant_zernio_profile_id(tenant_id: str) -> str | None:
     return channel_connections.get_tenant_zernio_profile_id(tenant_id)
 
 
+def _create_whatsapp_authorization(tenant, *, actor: str) -> channel_connections.CreatedConnectionRequest:
+    service = ZernioService()
+    zernio_profile_id = channel_connections.get_tenant_zernio_profile_id(
+        tenant.id
+    )
+    if not zernio_profile_id:
+        profile = service.create_profile(
+            name=tenant.name,
+            description=f"Unboks tenant workspace: {tenant.id}",
+        )
+        zernio_profile_id = profile.id
+        channel_connections.set_tenant_zernio_profile_id(
+            tenant_id=tenant.id,
+            name=tenant.name,
+            zernio_profile_id=zernio_profile_id,
+            status=tenant.status,
+        )
+
+    connect_url = service.get_connect_url(
+        platform="whatsapp",
+        profile_id=zernio_profile_id,
+        redirect_url=_whatsapp_callback_url(),
+    )
+    if not connect_url.state:
+        raise ZernioAPIError(502, "Zernio did not return a callback state.")
+
+    created = channel_connections.create_connection_request(
+        tenant_id=tenant.id,
+        auth_url=connect_url.auth_url,
+        zernio_profile_id=zernio_profile_id,
+        state_token=connect_url.state,
+        status="link_generated",
+    )
+    logger.info(
+        "whatsapp_connect_link_generated tenant=%s request_id=%s actor=%s",
+        tenant.id,
+        created.request.id,
+        actor,
+    )
+    audit_log.record_event(
+        tenant_id=tenant.id,
+        action="whatsapp.connect_link_generated",
+        result="ok",
+        safe_summary="WhatsApp authorization link generated.",
+        metadata={"request_id": created.request.id, "actor": actor},
+    )
+    return created
+
+
+def _public_whatsapp_token_valid(tenant_id: str, token: str) -> bool:
+    if not tenant_id or not token:
+        return False
+    data = get_tenant_client_data(tenant_id)
+    expected = data.get("whatsapp_connect_token")
+    return (
+        isinstance(expected, str)
+        and bool(expected.strip())
+        and hmac.compare_digest(token.strip(), expected.strip())
+    )
+
+
 def _load_whatsapp_phone_options(
     tenant_id: str,
 ) -> tuple[str | None, list[ZernioAccountSummary]]:
@@ -186,51 +248,8 @@ def start_whatsapp_connection(tenant_id: str, request: Request) -> dict:
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found.")
 
-    service = ZernioService()
     try:
-        zernio_profile_id = channel_connections.get_tenant_zernio_profile_id(
-            tenant.id
-        )
-        if not zernio_profile_id:
-            profile = service.create_profile(
-                name=tenant.name,
-                description=f"Unboks tenant workspace: {tenant.id}",
-            )
-            zernio_profile_id = profile.id
-            channel_connections.set_tenant_zernio_profile_id(
-                tenant_id=tenant.id,
-                name=tenant.name,
-                zernio_profile_id=zernio_profile_id,
-                status=tenant.status,
-            )
-
-        connect_url = service.get_connect_url(
-            platform="whatsapp",
-            profile_id=zernio_profile_id,
-            redirect_url=_whatsapp_callback_url(),
-        )
-        if not connect_url.state:
-            raise ZernioAPIError(502, "Zernio did not return a callback state.")
-
-        created = channel_connections.create_connection_request(
-            tenant_id=tenant.id,
-            auth_url=connect_url.auth_url,
-            zernio_profile_id=zernio_profile_id,
-            state_token=connect_url.state,
-            status="link_generated",
-        )
-        logger.info(
-            "whatsapp_connect_link_generated tenant=%s request_id=%s",
-            tenant.id,
-            created.request.id,
-        )
-        audit_log.record_event(
-            tenant_id=tenant.id,
-            action="whatsapp.connect_link_generated",
-            result="ok",
-            safe_summary="WhatsApp authorization link generated.",
-            metadata={"request_id": created.request.id},
-        )
+        created = _create_whatsapp_authorization(tenant, actor="nr3-admin")
     except ZernioNotConfigured as exc:
         audit_log.record_event(
             tenant_id=tenant.id,
@@ -263,6 +282,23 @@ def start_whatsapp_connection(tenant_id: str, request: Request) -> dict:
         "expiresAt": created.request.state_token_expires_at,
         "requestId": created.request.id,
     }
+
+
+@public_router.get("/connect/whatsapp/customer/start")
+def customer_start_whatsapp_connection(tenantId: str = "", token: str = ""):
+    """Customer-facing WhatsApp authorization launcher.
+
+    Nr2 can show this URL to a signed-in tenant without exposing any Zernio
+    credential. The token is per-tenant, random, and stored only in client.json.
+    """
+    tenant = get_tenant(tenantId.strip())
+    if tenant is None or not _public_whatsapp_token_valid(tenant.id, token):
+        return _result_redirect("failed", tenant_id=tenantId.strip() or None)
+    try:
+        created = _create_whatsapp_authorization(tenant, actor="tenant-self-service")
+    except (ZernioNotConfigured, ZernioAPIError):
+        return _result_redirect("failed", tenant_id=tenant.id)
+    return RedirectResponse(url=created.request.auth_url or CALLBACK_RESULT_PATH, status_code=303)
 
 
 @router.get("/tenants/{tenant_id}/channels/whatsapp/status")

@@ -340,6 +340,7 @@ def add_sot_entry(
     title: str,
     content: str,
     category: str = "general",
+    entry_id: str = "",
     updated_by: str = "nr3-admin",
 ) -> dict[str, Any]:
     """Add one authoritative Source of Truth entry for a tenant."""
@@ -349,8 +350,9 @@ def add_sot_entry(
         raise ValueError("SOT title is required.")
     if not clean_content:
         raise ValueError("SOT content is required.")
+    clean_id = _clean_text(entry_id)
     entry = {
-        "id": secrets.token_urlsafe(8),
+        "id": clean_id or secrets.token_urlsafe(8),
         "title": clean_title,
         "content": clean_content,
         "category": _clean_text(category) or "general",
@@ -364,6 +366,11 @@ def add_sot_entry(
     if not isinstance(entries, list):
         entries = []
         tenant_state["sot_entries"] = entries
+    if clean_id:
+        entries = [
+            existing for existing in entries
+            if _clean_text(existing.get("id")) != clean_id
+        ]
     entries.insert(0, entry)
     _save_all(data)
     logger.info("icp_overrides.add_sot_entry tenant=%s title=%r", tenant_id, clean_title)
