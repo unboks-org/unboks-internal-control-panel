@@ -332,6 +332,145 @@
   </section>
   </details>
 
+  <details class="ws-section ws-tone-green">
+    <summary class="ws-summary">
+      <span class="ws-title">Nr2 company knowledge</span>
+      <span class="ws-desc muted">Live read-only sync from the tenant dashboard.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
+    <section id="nr2-knowledge-section" class="nr2-knowledge-panel" aria-label="Nr2 company knowledge">
+      <header class="nr2-knowledge-header">
+        <div>
+          <h3>Nr2 company knowledge</h3>
+          <p class="muted compact-note">
+            Pulled live from <code>{{ nr2_knowledge.source_url }}</code>. This shows what the tenant added in Nr2.
+          </p>
+        </div>
+        <div class="nr2-knowledge-actions">
+          <span class="status-chip status-{{ 'ok' if nr2_knowledge.status == 'ok' else ('warn' if nr2_knowledge.status == 'partial' else 'unknown') }}">
+            {{ nr2_knowledge.status }}
+          </span>
+          <a class="button-secondary" href="/admin/tenants/{{ tenant.id }}#nr2-knowledge-section">Refresh</a>
+        </div>
+      </header>
+
+      {% if nr2_knowledge.error %}
+        <div class="form-feedback form-feedback-{{ 'warn' if nr2_knowledge.status != 'ok' else 'success' }}" role="status">
+          {{ nr2_knowledge.error }}
+        </div>
+      {% endif %}
+
+      <div class="nr2-knowledge-stats">
+        <div class="data-stat">
+          <span class="data-stat-label">SOT blocks</span>
+          <span class="data-stat-value">{{ nr2_knowledge.sot_blocks | length }}</span>
+        </div>
+        <div class="data-stat">
+          <span class="data-stat-label">Saved updates</span>
+          <span class="data-stat-value">{{ nr2_knowledge.info_updates | length }}</span>
+        </div>
+        <div class="data-stat">
+          <span class="data-stat-label">Files</span>
+          <span class="data-stat-value">{{ nr2_knowledge.knowledge_files | length }}</span>
+        </div>
+        <div class="data-stat">
+          <span class="data-stat-label">Images</span>
+          <span class="data-stat-value">{{ nr2_knowledge.knowledge_media | length }}</span>
+        </div>
+      </div>
+
+      {% if nr2_knowledge.total_items == 0 %}
+        <p class="muted compact-note nr2-empty">
+          No Nr2 company knowledge found yet, or this tenant runtime could not be reached.
+        </p>
+      {% else %}
+        <div class="nr2-knowledge-grid">
+          <div class="nr2-knowledge-card">
+            <h4>Source of Truth blocks</h4>
+            {% if nr2_knowledge.sot_blocks %}
+              <ul class="nr2-list">
+                {% for block in nr2_knowledge.sot_blocks %}
+                  <li>
+                    <strong>{{ block.title }}</strong>
+                    {% if block.content %}<p>{{ block.content }}</p>{% endif %}
+                    {% if block.items %}
+                      <ul class="nr2-mini-list">
+                        {% for item in block.items %}
+                          <li>{{ item }}</li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                    {% if block.subsections %}
+                      <ul class="nr2-mini-list">
+                        {% for sub in block.subsections %}
+                          <li><strong>{{ sub.title }}</strong>{% if sub.content %}: {{ sub.content }}{% endif %}</li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="muted compact-note">No SOT blocks in Nr2.</p>
+            {% endif %}
+          </div>
+
+          <div class="nr2-knowledge-card">
+            <h4>Saved knowledge updates</h4>
+            {% if nr2_knowledge.info_updates %}
+              <ul class="nr2-list">
+                {% for update in nr2_knowledge.info_updates %}
+                  <li>
+                    <span class="status-chip status-{{ 'ok' if update.active else 'unknown' }}">{{ update.type }}</span>
+                    <p>{{ update.text }}</p>
+                    {% if update.created_at %}<p class="muted compact-note">Added {{ update.created_at }}</p>{% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="muted compact-note">No saved updates in Nr2.</p>
+            {% endif %}
+          </div>
+
+          <div class="nr2-knowledge-card">
+            <h4>Knowledge files</h4>
+            {% if nr2_knowledge.knowledge_files %}
+              <ul class="nr2-list">
+                {% for file in nr2_knowledge.knowledge_files %}
+                  <li>
+                    <strong>{{ file.filename }}</strong>
+                    <span class="status-chip status-{{ 'ok' if file.status == 'ready' else 'unknown' }}">{{ file.status }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="muted compact-note">No uploaded files in Nr2.</p>
+            {% endif %}
+          </div>
+
+          <div class="nr2-knowledge-card">
+            <h4>Knowledge images</h4>
+            {% if nr2_knowledge.knowledge_media %}
+              <div class="nr2-media-grid">
+                {% for image in nr2_knowledge.knowledge_media %}
+                  <a class="nr2-media-item" href="{{ image.url }}" target="_blank" rel="noreferrer">
+                    {% if image.url %}
+                      <img src="{{ image.url }}" alt="{{ image.caption }}">
+                    {% endif %}
+                    <span>{{ image.caption }}</span>
+                  </a>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="muted compact-note">No attached images in Nr2.</p>
+            {% endif %}
+          </div>
+        </div>
+      {% endif %}
+    </section>
+  </details>
+
   {# 4h. Escalations #}
   <span id="escalations-section"></span>
   {% set esc = tenant.escalations %}

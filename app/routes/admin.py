@@ -28,6 +28,7 @@ from app.security import (
     verify_admin_password,
 )
 from app.provisioning import auto_provision_tenant, queue_tenant_host_action
+from app.nr2_sync import fetch_nr2_knowledge
 from app.tenants import (
     ESCALATION_MODES,
     NOTE_PRIORITIES,
@@ -1117,6 +1118,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     )
     stored_notes = _tenant_notes.list_notes(tenant.id)
     notes = sorted_notes(stored_notes + tenant.notes)
+    nr2_knowledge = fetch_nr2_knowledge(tenant.id)
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
@@ -1137,6 +1139,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "escalation_modes": ESCALATION_MODES,
             "notes": notes,
             "note_priorities": NOTE_PRIORITIES,
+            "nr2_knowledge": nr2_knowledge,
         },
     )
 

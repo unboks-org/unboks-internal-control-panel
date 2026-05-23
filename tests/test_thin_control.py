@@ -1,7 +1,7 @@
 """Invariants of the thin-control tenant workspace.
 
-The workspace stays at exactly five collapsed sections. Tenant-workspace
-buttons must post to real backend routes.
+The workspace stays collapsed and thin. Tenant-workspace buttons must post to
+real backend routes, while read-only sync panels can display live state.
 """
 import re
 
@@ -35,16 +35,20 @@ def _html(client) -> str:
     return r.text
 
 
-def test_workspace_has_exactly_five_sections(client):
-    """The 5 keep-list sections (Channels, AI Agent, Escalations,
-    Tenant notes, Danger zone) -- no more, no less."""
+def test_workspace_has_expected_sections(client):
+    """The keep-list sections plus the read-only Nr2 knowledge sync panel."""
     html = _html(client)
     aria_labels = re.findall(
         r'<details[^>]*ws-section[^>]*>.*?aria-label="([^"]+)"',
         html, re.DOTALL,
     )
     assert aria_labels == [
-        "Channels", "AI Agent", "Escalations", "Tenant notes", "Danger zone",
+        "Channels",
+        "AI Agent",
+        "Nr2 company knowledge",
+        "Escalations",
+        "Tenant notes",
+        "Danger zone",
     ], f"section drift: {aria_labels}"
 
 

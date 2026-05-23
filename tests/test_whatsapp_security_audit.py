@@ -79,6 +79,12 @@ def test_callback_records_safe_audit_event(monkeypatch, tmp_path):
         status="link_generated",
     ).request
 
+    class FakeZernioService:
+        def get_account(self, account_id):
+            return None
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", FakeZernioService)
+
     response = client.get(
         "/internal/api/connect/whatsapp/callback",
         params={
