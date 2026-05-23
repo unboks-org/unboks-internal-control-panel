@@ -116,6 +116,14 @@
 
       <nav class="sidebar-nav" aria-label="Sections">
         <a
+          href="/admin/todos"
+          class="nav-item {% if active == 'todos' %}active{% endif %}"
+          {% if active == 'todos' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Todo</span>
+        </a>
+        <a
           href="/admin/settings"
           class="nav-item {% if active == 'settings' %}active{% endif %}"
           {% if active == 'settings' %}aria-current="page"{% endif %}

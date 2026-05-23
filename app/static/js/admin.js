@@ -602,6 +602,96 @@
     setFinalReady();
   }
 
+  function initTodoEditor() {
+    var form = document.querySelector("[data-todo-form]");
+    if (!form) {
+      return;
+    }
+    var editor = form.querySelector("[data-todo-editor]");
+    var htmlInput = form.querySelector("[data-todo-html]");
+    var plainInput = form.querySelector("[data-todo-plain]");
+    var submit = form.querySelector("[data-todo-submit]");
+    if (!editor || !htmlInput || !plainInput || !submit) {
+      return;
+    }
+
+    function textValue() {
+      return (editor.innerText || editor.textContent || "").trim();
+    }
+
+    function hasImage() {
+      return Boolean(editor.querySelector("img"));
+    }
+
+    function syncState() {
+      htmlInput.value = editor.innerHTML || "";
+      plainInput.value = textValue();
+      submit.disabled = !plainInput.value && !hasImage();
+      editor.classList.toggle("is-empty", !plainInput.value && !hasImage());
+    }
+
+    function insertNode(node) {
+      var selection = window.getSelection ? window.getSelection() : null;
+      if (!selection || selection.rangeCount === 0) {
+        editor.appendChild(node);
+        return;
+      }
+      var range = selection.getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(node);
+      range.setStartAfter(node);
+      range.setEndAfter(node);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    function insertImage(file) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = document.createElement("img");
+        img.src = String(reader.result || "");
+        img.alt = "Pasted image";
+        insertNode(img);
+        var spacer = document.createElement("div");
+        spacer.innerHTML = "<br>";
+        insertNode(spacer);
+        syncState();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    form.querySelectorAll("[data-todo-command]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        editor.focus();
+        document.execCommand(btn.getAttribute("data-todo-command"), false, null);
+        syncState();
+      });
+    });
+
+    editor.addEventListener("paste", function (event) {
+      var items = event.clipboardData ? Array.prototype.slice.call(event.clipboardData.items || []) : [];
+      var imageItems = items.filter(function (item) {
+        return item.kind === "file" && /^image\//.test(item.type || "");
+      });
+      if (imageItems.length === 0) {
+        window.setTimeout(syncState, 0);
+        return;
+      }
+      event.preventDefault();
+      imageItems.forEach(function (item) {
+        var file = item.getAsFile();
+        if (file) {
+          insertImage(file);
+        }
+      });
+    });
+
+    editor.addEventListener("input", syncState);
+    editor.addEventListener("blur", syncState);
+    form.addEventListener("submit", syncState);
+    syncState();
+  }
+
   function init() {
     initSidebarDrawer();
     initTenantSelector();
@@ -610,6 +700,7 @@
     initWhatsAppConnectionCard();
     initWhatsAppConnectedToast();
     initTenantPermanentDelete();
+    initTodoEditor();
   }
 
   if (document.readyState === "loading") {

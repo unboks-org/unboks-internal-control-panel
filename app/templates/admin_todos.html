@@ -1,0 +1,92 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Todo | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Operator notes{% endblock %}
+{% block page_title %}Todo{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Private working list for Calvin. Paste notes, formatted text, screenshots, and images.</p>
+{% endblock %}
+
+{% block page_actions %}
+  <span class="status-chip status-ok">Private</span>
+{% endblock %}
+
+{% block content %}
+  <section class="panel todo-compose-panel" aria-label="Create todo">
+    <div class="panel-header">
+      <div>
+        <h2>New todo</h2>
+        <p class="muted compact-note">Paste from email, docs, ChatGPT, screenshots, or copied images.</p>
+      </div>
+      <span class="status-chip status-neutral">Rich paste</span>
+    </div>
+
+    {% if todo_error %}
+      <div class="alert alert-error">{{ todo_error }}</div>
+    {% endif %}
+
+    <form method="post" action="/admin/todos" class="todo-form" data-todo-form>
+      <div class="todo-toolbar" aria-label="Todo formatting">
+        <button type="button" class="todo-tool" data-todo-command="bold" title="Bold">B</button>
+        <button type="button" class="todo-tool" data-todo-command="italic" title="Italic"><em>I</em></button>
+        <button type="button" class="todo-tool" data-todo-command="insertUnorderedList" title="Bullet list">• List</button>
+        <button type="button" class="todo-tool" data-todo-command="removeFormat" title="Clear formatting">Clear</button>
+      </div>
+      <div
+        class="todo-editor"
+        contenteditable="true"
+        role="textbox"
+        aria-multiline="true"
+        aria-label="Todo content"
+        data-todo-editor
+        data-placeholder="Paste or type a todo..."
+      ></div>
+      <input type="hidden" name="content_html" data-todo-html>
+      <input type="hidden" name="content_plain" data-todo-plain>
+      <div class="todo-compose-footer">
+        <p class="muted compact-note">Images are stored inside Nr3. Keep secrets out of screenshots.</p>
+        <button type="submit" data-todo-submit disabled>Add todo</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel" aria-label="Todo list">
+    <div class="panel-header">
+      <h2>Open list</h2>
+      <span class="status-chip status-neutral">{{ todos | length }} total</span>
+    </div>
+
+    {% if todos %}
+      <div class="todo-list">
+        {% for todo in todos %}
+          <article class="todo-card {% if todo.is_done %}is-done{% endif %}">
+            <div class="todo-card-main">
+              <div class="todo-content">
+                {{ todo.content_html | safe }}
+              </div>
+              <p class="todo-meta">
+                {% if todo.is_done %}Done{% else %}Open{% endif %}
+                · Updated {{ todo.updated_at }}
+              </p>
+            </div>
+            <div class="todo-actions">
+              <form method="post" action="/admin/todos/{{ todo.id }}/toggle">
+                <button type="submit" class="button-secondary">
+                  {% if todo.is_done %}Reopen{% else %}Done{% endif %}
+                </button>
+              </form>
+              <form method="post" action="/admin/todos/{{ todo.id }}/delete">
+                <button type="submit" class="button-secondary todo-delete">Delete</button>
+              </form>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="todo-empty">
+        <h3>No todos yet</h3>
+        <p class="muted">Paste the first thing you want to remember into the box above.</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

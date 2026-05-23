@@ -19,6 +19,7 @@ from app.onboarding import (
     list_leads,
     set_review_decision,
 )
+from app import todos as todo_store
 from app.security import (
     clear_session_cookie,
     create_session_value,
@@ -1142,6 +1143,63 @@ def admin_reviews(request: Request) -> Response:
     if redirect:
         return redirect
     return render_reviews(request)
+
+
+@router.get("/admin/todos", response_class=HTMLResponse)
+def admin_todos(request: Request) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(
+        request,
+        "admin_todos.html",
+        {
+            **_shell_context("todos"),
+            "todos": todo_store.list_todos(),
+            "todo_error": request.query_params.get("todo_error", ""),
+        },
+    )
+
+
+@router.post("/admin/todos", response_class=HTMLResponse)
+def admin_create_todo(
+    request: Request,
+    content_html: str = Form(default=""),
+    content_plain: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        todo_store.create_todo(content_html=content_html, content_plain=content_plain)
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/admin/todos?todo_error={quote_plus(str(exc))}",
+            status_code=303,
+        )
+    return RedirectResponse(url="/admin/todos", status_code=303)
+
+
+@router.post("/admin/todos/{todo_id}/toggle", response_class=HTMLResponse)
+def admin_toggle_todo(request: Request, todo_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    todo_store.toggle_todo(todo_id)
+    return RedirectResponse(url="/admin/todos", status_code=303)
+
+
+@router.post("/admin/todos/{todo_id}/delete", response_class=HTMLResponse)
+def admin_delete_todo(request: Request, todo_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    todo_store.delete_todo(todo_id)
+    return RedirectResponse(url="/admin/todos", status_code=303)
 
 
 @router.get("/admin/settings", response_class=HTMLResponse)
