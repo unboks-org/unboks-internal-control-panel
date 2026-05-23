@@ -67,6 +67,39 @@ def test_whatsapp_callback_marks_connection_connected(monkeypatch, tmp_path):
     assert connection.waba_id == "waba_1"
 
 
+def test_whatsapp_callback_accepts_zernio_connect_token_and_username(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    created = _connection_request("connect_token_123")
+
+    response = client.get(
+        "/internal/api/connect/whatsapp/callback",
+        params={
+            "connect_token": "connect_token_123",
+            "connected": "whatsapp",
+            "accountId": "account_1",
+            "profileId": "profile_lawyer",
+            "username": "+599 9 694 5527",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        "/connect/whatsapp/result?status=success&tenantId=lawyer"
+    )
+    stored = channel_connections.get_connection_request(created.id)
+    assert stored is not None
+    assert stored.status == "connected"
+    assert stored.zernio_account_id == "account_1"
+    assert stored.display_phone_number == "+599 9 694 5527"
+
+    connection = channel_connections.get_tenant_channel_connection("lawyer")
+    assert connection is not None
+    assert connection.status == "connected"
+    assert connection.zernio_account_id == "account_1"
+    assert connection.display_phone_number == "+599 9 694 5527"
+
+
 def test_whatsapp_callback_marks_pending_when_number_is_missing(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     created = _connection_request("state_pending")

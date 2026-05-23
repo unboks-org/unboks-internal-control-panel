@@ -53,6 +53,14 @@ ANTHROPIC_KEY_FILE = env_path(
     "NR3_PROVISION_ANTHROPIC_KEY_FILE",
     "/root/clients/_shared/anthropic_api_key",
 )
+LATE_API_KEY_FILE = env_path(
+    "NR3_PROVISION_LATE_API_KEY_FILE",
+    "/root/clients/_shared/late_api_key",
+)
+ZERNIO_WEBHOOK_SECRET_FILE = env_path(
+    "NR3_PROVISION_ZERNIO_WEBHOOK_SECRET_FILE",
+    "/root/clients/_shared/zernio_webhook_secret",
+)
 NGINX_BACKUP_DIR = env_path(
     "NR3_PROVISION_NGINX_BACKUP_DIR",
     "/root/nginx-sites-enabled-backups",
@@ -100,8 +108,12 @@ def read_bridge_token() -> str:
 
 
 def read_optional_anthropic_key() -> str:
+    return read_optional_secret(ANTHROPIC_KEY_FILE)
+
+
+def read_optional_secret(path: Path) -> str:
     try:
-        token = ANTHROPIC_KEY_FILE.read_text(encoding="utf-8").strip()
+        token = path.read_text(encoding="utf-8").strip()
     except OSError:
         return ""
     return token
@@ -121,6 +133,12 @@ def platform_env_text(slug: str, password: str, created_at: str, token: str) -> 
     anthropic_key = read_optional_anthropic_key()
     if anthropic_key:
         text += f"ANTHROPIC_API_KEY={anthropic_key}\n"
+    late_api_key = read_optional_secret(LATE_API_KEY_FILE)
+    if late_api_key:
+        text += f"LATE_API_KEY={late_api_key}\n"
+    zernio_webhook_secret = read_optional_secret(ZERNIO_WEBHOOK_SECRET_FILE)
+    if zernio_webhook_secret:
+        text += f"ZERNIO_WEBHOOK_SECRET={zernio_webhook_secret}\n"
     return text
 
 

@@ -22,6 +22,8 @@ class Settings:
     zernio_api_base_url: str
     unboks_public_url: str
     unboks_admin_api_url: str
+    zernio_webhook_secret: Optional[str] = field(default=None, repr=False)
+    late_api_key: Optional[str] = field(default=None, repr=False)
 
 
 def get_settings() -> Settings:
@@ -50,6 +52,8 @@ def get_settings() -> Settings:
         not in {"0", "false", "no", "off"},
         internal_api_token=_clean_env("NR3_INTERNAL_API_TOKEN"),
         zernio_api_key=_clean_env("ZERNIO_API_KEY"),
+        zernio_webhook_secret=_clean_env("ZERNIO_WEBHOOK_SECRET"),
+        late_api_key=_clean_env("LATE_API_KEY") or _clean_env("ZERNIO_API_KEY"),
         zernio_api_base_url=os.getenv(
             "ZERNIO_API_BASE_URL",
             "https://zernio.com/api/v1",
@@ -60,7 +64,7 @@ def get_settings() -> Settings:
         ).strip().rstrip("/"),
         unboks_admin_api_url=os.getenv(
             "UNBOKS_ADMIN_API_URL",
-            "https://api.wetakeyourjob.com/internal/api",
+            "https://icp.unboks.org/internal/api",
         ).strip().rstrip("/"),
     )
 

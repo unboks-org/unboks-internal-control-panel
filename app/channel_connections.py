@@ -479,6 +479,29 @@ def get_tenant_channel_connection(
     return row_to_tenant_channel_connection(row) if row is not None else None
 
 
+def get_tenant_channel_connection_by_account_id(
+    zernio_account_id: str,
+    *,
+    channel: str = "whatsapp",
+    provider: str = "zernio",
+) -> TenantChannelConnection | None:
+    account_id = (zernio_account_id or "").strip()
+    if not account_id:
+        return None
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM tenant_channel_connections
+            WHERE zernio_account_id = ? AND channel = ? AND provider = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (account_id, channel, provider),
+        ).fetchone()
+    return row_to_tenant_channel_connection(row) if row is not None else None
+
+
 def set_tenant_zernio_profile_id(
     *,
     tenant_id: str,

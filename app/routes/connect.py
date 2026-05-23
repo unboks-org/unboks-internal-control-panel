@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import logging
 import hmac
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+import httpx
+
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -19,12 +22,18 @@ from app.emailer import (
     smtp_is_configured,
 )
 from app.security import is_authenticated
-from app.tenants import get_tenant, get_tenant_client_data, tenant_contact_details
+from app.tenants import (
+    get_tenant,
+    get_tenant_client_data,
+    list_tenants,
+    tenant_contact_details,
+)
 from app.zernio import (
     ZernioAccountSummary,
     ZernioAPIError,
     ZernioNotConfigured,
     ZernioService,
+    build_whatsapp_callback_url,
 )
 
 
@@ -45,6 +54,7 @@ PENDING_NUMBER_STATUSES = {
 }
 SAFE_CALLBACK_KEYS = {
     "state",
+    "connected",
     "status",
     "connection_status",
     "accountId",
@@ -59,6 +69,7 @@ SAFE_CALLBACK_KEYS = {
     "selected_phone_number_id",
     "displayPhoneNumber",
     "display_phone_number",
+    "username",
     "wabaId",
     "waba_id",
     "platform",
@@ -80,8 +91,7 @@ def _require_operator_json(request: Request) -> None:
 
 
 def _whatsapp_callback_url() -> str:
-    settings = get_settings()
-    return f"{settings.unboks_admin_api_url}/connect/whatsapp/callback"
+    return build_whatsapp_callback_url(get_settings())
 
 
 def _result_redirect(status: str, *, tenant_id: str | None = None) -> RedirectResponse:
@@ -150,6 +160,96 @@ def _safe_phone_option(account: ZernioAccountSummary) -> dict[str, object]:
         "isActive": account.is_active,
         "platformStatus": account.platform_status,
     }
+
+
+def _account_is_connected(account: ZernioAccountSummary) -> bool:
+    return (
+        bool(account.id)
+        and account.platform.lower() == "whatsapp"
+        and account.enabled
+        and account.is_active
+        and (account.platform_status or "").lower() in {"", "active"}
+    )
+
+
+def _display_phone(account: ZernioAccountSummary) -> str | None:
+    return account.display_phone_number or account.username
+
+
+def _upsert_connected_account(
+    tenant_id: str,
+    account: ZernioAccountSummary,
+    *,
+    request_id: str | None = None,
+    callback_payload: dict[str, str] | None = None,
+) -> channel_connections.TenantChannelConnection:
+    metadata: dict[str, object] = {
+        "zernio": {
+            "displayName": account.display_name,
+            "username": account.username,
+            "platformStatus": account.platform_status,
+            "enabled": account.enabled,
+            "isActive": account.is_active,
+        }
+    }
+    if callback_payload:
+        metadata["callback"] = callback_payload
+    return channel_connections.upsert_tenant_channel_connection(
+        tenant_id=tenant_id,
+        status="connected",
+        zernio_profile_id=account.profile_id,
+        zernio_account_id=account.id,
+        phone_number_id=account.phone_number_id,
+        display_phone_number=_display_phone(account),
+        waba_id=account.waba_id,
+        metadata=metadata,
+        last_request_id=request_id,
+        last_error=None,
+    )
+
+
+def _sync_whatsapp_connection_from_zernio(
+    tenant_id: str,
+) -> channel_connections.TenantChannelConnection | None:
+    """Reconcile Nr3 state from Zernio when the browser callback was missed."""
+    zernio_profile_id = _tenant_zernio_profile_id(tenant_id)
+    if not zernio_profile_id:
+        return None
+    try:
+        accounts = ZernioService().list_accounts(platform="whatsapp")
+    except (ZernioNotConfigured, ZernioAPIError):
+        return None
+    for account in accounts:
+        if account.profile_id == zernio_profile_id and _account_is_connected(account):
+            latest = channel_connections.get_latest_connection_request_for_tenant(
+                tenant_id
+            )
+            if latest and latest.status not in {
+                "connected",
+                "failed",
+                "expired",
+                "cancelled",
+            }:
+                channel_connections.update_connection_request(
+                    latest.id,
+                    status="connected",
+                    zernio_account_id=account.id,
+                    selected_phone_number_id=account.phone_number_id,
+                    display_phone_number=_display_phone(account),
+                    callback_payload={
+                        "source": "zernio_status_reconcile",
+                        "accountId": account.id,
+                        "profileId": account.profile_id or "",
+                        "displayPhoneNumber": _display_phone(account) or "",
+                    },
+                    error_summary=None,
+                )
+            return _upsert_connected_account(
+                tenant_id,
+                account,
+                request_id=latest.id if latest else None,
+            )
+    return None
 
 
 def _tenant_zernio_profile_id(tenant_id: str) -> str | None:
@@ -310,6 +410,8 @@ def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
         raise HTTPException(status_code=404, detail="Tenant not found.")
 
     connection = channel_connections.get_tenant_channel_connection(tenant.id)
+    if connection is None or connection.status in {"pending", "not_connected"}:
+        connection = _sync_whatsapp_connection_from_zernio(tenant.id) or connection
     if connection is None:
         zernio_profile_id = channel_connections.get_tenant_zernio_profile_id(
             tenant.id
@@ -570,7 +672,7 @@ def whatsapp_connection_callback(request: Request):
     This endpoint is intentionally unauthenticated because the browser returns
     here from Meta/Zernio. The random callback state is the trust anchor.
     """
-    state_token = _first_query_value(request, "state")
+    state_token = _first_query_value(request, "state", "connect_token")
     if not state_token:
         logger.warning("whatsapp_connect_callback_missing_state")
         return _result_redirect("failed")
@@ -664,14 +766,29 @@ def whatsapp_connection_callback(request: Request):
         request,
         "displayPhoneNumber",
         "display_phone_number",
+        "username",
     )
     waba_id = _first_query_value(request, "wabaId", "waba_id")
+
+    zernio_account: ZernioAccountSummary | None = None
+    if zernio_account_id:
+        try:
+            zernio_account = ZernioService().get_account(zernio_account_id)
+        except (AttributeError, ZernioNotConfigured, ZernioAPIError) as exc:
+            logger.warning(
+                "whatsapp_connect_callback_account_lookup_failed tenant=%s account=%s error=%s",
+                tenant_id,
+                zernio_account_id[:20],
+                str(exc)[:200],
+            )
+    if zernio_account is not None:
+        phone_number_id = phone_number_id or zernio_account.phone_number_id
+        display_phone_number = display_phone_number or _display_phone(zernio_account)
+        waba_id = waba_id or zernio_account.waba_id
 
     if (
         status in PENDING_NUMBER_STATUSES
         or not zernio_account_id
-        or not phone_number_id
-        or not display_phone_number
     ):
         channel_connections.update_connection_request(
             connection_request.id,
@@ -720,18 +837,26 @@ def whatsapp_connection_callback(request: Request):
         callback_payload=callback_payload,
         error_summary=None,
     )
-    channel_connections.upsert_tenant_channel_connection(
-        tenant_id=tenant_id,
-        status="connected",
-        zernio_profile_id=connection_request.zernio_profile_id,
-        zernio_account_id=zernio_account_id,
-        phone_number_id=phone_number_id,
-        display_phone_number=display_phone_number,
-        waba_id=waba_id,
-        metadata={"callback": callback_payload},
-        last_request_id=connection_request.id,
-        last_error=None,
-    )
+    if zernio_account is not None:
+        _upsert_connected_account(
+            tenant_id,
+            zernio_account,
+            request_id=connection_request.id,
+            callback_payload=callback_payload,
+        )
+    else:
+        channel_connections.upsert_tenant_channel_connection(
+            tenant_id=tenant_id,
+            status="connected",
+            zernio_profile_id=connection_request.zernio_profile_id,
+            zernio_account_id=zernio_account_id,
+            phone_number_id=phone_number_id,
+            display_phone_number=display_phone_number,
+            waba_id=waba_id,
+            metadata={"callback": callback_payload},
+            last_request_id=connection_request.id,
+            last_error=None,
+        )
     logger.info(
         "whatsapp_connect_callback_connected tenant=%s request_id=%s",
         tenant_id,
@@ -749,6 +874,115 @@ def whatsapp_connection_callback(request: Request):
         },
     )
     return _result_redirect("success", tenant_id=tenant_id)
+
+
+def _zernio_payload_account_id(payload: dict) -> str:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        data = {}
+    account_id = (
+        data.get("accountId")
+        or data.get("account_id")
+        or payload.get("accountId")
+        or payload.get("account_id")
+    )
+    if account_id:
+        return str(account_id).strip()
+    account = payload.get("account")
+    if isinstance(account, dict):
+        return str(account.get("id") or account.get("_id") or "").strip()
+    return ""
+
+
+def _tenant_id_for_zernio_account(account_id: str) -> str | None:
+    connection = channel_connections.get_tenant_channel_connection_by_account_id(
+        account_id
+    )
+    if connection:
+        return connection.tenant_id
+    for tenant in list_tenants():
+        allowlist = (
+            get_tenant_client_data(tenant.id).get("channel_account_allowlist") or {}
+        )
+        if not isinstance(allowlist, dict):
+            continue
+        allowed = allowlist.get("zernio_accounts") or []
+        if account_id in {str(item) for item in allowed}:
+            return tenant.id
+    return None
+
+
+async def _forward_zernio_webhook_to_tenant(
+    *,
+    tenant_id: str,
+    body: bytes,
+    signature: str,
+    content_type: str,
+) -> tuple[int, str]:
+    url = f"http://wtyj-{tenant_id}:8001/webhooks/zernio"
+    headers = {"Content-Type": content_type or "application/json"}
+    if signature:
+        headers["X-Zernio-Signature"] = signature
+    async with httpx.AsyncClient(timeout=12) as client:
+        response = await client.post(url, content=body, headers=headers)
+    return response.status_code, response.text[:500]
+
+
+@router.post("/zernio/webhook-router")
+async def zernio_webhook_router(request: Request) -> PlainTextResponse:
+    """Route the single Zernio webhook stream to the owning tenant container."""
+    body = await request.body()
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        logger.warning("zernio_webhook_router_bad_json")
+        return PlainTextResponse("OK", status_code=202)
+    if not isinstance(payload, dict):
+        logger.warning("zernio_webhook_router_bad_payload")
+        return PlainTextResponse("OK", status_code=202)
+
+    account_id = _zernio_payload_account_id(payload)
+    tenant_id = _tenant_id_for_zernio_account(account_id)
+    if not tenant_id:
+        logger.warning(
+            "zernio_webhook_router_unmapped_account account=%s event=%s",
+            account_id[:24],
+            str(payload.get("event") or "")[:80],
+        )
+        return PlainTextResponse("OK", status_code=202)
+
+    try:
+        status_code, response_text = await _forward_zernio_webhook_to_tenant(
+            tenant_id=tenant_id,
+            body=body,
+            signature=request.headers.get("X-Zernio-Signature", ""),
+            content_type=request.headers.get("Content-Type", "application/json"),
+        )
+    except Exception as exc:
+        logger.warning(
+            "zernio_webhook_router_forward_failed tenant=%s account=%s error=%s",
+            tenant_id,
+            account_id[:24],
+            str(exc)[:200],
+        )
+        return PlainTextResponse("Forward failed", status_code=502)
+
+    if status_code >= 400:
+        logger.warning(
+            "zernio_webhook_router_tenant_rejected tenant=%s account=%s status=%s body=%s",
+            tenant_id,
+            account_id[:24],
+            status_code,
+            response_text[:200],
+        )
+        return PlainTextResponse("Tenant rejected webhook", status_code=status_code)
+    logger.info(
+        "zernio_webhook_router_forwarded tenant=%s account=%s event=%s",
+        tenant_id,
+        account_id[:24],
+        str(payload.get("event") or "")[:80],
+    )
+    return PlainTextResponse("OK", status_code=200)
 
 
 @public_router.get("/connect/whatsapp/result", response_class=HTMLResponse)

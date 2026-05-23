@@ -23,7 +23,7 @@ def test_zernio_settings_defaults_and_secret_repr(monkeypatch):
     assert settings.zernio_api_key is None
     assert settings.zernio_api_base_url == "https://zernio.com/api/v1"
     assert settings.unboks_public_url == "https://unboks.org"
-    assert settings.unboks_admin_api_url == "https://api.wetakeyourjob.com/internal/api"
+    assert settings.unboks_admin_api_url == "https://icp.unboks.org/internal/api"
     assert "zernio_api_key" not in repr(settings)
 
 
@@ -32,8 +32,10 @@ def test_zernio_env_example_documents_required_vars():
 
     assert "ZERNIO_API_KEY=" in env_example
     assert "ZERNIO_API_BASE_URL=https://zernio.com/api/v1" in env_example
+    assert "ZERNIO_WEBHOOK_SECRET=" in env_example
+    assert "LATE_API_KEY=" in env_example
     assert "UNBOKS_PUBLIC_URL=https://unboks.org" in env_example
-    assert "UNBOKS_ADMIN_API_URL=https://api.wetakeyourjob.com/internal/api" in env_example
+    assert "UNBOKS_ADMIN_API_URL=https://icp.unboks.org/internal/api" in env_example
 
 
 def test_zernio_service_fails_closed_without_key(monkeypatch):
@@ -189,9 +191,9 @@ def test_zernio_service_raises_safe_api_error(monkeypatch):
 
 
 def test_build_whatsapp_callback_url(monkeypatch):
-    monkeypatch.setenv("UNBOKS_PUBLIC_URL", "https://unboks.org/")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org/")
 
     assert (
         build_whatsapp_callback_url(get_settings())
-        == "https://unboks.org/internal/api/connect/whatsapp/callback"
+        == "https://icp.unboks.org/internal/api/connect/whatsapp/callback"
     )

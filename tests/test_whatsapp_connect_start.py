@@ -22,8 +22,8 @@ def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
     monkeypatch.setenv(
-        "UNBOKS_ADMIN_API_URL",
-        "https://api.unboks.org/internal/api",
+        "NR3_BASE_URL",
+        "https://icp.unboks.org",
     )
     return TestClient(app)
 
@@ -122,7 +122,7 @@ def test_whatsapp_connect_start_creates_profile_and_stores_request(
     assert calls["connect"] == {
         "platform": "whatsapp",
         "profile_id": "profile_lawyer",
-        "redirect_url": "https://api.unboks.org/internal/api/connect/whatsapp/callback",
+        "redirect_url": "https://icp.unboks.org/internal/api/connect/whatsapp/callback",
         "headless": False,
     }
 

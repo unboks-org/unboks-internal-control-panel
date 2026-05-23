@@ -25,8 +25,8 @@ def test_whatsapp_authorization_flow_end_to_end_mocked(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tenants_root))
     monkeypatch.setenv("ZERNIO_API_KEY", "secret-zernio-key")
     monkeypatch.setenv(
-        "UNBOKS_ADMIN_API_URL",
-        "https://api.unboks.org/internal/api",
+        "NR3_BASE_URL",
+        "https://icp.unboks.org",
     )
 
     class FakeZernioService:
@@ -37,7 +37,7 @@ def test_whatsapp_authorization_flow_end_to_end_mocked(monkeypatch, tmp_path):
             assert platform == "whatsapp"
             assert profile_id == "profile_lawyer"
             assert redirect_url == (
-                "https://api.unboks.org/internal/api/connect/whatsapp/callback"
+                "https://icp.unboks.org/internal/api/connect/whatsapp/callback"
             )
             return ZernioConnectUrl(
                 auth_url="https://facebook.com/connect/lawyer",

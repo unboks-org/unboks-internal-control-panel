@@ -204,7 +204,7 @@ class ZernioService:
 
 def build_whatsapp_callback_url(settings: Settings | None = None) -> str:
     resolved = settings or get_settings()
-    return f"{resolved.unboks_public_url}/internal/api/connect/whatsapp/callback"
+    return f"{resolved.base_url}/internal/api/connect/whatsapp/callback"
 
 
 def summarize_account(account: dict[str, Any]) -> ZernioAccountSummary:
