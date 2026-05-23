@@ -394,16 +394,16 @@
                   <li>
                     <strong>{{ block.title }}</strong>
                     {% if block.content %}<p>{{ block.content }}</p>{% endif %}
-                    {% if block.items %}
+                    {% if block["items"] %}
                       <ul class="nr2-mini-list">
-                        {% for item in block.items %}
+                        {% for item in block["items"] %}
                           <li>{{ item }}</li>
                         {% endfor %}
                       </ul>
                     {% endif %}
-                    {% if block.subsections %}
+                    {% if block["subsections"] %}
                       <ul class="nr2-mini-list">
-                        {% for sub in block.subsections %}
+                        {% for sub in block["subsections"] %}
                           <li><strong>{{ sub.title }}</strong>{% if sub.content %}: {{ sub.content }}{% endif %}</li>
                         {% endfor %}
                       </ul>

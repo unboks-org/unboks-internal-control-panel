@@ -1,5 +1,8 @@
 import httpx
+from fastapi.testclient import TestClient
 
+from app.main import app
+from app.nr2_sync import Nr2KnowledgeSync
 from app.nr2_sync import fetch_nr2_knowledge
 
 
@@ -120,3 +123,38 @@ def test_nr2_sync_handles_optional_missing_endpoint_as_partial(monkeypatch):
 
     assert sync.status == "partial"
     assert "/knowledge/media missing" in sync.error
+
+
+def test_workspace_renders_synced_sot_items_without_jinja_dict_collision(monkeypatch, tmp_path):
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
+    monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
+    monkeypatch.setenv("NR3_CHANNEL_STATE_PATH", str(tmp_path / "channels.json"))
+    monkeypatch.setenv("NR3_ICP_STATE_PATH", str(tmp_path / "icp.json"))
+    (tmp_path / "tenants").mkdir()
+    monkeypatch.setattr(
+        "app.routes.admin.fetch_nr2_knowledge",
+        lambda tenant_id: Nr2KnowledgeSync(
+            status="ok",
+            source_url="https://api.unboks.org/api/test/dashboard/api",
+            sot_blocks=(
+                {
+                    "title": "Listings",
+                    "content": "Real estate inventory.",
+                    "items": ("Oceanview Apartment", "Blue Bay Villa"),
+                    "subsections": (
+                        {"title": "Rules", "content": "Ask discovery questions first."},
+                    ),
+                },
+            ),
+        ),
+    )
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    response = client.get("/admin/tenants/unboks")
+
+    assert response.status_code == 200
+    assert "Nr2 company knowledge" in response.text
+    assert "Oceanview Apartment" in response.text
+    assert "Ask discovery questions first." in response.text
