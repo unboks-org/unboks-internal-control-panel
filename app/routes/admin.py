@@ -36,6 +36,7 @@ from app.tenants import (
     TenantCreateError,
     derive_slug_from_name,
     get_tenant,
+    get_tenant_client_data,
     list_tenants,
     register_tenant,
     sorted_notes,
@@ -112,7 +113,7 @@ def _tenant_whatsapp_statuses(tenants: tuple[Tenant, ...]) -> dict[str, dict]:
         ):
             statuses[tenant.id] = {
                 "status": "pending",
-                "label": "Pending",
+                "label": "Awaiting activation",
                 "badge_class": "tenant-wa-pending",
                 "chip_class": "status-warn",
                 "visible": True,
@@ -121,6 +122,15 @@ def _tenant_whatsapp_statuses(tenants: tuple[Tenant, ...]) -> dict[str, dict]:
                     if connection and connection.display_phone_number
                     else ""
                 ),
+            }
+        elif get_tenant_client_data(tenant.id).get("whatsapp_connect_token"):
+            statuses[tenant.id] = {
+                "status": "awaiting_activation",
+                "label": "Awaiting activation",
+                "badge_class": "tenant-wa-pending",
+                "chip_class": "status-warn",
+                "visible": True,
+                "phone": "",
             }
         elif connection and connection.status == "failed":
             statuses[tenant.id] = {

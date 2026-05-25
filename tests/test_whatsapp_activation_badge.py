@@ -63,7 +63,28 @@ def test_sidebar_shows_pending_when_link_generated(client):
     response = client.get("/admin/tenants/lawyer")
 
     assert response.status_code == 200
-    assert "WhatsApp: Pending" in response.text
+    assert "WhatsApp: Awaiting activation" in response.text
+    assert "tenant-wa-pending" in response.text
+    assert "data-wa-connected-toast" not in response.text
+
+
+def test_sidebar_shows_awaiting_activation_for_tenant_connect_token(client, tmp_path):
+    config_dir = tmp_path / "tenants" / "clinica-roberto" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "client.json").write_text(
+        json.dumps({
+            "slug": "clinica-roberto",
+            "name": "Clinica Roberto",
+            "status": "active",
+            "whatsapp_connect_token": "token-for-client-start",
+        }),
+        encoding="utf-8",
+    )
+
+    response = client.get("/admin/tenants/clinica-roberto")
+
+    assert response.status_code == 200
+    assert "WhatsApp: Awaiting activation" in response.text
     assert "tenant-wa-pending" in response.text
     assert "data-wa-connected-toast" not in response.text
 
