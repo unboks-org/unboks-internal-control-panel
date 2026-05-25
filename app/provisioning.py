@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.file_lock import exclusive_file_lock
+
 
 @dataclass(frozen=True)
 class AutoProvisionResult:
@@ -47,6 +49,53 @@ def _timeout_seconds() -> float:
     return max(0.0, min(value, 180.0))
 
 
+def _job_slug(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("slug") or "").strip()
+
+
+def _job_action(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("action") or "").strip()
+
+
+def _job_id(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return path.stem
+    if not isinstance(data, dict):
+        return path.stem
+    return str(data.get("job_id") or path.stem)
+
+
+def _active_job_for_slug(jobs_dir: Path, slug: str, *, action: str = "") -> tuple[str, str] | None:
+    for pattern in ("*.json", "*.processing"):
+        for path in sorted(jobs_dir.glob(pattern)):
+            if path.name.startswith("."):
+                continue
+            if _job_slug(path) != slug:
+                continue
+            if action and _job_action(path) != action:
+                continue
+            return _job_id(path), path.name
+    return None
+
+
+def _provision_lock_path(jobs_dir: Path, slug: str) -> Path:
+    return jobs_dir.parent / "locks" / f"{slug}.lock"
+
+
 def auto_provision_tenant(
     *,
     slug: str,
@@ -74,24 +123,34 @@ def auto_provision_tenant(
     jobs_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    job_id = f"{stamp}-{slug}-{secrets.token_hex(4)}"
-    result_path = results_dir / f"{job_id}.json"
-    job_path = jobs_dir / f"{job_id}.json"
-    tmp_path = jobs_dir / f".{job_id}.tmp"
+    with exclusive_file_lock(_provision_lock_path(jobs_dir, slug)):
+        active = _active_job_for_slug(jobs_dir, slug)
+        if active is not None:
+            existing_job_id, filename = active
+            return AutoProvisionResult(
+                status="queued",
+                message=f"Provisioning is already active for tenant {slug} ({filename}).",
+                job_id=existing_job_id,
+                dashboard_url=dashboard_url,
+            )
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        job_id = f"{stamp}-{slug}-{secrets.token_hex(4)}"
+        result_path = results_dir / f"{job_id}.json"
+        job_path = jobs_dir / f"{job_id}.json"
+        tmp_path = jobs_dir / f".{job_id}.tmp"
 
-    payload = {
-        "job_id": job_id,
-        "requested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "slug": slug,
-        "host_port": host_port,
-        "client_data": client_data,
-        "docker_compose_text": docker_compose_text,
-        "managed_nginx_block_text": managed_nginx_block_text,
-        "dashboard_url": dashboard_url,
-    }
-    tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp_path, job_path)
+        payload = {
+            "job_id": job_id,
+            "requested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "slug": slug,
+            "host_port": host_port,
+            "client_data": client_data,
+            "docker_compose_text": docker_compose_text,
+            "managed_nginx_block_text": managed_nginx_block_text,
+            "dashboard_url": dashboard_url,
+        }
+        tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp_path, job_path)
 
     timeout = _timeout_seconds()
     if timeout <= 0:
@@ -166,26 +225,36 @@ def queue_tenant_host_action(
     results_dir = _path_env("NR3_PROVISION_RESULT_DIR", "data/provisioning/results")
     jobs_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    job_id = f"{stamp}-{slug}-{action}-{secrets.token_hex(4)}"
-    job_path = jobs_dir / f"{job_id}.json"
-    tmp_path = jobs_dir / f".{job_id}.tmp"
-    result_path = results_dir / f"{job_id}.json"
+    with exclusive_file_lock(_provision_lock_path(jobs_dir, f"{slug}-{action}")):
+        active = _active_job_for_slug(jobs_dir, slug, action=action)
+        if active is not None:
+            existing_job_id, filename = active
+            return AutoProvisionResult(
+                status="queued",
+                message=f"Host action {action} is already active for tenant {slug} ({filename}).",
+                job_id=existing_job_id,
+                dashboard_url=dashboard_url,
+            )
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        job_id = f"{stamp}-{slug}-{action}-{secrets.token_hex(4)}"
+        job_path = jobs_dir / f"{job_id}.json"
+        tmp_path = jobs_dir / f".{job_id}.tmp"
+        result_path = results_dir / f"{job_id}.json"
 
-    payload = {
-        "job_id": job_id,
-        "job_type": "tenant_action",
-        "action": action,
-        "requested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "slug": slug,
-        "dashboard_url": dashboard_url,
-    }
-    if typed_slug:
-        payload["typed_slug"] = typed_slug
-    if final_confirmation:
-        payload["final_confirmation"] = final_confirmation
-    tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp_path, job_path)
+        payload = {
+            "job_id": job_id,
+            "job_type": "tenant_action",
+            "action": action,
+            "requested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "slug": slug,
+            "dashboard_url": dashboard_url,
+        }
+        if typed_slug:
+            payload["typed_slug"] = typed_slug
+        if final_confirmation:
+            payload["final_confirmation"] = final_confirmation
+        tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp_path, job_path)
 
     timeout = _timeout_seconds()
     if timeout <= 0:

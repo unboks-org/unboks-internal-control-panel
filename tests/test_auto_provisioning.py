@@ -52,6 +52,35 @@ def test_auto_provision_writes_queue_job_without_waiting(monkeypatch, tmp_path):
     assert payload["dashboard_url"] == "https://dashboard.unboks.org/acme"
 
 
+def test_auto_provision_does_not_duplicate_active_slug_job(monkeypatch, tmp_path):
+    jobs = tmp_path / "jobs"
+    results = tmp_path / "results"
+    jobs.mkdir(parents=True)
+    existing = jobs / "existing.json"
+    existing.write_text(
+        json.dumps({"job_id": "existing-job", "slug": "acme"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
+    monkeypatch.setenv("NR3_PROVISION_QUEUE_DIR", str(jobs))
+    monkeypatch.setenv("NR3_PROVISION_RESULT_DIR", str(results))
+    monkeypatch.setenv("NR3_PROVISION_TIMEOUT_SECONDS", "0")
+
+    result = auto_provision_tenant(
+        slug="acme",
+        host_port=8123,
+        client_data={"slug": "acme", "password": "temporary-password"},
+        docker_compose_text="container_name: wtyj-acme\n",
+        managed_nginx_block_text="# BEGIN UNBOKS TENANT acme\nlocation ^~ /api/acme/ {}",
+        dashboard_url="https://dashboard.unboks.org/acme",
+    )
+
+    assert result.status == "queued"
+    assert result.job_id == "existing-job"
+    assert "already active" in result.message
+    assert len(list(jobs.glob("*.json"))) == 1
+
+
 def test_host_action_queue_writes_suspend_job(monkeypatch, tmp_path):
     jobs = tmp_path / "jobs"
     results = tmp_path / "results"
@@ -99,6 +128,37 @@ def test_host_action_queue_writes_delete_job(monkeypatch, tmp_path):
     assert payload["slug"] == "acme"
     assert payload["typed_slug"] == "acme"
     assert payload["final_confirmation"] == "DELETE FOREVER"
+
+
+def test_host_action_queue_does_not_duplicate_same_active_action(monkeypatch, tmp_path):
+    jobs = tmp_path / "jobs"
+    results = tmp_path / "results"
+    jobs.mkdir(parents=True)
+    (jobs / "existing.processing").write_text(
+        json.dumps({
+            "job_id": "existing-delete",
+            "job_type": "tenant_action",
+            "action": "delete_tenant",
+            "slug": "acme",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
+    monkeypatch.setenv("NR3_PROVISION_QUEUE_DIR", str(jobs))
+    monkeypatch.setenv("NR3_PROVISION_RESULT_DIR", str(results))
+    monkeypatch.setenv("NR3_PROVISION_TIMEOUT_SECONDS", "0")
+
+    result = queue_tenant_host_action(
+        slug="acme",
+        action="delete_tenant",
+        typed_slug="acme",
+        final_confirmation="DELETE FOREVER",
+    )
+
+    assert result.status == "queued"
+    assert result.job_id == "existing-delete"
+    assert "already active" in result.message
+    assert len(list(jobs.glob("*.json"))) == 0
 
 
 def test_host_worker_keeps_nginx_backups_outside_sites_enabled():

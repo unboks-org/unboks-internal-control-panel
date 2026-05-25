@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 
@@ -238,23 +239,24 @@ def register_tenant(client_data: dict) -> None:
     path = _registry_path()
     if not path:
         return
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        data = {"tenants": {}}
-    if not isinstance(data, dict):
-        data = {"tenants": {}}
-    tenants = data.setdefault("tenants", {})
-    if not isinstance(tenants, dict):
-        tenants = {}
-        data["tenants"] = tenants
-    tenants[tenant.id] = {
-        "slug": tenant.id,
-        "name": tenant.name,
-        "status": tenant.status,
-    }
-    _save_registry(data)
+    with exclusive_file_lock(Path(path).with_suffix(Path(path).suffix + ".lock")):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            data = {"tenants": {}}
+        if not isinstance(data, dict):
+            data = {"tenants": {}}
+        tenants = data.setdefault("tenants", {})
+        if not isinstance(tenants, dict):
+            tenants = {}
+            data["tenants"] = tenants
+        tenants[tenant.id] = {
+            "slug": tenant.id,
+            "name": tenant.name,
+            "status": tenant.status,
+        }
+        _save_registry(data)
 
 
 def unregister_tenant(slug: str) -> bool:
@@ -273,21 +275,22 @@ def unregister_tenant(slug: str) -> bool:
     path = _registry_path()
     if not path:
         return False
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        return False
-    if not isinstance(data, dict):
-        return False
-    tenants = data.get("tenants")
-    if not isinstance(tenants, dict) or slug not in tenants:
-        return False
-    tenants.pop(slug, None)
-    try:
-        _save_registry(data)
-    except OSError:
-        return False
+    with exclusive_file_lock(Path(path).with_suffix(Path(path).suffix + ".lock")):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        tenants = data.get("tenants")
+        if not isinstance(tenants, dict) or slug not in tenants:
+            return False
+        tenants.pop(slug, None)
+        try:
+            _save_registry(data)
+        except OSError:
+            return False
     return True
 
 
@@ -513,3 +516,4 @@ def delete_tenant_directory(slug: str,
     # state. Each call is best-effort: the on-disk delete already
     # succeeded and a single ghost JSON row must not raise.
     forget_tenant_state(safe_slug)
+from app.file_lock import exclusive_file_lock

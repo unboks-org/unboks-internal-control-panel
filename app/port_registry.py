@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from app.file_lock import exclusive_file_lock
+
 
 DEFAULT_START = 8100
 DEFAULT_END = 8999
@@ -74,17 +76,18 @@ def reserve_tenant_port(slug: str) -> int:
         raise PortRegistryError("Tenant slug is required for port allocation.")
 
     path = _registry_path()
-    registry = _load(path)
-    if clean_slug in registry:
-        return registry[clean_slug]
+    with exclusive_file_lock(path.with_suffix(path.suffix + ".lock")):
+        registry = _load(path)
+        if clean_slug in registry:
+            return registry[clean_slug]
 
-    start, end = _port_range()
-    used = {port for port in registry.values() if start <= port <= end}
-    for port in range(start, end + 1):
-        if port not in used:
-            registry[clean_slug] = port
-            _write(path, registry)
-            return port
+        start, end = _port_range()
+        used = {port for port in registry.values() if start <= port <= end}
+        for port in range(start, end + 1):
+            if port not in used:
+                registry[clean_slug] = port
+                _write(path, registry)
+                return port
 
     raise PortRegistryError(
         f"No free tenant host ports left in configured range {start}-{end}."
@@ -96,11 +99,12 @@ def release_tenant_port(slug: str) -> bool:
     if not clean_slug:
         return False
     path = _registry_path()
-    registry = _load(path)
-    if clean_slug not in registry:
-        return False
-    del registry[clean_slug]
-    _write(path, registry)
+    with exclusive_file_lock(path.with_suffix(path.suffix + ".lock")):
+        registry = _load(path)
+        if clean_slug not in registry:
+            return False
+        del registry[clean_slug]
+        _write(path, registry)
     return True
 
 
