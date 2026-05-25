@@ -56,7 +56,7 @@ def test_removed_agent_controls_do_not_write_bridge_overrides(client, tmp_path):
             follow_redirects=False,
         )
         assert response.status_code == 303
-        assert "not+wired" in response.headers["location"]
+        assert "Unknown+AI+Agent+control" in response.headers["location"]
 
     bridge_path = tmp_path / "ov.json"
     if bridge_path.exists():

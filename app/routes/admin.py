@@ -283,7 +283,7 @@ def admin_toggle_agent_feature(
         return _workspace_redirect(
             tenant_id,
             "agent-section",
-            message="That AI Agent control is not wired yet.",
+            message="Unknown AI Agent control.",
             level="warn",
         )
     from app import icp_overrides

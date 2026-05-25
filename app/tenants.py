@@ -63,11 +63,11 @@ NOTE_PRIORITIES: tuple[tuple[str, str], ...] = (
 class TenantNote:
     id: str
     body: str
-    author: str = "—"           # placeholder
-    created_at: str = "—"       # placeholder
+    author: str = "—"
+    created_at: str = "—"
     priority: str = "normal"    # normal | important | critical
     pinned: bool = False
-    follow_up_date: Optional[str] = None  # placeholder
+    follow_up_date: Optional[str] = None
     follow_up_done: bool = False
 
 
@@ -127,9 +127,8 @@ def _tenant_from_source(source: dict, fallback_id: str) -> Optional[Tenant]:
 def _load_tenants_from_disk(client_dir: str) -> tuple[Tenant, ...]:
     """J3-BE-01: discover tenants by globbing {client_dir}/*/config/client.json.
 
-    Mapping (only id/name/status are pulled from disk for now; all other
-    Tenant fields keep their placeholder defaults until subsequent J3 briefs
-    wire them up):
+    Mapping (only id/name/status are pulled from disk; workspace-specific
+    details are loaded from their dedicated stores later in the request):
       tenant.id     = business.slug, fallback to the parent directory name
       tenant.name   = business.name, fallback to tenant.id
       tenant.status = 'active' or 'inactive'
