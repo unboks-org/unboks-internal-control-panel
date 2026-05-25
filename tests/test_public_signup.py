@@ -10,6 +10,7 @@ def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
     monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
     monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(tmp_path / "registry.json"))
+    monkeypatch.setenv("NR3_PORT_REGISTRY_PATH", str(tmp_path / "port_registry.json"))
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "clients"))
     monkeypatch.delenv("NR3_AUTO_PROVISION", raising=False)
     return TestClient(app)
@@ -39,6 +40,7 @@ def test_public_signup_creates_trial_tenant_and_redirects(monkeypatch, tmp_path)
     assert data["billing_status"] == "trialing"
     assert data["email"] == "ada@example.com"
     assert data["business"]["name"] == "Lovelace Law"
+    assert data["host_port"] == 8100
     assert data["whatsapp_connect_token"]
     assert data["whatsapp_connect_token_expires_at"]
 
@@ -74,3 +76,4 @@ def test_public_signup_auto_provision_queues_without_precreating_root(
     assert payload["slug"] == "grace-legal"
     assert payload["client_data"]["whatsapp_connect_token"]
     assert payload["client_data"]["whatsapp_connect_token_expires_at"]
+    assert payload["client_data"]["host_port"] == 8100

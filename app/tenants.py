@@ -295,6 +295,11 @@ def forget_tenant_state(slug: str) -> None:
     """Best-effort cleanup of every local Nr3 state store for a tenant."""
     unregister_tenant(slug)
     try:
+        from app.port_registry import release_tenant_port
+        release_tenant_port(slug)
+    except Exception:  # pragma: no cover -- defensive
+        pass
+    try:
         from app import channel_state, icp_overrides, tenant_notes
         channel_state.forget_tenant(slug)
         icp_overrides.forget_tenant(slug)

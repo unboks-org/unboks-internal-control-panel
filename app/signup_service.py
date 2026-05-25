@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import secrets
@@ -10,6 +9,7 @@ from typing import Any
 
 from app.config import Settings
 from app.emailer import build_tenant_welcome_email, send_email, smtp_is_configured
+from app.port_registry import reserve_tenant_port
 from app.provisioning import AutoProvisionResult, auto_provision_tenant
 from app.tenants import (
     TenantCreateError,
@@ -36,10 +36,6 @@ class SignupResult:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
-
-
-def _host_port(slug: str) -> int:
-    return 8100 + int(hashlib.sha256(slug.encode()).hexdigest()[:8], 16) % 100
 
 
 def _tenant_root_exists(slug: str) -> bool:
@@ -157,7 +153,7 @@ def create_public_signup_tenant(
     whatsapp_connect_token = secrets.token_urlsafe(32)
     whatsapp_connect_token_expires_at = (created + timedelta(days=30)).isoformat()
     trial_ends = created + timedelta(days=14)
-    host_port = _host_port(slug)
+    host_port = reserve_tenant_port(slug)
     dashboard_url = f"https://dashboard.unboks.org/login?workspace={slug}"
 
     client_data: dict[str, Any] = {
@@ -172,6 +168,7 @@ def create_public_signup_tenant(
         "trial_started_at": created.isoformat(),
         "trial_ends_at": trial_ends.isoformat(),
         "created_at": created.isoformat(),
+        "host_port": host_port,
         "contact_person": clean_full_name,
         "email": clean_email,
         "whatsapp_connect_token": whatsapp_connect_token,

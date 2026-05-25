@@ -32,6 +32,10 @@ def _isolated_env(tmp_path, monkeypatch):
         "NR3_TENANT_REGISTRY_PATH",
         str(tmp_path / "tenant_registry.json"),
     )
+    monkeypatch.setenv(
+        "NR3_PORT_REGISTRY_PATH",
+        str(tmp_path / "port_registry.json"),
+    )
     (tmp_path / "client_root").mkdir()
     yield
 
@@ -463,9 +467,9 @@ def test_nginx_snippet_routes_slug_to_proxy_pass(client):
     assert re.search(r"proxy_pass http://127\.0\.0\.1:\d{4}/;", nginx)
 
 
-def test_host_port_is_deterministic_and_in_range(client):
-    """The slug-derived host port must be deterministic so the
-    operator can re-generate the artifacts and get the SAME port."""
+def test_host_port_is_stable_and_collision_safe(client):
+    """The registry keeps each slug stable while avoiding the old
+    100-port hash collision window."""
     r1 = client.post(
         "/admin/tenants/create",
         data={"name": "Stable A", "slug": "stable-a"},
@@ -478,8 +482,9 @@ def test_host_port_is_deterministic_and_in_range(client):
     port_a = re.search(r'(\d{4}):8001', _extract_block(r1.text, "ct-docker-compose"))
     port_b = re.search(r'(\d{4}):8001', _extract_block(r2.text, "ct-docker-compose"))
     assert port_a and port_b
-    assert 8100 <= int(port_a.group(1)) <= 8199
-    assert 8100 <= int(port_b.group(1)) <= 8199
+    assert port_a.group(1) != port_b.group(1)
+    assert 8100 <= int(port_a.group(1)) <= 8999
+    assert 8100 <= int(port_b.group(1)) <= 8999
 
 
 def test_full_vps_setup_script_is_ready_to_paste(client):

@@ -29,6 +29,7 @@ from app.security import (
 )
 from app.provisioning import auto_provision_tenant, queue_tenant_host_action
 from app.nr2_sync import fetch_nr2_knowledge
+from app.port_registry import PortRegistryError, reserve_tenant_port
 from app.tenants import (
     ESCALATION_MODES,
     NOTE_PRIORITIES,
@@ -44,7 +45,6 @@ from app.tenants import (
     RESERVED_SLUGS,
 )
 
-import hashlib
 import json
 import logging
 import os
@@ -706,12 +706,13 @@ async def admin_tenant_create_submit(
     ).isoformat()
     dashboard_url = f"https://dashboard.unboks.org/login?workspace={safe_slug}"
 
-    # Deterministic host port derived from the slug (range 8100-8199).
-    # Sha256 keeps it stable across processes (unlike Python's hash()),
-    # so the same slug always lands on the same port -- safe to write
-    # into both docker-compose.yml and the nginx snippet.
-    host_port = 8100 + int(
-        hashlib.sha256(safe_slug.encode()).hexdigest()[:8], 16) % 100
+    try:
+        host_port = reserve_tenant_port(safe_slug)
+    except PortRegistryError as exc:
+        logger.warning(
+            "tenant_create.invalid reason=port_allocation_failed slug=%s err=%s",
+            safe_slug, exc)
+        return _create_error_response(request, str(exc), form_echo=locals())
 
     # Manual-Mode client.json payload. Flat shape per J3-BE-50, plus
     # the new access_key field.
@@ -724,6 +725,7 @@ async def admin_tenant_create_submit(
         "whatsapp_connect_token_expires_at": whatsapp_connect_token_expires_at,
         "status": "active" if status.strip().lower() == "active" else "inactive",
         "created_at": created_at,
+        "host_port": host_port,
     }
     if contact_person.strip():
         client_data["contact_person"] = contact_person.strip()
