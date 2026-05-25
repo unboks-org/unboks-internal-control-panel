@@ -538,8 +538,13 @@ def test_create_shows_auto_provision_success_when_worker_succeeds(client, monkey
     assert "Automatic VPS provisioning succeeded" in r.text
     assert "Open tenant dashboard" in r.text
     assert "wrote tenant files" in r.text
-    # Manual fallback stays available even after a successful automatic run.
-    assert "ct-full-vps-setup" in r.text
+    # Successful automatic provisioning must not render internal secrets
+    # or fallback files that contain access_key / platform credentials.
+    assert "ct-full-vps-setup" not in r.text
+    assert "ct-client-json" not in r.text
+    assert "ct-platform-env" not in r.text
+    assert "access_key" not in r.text
+    assert "Internal access keys were written by automatic provisioning" in r.text
 
 
 def test_create_shows_auto_provision_failure_without_fake_success(client, monkeypatch):

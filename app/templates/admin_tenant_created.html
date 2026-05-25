@@ -73,6 +73,8 @@
     </div>
   {% endif %}
 
+  {% set manual_artifacts_required = not provision_result or provision_result.status != 'succeeded' %}
+
   {% if welcome_status == 'sent' %}
     <div class="form-feedback form-feedback-success">
       Welcome email sent to <strong>{{ contact_email }}</strong> with
@@ -90,18 +92,40 @@
   {% elif welcome_status == 'no_smtp' %}
     <div class="form-feedback form-feedback-warn">
       Welcome email skipped: SMTP is not configured on this Nr 3
-      deployment. The credentials are in the JSON below — send them
-      to the tenant manually.
+      deployment. Use the manual credential handoff below; internal
+      access keys are not shown unless VPS fallback files are needed.
     </div>
   {% elif welcome_status == 'failed' %}
     <div class="form-feedback form-feedback-warn">
-      Welcome email send failed: {{ welcome_error }}. The credentials
-      are in the JSON below — send them to the tenant manually.
+      Welcome email send failed: {{ welcome_error }}. Use the manual
+      credential handoff below; internal access keys are not shown
+      unless VPS fallback files are needed.
     </div>
   {% endif %}
 
   <p class="ct-action-feedback" data-ct-copy-feedback aria-live="polite"></p>
 
+  {% if welcome_status in ['unchecked', 'no_smtp', 'failed'] %}
+    <fieldset class="ct-fieldset">
+      <legend>Manual credential handoff</legend>
+      <p class="ct-help muted">
+        Send only these dashboard sign-in details to the tenant. Do not
+        send internal provisioning files or access keys.
+      </p>
+      <pre id="ct-tenant-login"
+           class="ct-json-block">Login URL: {{ dashboard_url }}
+Workspace: {{ slug }}
+Temporary password: {{ temporary_password }}</pre>
+      <div class="ct-actions">
+        <button type="button" class="control-btn control-btn-primary"
+                data-ct-copy data-ct-copy-target="ct-tenant-login">
+          Copy login details
+        </button>
+      </div>
+    </fieldset>
+  {% endif %}
+
+  {% if manual_artifacts_required %}
   <fieldset class="ct-fieldset">
     <legend>One-paste VPS setup</legend>
     <p class="ct-help muted">
@@ -122,7 +146,9 @@
       </button>
     </div>
   </fieldset>
+  {% endif %}
 
+  {% if manual_artifacts_required %}
   <fieldset class="ct-fieldset">
     <legend>1. client.json</legend>
     <p class="ct-help muted">
@@ -143,7 +169,9 @@
       </button>
     </div>
   </fieldset>
+  {% endif %}
 
+  {% if manual_artifacts_required %}
   <fieldset class="ct-fieldset">
     <legend>2. platform.env</legend>
     <p class="ct-help muted">
@@ -164,7 +192,9 @@
       </button>
     </div>
   </fieldset>
+  {% endif %}
 
+  {% if manual_artifacts_required %}
   <fieldset class="ct-fieldset">
     <legend>3. docker-compose.yml</legend>
     <p class="ct-help muted">
@@ -189,7 +219,9 @@
       </button>
     </div>
   </fieldset>
+  {% endif %}
 
+  {% if manual_artifacts_required %}
   <fieldset class="ct-fieldset">
     <legend>4. nginx snippet</legend>
     <p class="ct-help muted">
@@ -211,7 +243,9 @@
       </button>
     </div>
   </fieldset>
+  {% endif %}
 
+  {% if manual_artifacts_required %}
   <fieldset class="ct-fieldset">
     <legend>Deploy script (run on VPS as root)</legend>
     <p class="ct-help muted">
@@ -232,6 +266,7 @@
       </button>
     </div>
   </fieldset>
+  {% endif %}
 
   <fieldset class="ct-fieldset">
     <legend>Credentials reminder</legend>
@@ -241,11 +276,16 @@
       Login URL: <a href="{{ dashboard_url }}">{{ dashboard_url }}</a>
     </p>
     <p class="ct-help muted">
-      The temporary <code>password</code> and the
-      <code>access_key</code> are in <em>client.json</em> above.
-      Treat them as one-shot secrets — once the tenant logs in and
-      changes the password, this page is no longer the source of
-      truth.
+      Treat the temporary password as a one-shot secret. Once the
+      tenant logs in and changes the password, this page is no longer
+      the source of truth.
+      {% if manual_artifacts_required %}
+        Internal access keys are visible above only because fallback
+        VPS provisioning files are required.
+      {% else %}
+        Internal access keys were written by automatic provisioning and
+        are intentionally not rendered on this page.
+      {% endif %}
     </p>
   </fieldset>
 

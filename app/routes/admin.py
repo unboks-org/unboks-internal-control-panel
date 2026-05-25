@@ -1068,6 +1068,7 @@ async def admin_tenant_create_submit(
             "welcome_status": welcome_status,
             "welcome_error": welcome_error,
             "contact_email": contact_email_clean,
+            "temporary_password": initial_token,
             "client_json_text": client_json_text,
             "platform_env_text": platform_env_text,
             "docker_compose_text": docker_compose_text,
