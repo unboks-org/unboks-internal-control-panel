@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 
-from app.provisioning import auto_provision_tenant, queue_tenant_host_action
+from app.provisioning import (
+    auto_provision_tenant,
+    queue_tenant_host_action,
+    reconcile_host_action_results,
+)
 
 
 def test_auto_provision_disabled_by_default(monkeypatch):
@@ -109,5 +113,44 @@ def test_host_worker_keeps_nginx_backups_outside_sites_enabled():
     assert "delete_tenant" in worker_source
     assert "DELETED_TENANTS_ROOT" in worker_source
     assert "remove_nginx_block" in worker_source
+    assert "rollback_failed_provision" in worker_source
+    assert '"job_type": "tenant_action"' in worker_source
     assert '"down", "-v", "--remove-orphans"' in worker_source
     assert "NR3_PROVISION_NGINX_BACKUP_DIR=/root/nginx-sites-enabled-backups" in service_source
+
+
+def test_reconcile_host_action_results_cleans_async_delete_state(monkeypatch, tmp_path):
+    from app import channel_connections
+    from app.tenants import register_tenant
+
+    registry = tmp_path / "registry.json"
+    results = tmp_path / "results"
+    reconciled = tmp_path / "reconciled"
+    monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(registry))
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    monkeypatch.setenv("NR3_PROVISION_RESULT_DIR", str(results))
+    monkeypatch.setenv("NR3_PROVISION_RECONCILED_DIR", str(reconciled))
+
+    register_tenant({"slug": "lawyer", "name": "Lawyer", "status": "active"})
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        name="Lawyer",
+        zernio_profile_id="profile_lawyer",
+    )
+    results.mkdir(parents=True)
+    (results / "job_delete.json").write_text(
+        json.dumps(
+            {
+                "status": "succeeded",
+                "job_type": "tenant_action",
+                "action": "delete_tenant",
+                "slug": "lawyer",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert reconcile_host_action_results() == 1
+    assert channel_connections.get_tenant_zernio_profile_id("lawyer") is None
+    assert (reconciled / "job_delete.done").exists()
+    assert reconcile_host_action_results() == 0

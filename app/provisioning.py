@@ -226,3 +226,53 @@ def queue_tenant_host_action(
         job_id=job_id,
         dashboard_url=dashboard_url,
     )
+
+
+def reconcile_host_action_results() -> int:
+    """Best-effort cleanup for async host actions that finished after UI timeout."""
+    results_dir = _path_env("NR3_PROVISION_RESULT_DIR", "data/provisioning/results")
+    marker_dir = _path_env("NR3_PROVISION_RECONCILED_DIR", "data/provisioning/reconciled")
+    if not results_dir.exists():
+        return 0
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    reconciled = 0
+    for result_path in sorted(results_dir.glob("*.json")):
+        marker_path = marker_dir / f"{result_path.stem}.done"
+        if marker_path.exists():
+            continue
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            continue
+        if not isinstance(result, dict):
+            continue
+        if result.get("status") != "succeeded":
+            continue
+        if result.get("job_type") != "tenant_action":
+            continue
+        if result.get("action") != "delete_tenant":
+            continue
+        slug = str(result.get("slug") or "").strip()
+        if not slug:
+            continue
+        try:
+            from app import audit_log
+            from app.tenants import forget_tenant_state
+
+            forget_tenant_state(slug)
+            audit_log.record_event(
+                tenant_id=slug,
+                action="tenant.delete_reconciled",
+                result="ok",
+                safe_summary="Async host delete result reconciled into Nr3 state.",
+                metadata={"job_id": result_path.stem},
+            )
+            marker_path.write_text(utc_marker(), encoding="utf-8")
+            reconciled += 1
+        except Exception:
+            continue
+    return reconciled
+
+
+def utc_marker() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat() + "\n"

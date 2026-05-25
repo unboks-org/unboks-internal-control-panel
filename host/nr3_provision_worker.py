@@ -221,6 +221,28 @@ def wait_for_health(host_port: int, timeout: int = 45) -> str:
     raise RuntimeError(f"Tenant health check timed out for {url}: {last_error}")
 
 
+def rollback_failed_provision(slug: str, tenant_dir: Path, details: list[str]) -> None:
+    """Best-effort rollback for a tenant provision job that failed mid-flight."""
+    if (tenant_dir / "docker-compose.yml").exists():
+        down = run(
+            ["docker", "compose", "down", "-v", "--remove-orphans"],
+            cwd=tenant_dir,
+            check=False,
+        )
+        details.append(f"rollback docker compose down returned {down.returncode}")
+    rm = run(["docker", "rm", "-f", f"wtyj-{slug}"], check=False)
+    if rm.returncode == 0:
+        details.append(f"rollback removed container wtyj-{slug}")
+    try:
+        nginx_detail = remove_nginx_block(slug)
+        details.append(f"rollback nginx: {nginx_detail}")
+    except Exception as exc:
+        details.append(f"rollback nginx failed: {str(exc)[:200]}")
+    if tenant_dir.exists():
+        shutil.rmtree(tenant_dir, ignore_errors=True)
+        details.append(f"rollback removed tenant folder {tenant_dir}")
+
+
 def validate_slug(raw: object) -> str:
     slug = str(raw or "")
     if not SLUG_RE.match(slug):
@@ -298,6 +320,9 @@ def process_delete_tenant(job_id: str, job: dict[str, Any], slug: str) -> None:
 
     write_result(job_id, {
         "status": "succeeded",
+        "job_type": "tenant_action",
+        "action": "delete_tenant",
+        "slug": slug,
         "message": f"Tenant {slug} was permanently deleted on the VPS.",
         "details": details,
         "backup_path": str(backup_dir),
@@ -326,6 +351,9 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
     dashboard_url = str(job.get("dashboard_url") or f"https://dashboard.unboks.org/{slug}")
     write_result(job_id, {
         "status": "succeeded",
+        "job_type": "tenant_action",
+        "action": "suspend_tenant",
+        "slug": slug,
         "message": f"Tenant {slug} was made inactive on the VPS.",
         "details": details,
         "dashboard_url": dashboard_url,
@@ -341,6 +369,9 @@ def process_job(job_path: Path) -> None:
 
     job_id = processing_path.stem
     details: list[str] = []
+    slug = ""
+    tenant_dir: Path | None = None
+    rollback_on_failure = False
     try:
         job = json.loads(processing_path.read_text(encoding="utf-8"))
         job_id = str(job.get("job_id") or job_id)
@@ -373,6 +404,7 @@ def process_job(job_path: Path) -> None:
         token = read_bridge_token()
 
         (tenant_dir / "config").mkdir(parents=True)
+        rollback_on_failure = True
         (tenant_dir / "data").mkdir()
         (tenant_dir / "logs").mkdir()
         (tenant_dir / "config" / "client.json").write_text(
@@ -404,6 +436,8 @@ def process_job(job_path: Path) -> None:
         dashboard_url = str(job.get("dashboard_url") or f"https://dashboard.unboks.org/{slug}")
         write_result(job_id, {
             "status": "succeeded",
+            "job_type": "tenant_provision",
+            "slug": slug,
             "message": f"Tenant {slug} was provisioned on the VPS.",
             "details": details,
             "dashboard_url": dashboard_url,
@@ -411,6 +445,11 @@ def process_job(job_path: Path) -> None:
         })
         processing_path.unlink(missing_ok=True)
     except Exception as exc:
+        if rollback_on_failure and slug and tenant_dir is not None:
+            try:
+                rollback_failed_provision(slug, tenant_dir, details)
+            except Exception as rollback_exc:
+                details.append(f"rollback failed: {str(rollback_exc)[:200]}")
         FAILED_DIR.mkdir(parents=True, exist_ok=True)
         failed_copy = FAILED_DIR / processing_path.name
         try:
@@ -419,6 +458,8 @@ def process_job(job_path: Path) -> None:
             pass
         write_result(job_id, {
             "status": "failed",
+            "job_type": "tenant_provision" if slug else "unknown",
+            "slug": slug,
             "message": str(exc),
             "details": details,
         })

@@ -318,6 +318,11 @@ def list_tenants() -> tuple[Tenant, ...]:
     - Use a minimal built-in Unboks row only when no disk tenant and no
       registry tenant exists. This keeps local development usable.
     """
+    try:
+        from app.provisioning import reconcile_host_action_results
+        reconcile_host_action_results()
+    except Exception:  # pragma: no cover -- sidebar must never fail on reconciliation.
+        pass
     registry = _load_tenants_from_registry()
     client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
     loaded: tuple[Tenant, ...] = tuple()
