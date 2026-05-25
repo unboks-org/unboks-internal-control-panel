@@ -150,7 +150,7 @@
   <details class="ws-section ws-tone-violet">
     <summary class="ws-summary">
       <span class="ws-title">AI Agent</span>
-      <span class="ws-desc muted">Control replies, auto-reply, and learning.</span>
+      <span class="ws-desc muted">Control learning and escalation behavior.</span>
       <span class="ws-chevron" aria-hidden="true">&#9662;</span>
     </summary>
 
@@ -158,7 +158,7 @@
     <header class="agent-panel-header">
       <div>
         <h3>AI Agent</h3>
-        <p class="muted compact-note">Per-tenant agent behavior. Replies, auto-reply, and learning.</p>
+        <p class="muted compact-note">Per-tenant agent behavior. Learning and escalation.</p>
       </div>
       <span class="source-badge source-{{ agent_source or state_source['ai_agent'] }}" data-source-area="ai_agent" title="Effective state source">
         Source: {{ 'ICP override' if (agent_source or state_source['ai_agent']) == 'icp_override' else 'backend' }}
@@ -167,18 +167,6 @@
     </header>
 
     <div class="agent-toggle-row">
-      <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/agent-replies/toggle" class="agent-toggle-form">
-        <button type="submit" class="agent-toggle">
-          <span class="agent-toggle-label">Agent replies</span>
-          <span class="status-chip status-{{ 'ok' if agent_feature_states.agent_replies else 'unknown' }}">{{ 'ON' if agent_feature_states.agent_replies else 'OFF' }}</span>
-        </button>
-      </form>
-      <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/auto-reply/toggle" class="agent-toggle-form">
-        <button type="submit" class="agent-toggle">
-          <span class="agent-toggle-label">Auto-reply</span>
-          <span class="status-chip status-{{ 'ok' if agent_feature_states.auto_reply else 'unknown' }}">{{ 'ON' if agent_feature_states.auto_reply else 'OFF' }}</span>
-        </button>
-      </form>
       <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/learning-from-operator-answers/toggle" class="agent-toggle-form">
         <button type="submit" class="agent-toggle">
           <span class="agent-toggle-label">Learning from operator answers</span>

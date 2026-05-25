@@ -180,8 +180,8 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "tenant-header" in workspace.text
     # AI Agent control panel
     assert "agent-panel" in workspace.text
-    assert "Agent replies" in workspace.text
-    assert "Auto-reply" in workspace.text
+    assert "/agent/agent-replies/toggle" not in workspace.text
+    assert "Auto-reply" not in workspace.text
     assert "Learning from operator answers" in workspace.text
     assert "Escalation behavior" in workspace.text
     assert "Soft escalation allowed" in workspace.text
@@ -189,8 +189,8 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "Both allowed" in workspace.text
     assert "Tone / personality" in workspace.text
     assert "Escalation rules" in workspace.text
-    # Each toggle must be a real disabled control, not a passive chip
-    assert workspace.text.count('class="agent-toggle"') >= 3
+    # The remaining learning control must be a real button, not a passive chip.
+    assert workspace.text.count('class="agent-toggle"') >= 1
     # Forbidden legacy terminology
     assert "Soft mode" not in workspace.text
     assert "Hard mode" not in workspace.text
@@ -211,7 +211,7 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         assert tone in workspace.text
     # One-line descriptions for the final 4 sections only.
     for desc in (
-        "Control replies, auto-reply, and learning.",
+        "Control learning and escalation behavior.",
         "View escalation rules, open escalations, and alert routing.",
         "Keep private internal notes for the Unboks team.",
         "Suspend or cut off tenant access.",
