@@ -1811,8 +1811,7 @@ button.button-disabled,
 .ws-tone-gray3     .ws-summary:hover { background: #ededef; }
 .ws-tone-danger    .ws-summary:hover { background: #f5e6e8; }
 
-.audit-table,
-.admin-users-table {
+.audit-table {
   border-collapse: collapse;
   font-size: 12px;
   margin: 0 0 10px;
@@ -1820,16 +1819,13 @@ button.button-disabled,
 }
 
 .audit-table th,
-.audit-table td,
-.admin-users-table th,
-.admin-users-table td {
+.audit-table td {
   border-bottom: 1px solid var(--color-border);
   padding: 6px 8px;
   text-align: left;
 }
 
-.audit-table th,
-.admin-users-table th {
+.audit-table th {
   color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 600;

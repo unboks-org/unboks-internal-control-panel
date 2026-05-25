@@ -157,14 +157,8 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     # Global ICP audit log
     assert "Global ICP audit log" in settings_page.text
     assert "No audit events yet." in settings_page.text
-    for action in ("View global audit log", "Export audit log"):
-        assert action in settings_page.text
-    # Admin users
-    assert "Admin users" in settings_page.text
-    for label in ("Name", "Email", "Role", "Last login", "2FA", "Status"):
-        assert label in settings_page.text
-    for action in ("Invite admin", "Change role", "Disable user", "Rotate admin password"):
-        assert action in settings_page.text
+    assert "View global audit log" not in settings_page.text
+    assert "Admin users" not in settings_page.text
 
 def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")

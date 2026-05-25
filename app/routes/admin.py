@@ -230,10 +230,11 @@ def admin_tenants_index(request: Request) -> Response:
 def admin_toggle_channel(
     request: Request, tenant_id: str, channel: str,
 ) -> Response:
-    """Flip one channel's on/off state for one tenant. Placeholder
-    backend (a single JSON file in data/channel_state.json) — the
-    wtyj-agent doesn't read this yet. Redirects back to the
-    workspace's #channels anchor so the operator stays in place."""
+    """Flip one channel's on/off state for one tenant.
+
+    The state is written to Nr3 channel storage and mirrored into the ICP
+    override envelope consumed by Nr2.
+    """
     settings = get_settings()
     redirect = require_admin(request, settings)
     if redirect:
@@ -1286,16 +1287,6 @@ def admin_settings(request: Request) -> Response:
         {
             **_shell_context("settings"),
             "audit_events": audit_events,
-            "admin_users": (
-                {
-                    "name": "Internal admin",
-                    "email": "—",
-                    "role": "Owner",
-                    "last_login": "—",
-                    "two_factor": "Not configured",
-                    "status": "Active",
-                },
-            ),
         },
     )
 
