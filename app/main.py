@@ -1,11 +1,21 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.config import get_settings
 from app.routes import admin, connect, health, internal, onboarding, signup, tenant_api
+from app.security import csrf_protect_admin_request
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Unboks Internal Control Panel", version="0.1.0")
+
+    @app.middleware("http")
+    async def admin_csrf_guard(request, call_next):
+        blocked = csrf_protect_admin_request(request, get_settings())
+        if blocked is not None:
+            return blocked
+        return await call_next(request)
+
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
     app.include_router(health.router)
     app.include_router(onboarding.router)

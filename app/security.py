@@ -1,15 +1,17 @@
 import hmac
 import time
+from urllib.parse import urlparse
 from typing import Optional
 
 from itsdangerous import BadSignature, URLSafeSerializer
 from starlette.requests import Request
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
 from app.config import Settings
 
 
 SESSION_COOKIE = "nr3_admin_session"
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
 
 def _serializer(settings: Settings) -> URLSafeSerializer:
@@ -60,3 +62,58 @@ def set_session_cookie(response: Response, value: str, settings: Settings) -> No
 
 def clear_session_cookie(response: Response) -> None:
     response.delete_cookie(SESSION_COOKIE)
+
+
+def _is_admin_state_change(request: Request) -> bool:
+    if request.method.upper() in SAFE_METHODS:
+        return False
+    path = request.url.path
+    if path == "/login":
+        return False
+    if path == "/logout" or path.startswith("/admin/"):
+        return True
+    if path.startswith("/internal/api/tenants/"):
+        return True
+    return False
+
+
+def _allowed_csrf_hosts(request: Request, settings: Settings) -> set[str]:
+    hosts = {request.url.hostname or ""}
+    configured = urlparse(settings.base_url)
+    if configured.hostname:
+        hosts.add(configured.hostname)
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if forwarded_host:
+        hosts.add(forwarded_host.split(",", 1)[0].strip().split(":", 1)[0])
+    host = request.headers.get("host")
+    if host:
+        hosts.add(host.split(":", 1)[0])
+    return {host.lower() for host in hosts if host}
+
+
+def _request_source_host(request: Request) -> str:
+    origin = request.headers.get("origin")
+    if origin:
+        return (urlparse(origin).hostname or "").lower()
+    referer = request.headers.get("referer")
+    if referer:
+        return (urlparse(referer).hostname or "").lower()
+    return ""
+
+
+def csrf_protect_admin_request(
+    request: Request,
+    settings: Settings,
+) -> Optional[PlainTextResponse]:
+    """Reject cross-site admin mutations in production.
+
+    Nr3 uses cookie sessions and normal HTML forms. A production-only
+    Origin/Referer gate protects state-changing admin routes without changing
+    the existing form and file-upload paths.
+    """
+    if settings.env != "production" or not _is_admin_state_change(request):
+        return None
+    source_host = _request_source_host(request)
+    if source_host and source_host in _allowed_csrf_hosts(request, settings):
+        return None
+    return PlainTextResponse("CSRF validation failed.", status_code=403)
