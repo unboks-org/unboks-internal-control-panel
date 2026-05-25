@@ -18,6 +18,8 @@ class Settings:
     smtp_password: Optional[str]
     smtp_use_tls: bool
     internal_api_token: Optional[str]
+    tenant_bridge_token_dir: str
+    allow_legacy_shared_bridge_token: bool
     zernio_api_key: Optional[str] = field(repr=False)
     zernio_api_base_url: str
     unboks_public_url: str
@@ -55,6 +57,16 @@ def get_settings() -> Settings:
         smtp_use_tls=os.getenv("NR3_SMTP_USE_TLS", "true").strip().lower()
         not in {"0", "false", "no", "off"},
         internal_api_token=_clean_env("NR3_INTERNAL_API_TOKEN"),
+        tenant_bridge_token_dir=os.getenv(
+            "NR3_TENANT_BRIDGE_TOKEN_DIR",
+            "/app/tenant_root/_shared/nr3_bridge_tokens",
+        ).strip()
+        or "/app/tenant_root/_shared/nr3_bridge_tokens",
+        allow_legacy_shared_bridge_token=os.getenv(
+            "NR3_ALLOW_LEGACY_SHARED_BRIDGE_TOKEN",
+            "false",
+        ).strip().lower()
+        in {"1", "true", "yes", "on"},
         zernio_api_key=_clean_env("ZERNIO_API_KEY"),
         zernio_webhook_secret=_clean_env("ZERNIO_WEBHOOK_SECRET"),
         late_api_key=_clean_env("LATE_API_KEY") or _clean_env("ZERNIO_API_KEY"),

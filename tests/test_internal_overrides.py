@@ -9,6 +9,10 @@ def _isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
     monkeypatch.setenv("NR3_INTERNAL_API_TOKEN", "bridge-token")
+    token_dir = tmp_path / "bridge_tokens"
+    token_dir.mkdir()
+    (token_dir / "unboks").write_text("tenant-unboks-token-32-bytes-long", encoding="utf-8")
+    monkeypatch.setenv("NR3_TENANT_BRIDGE_TOKEN_DIR", str(token_dir))
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
     monkeypatch.setenv("NR3_CHANNEL_STATE_PATH", str(tmp_path / "channels.json"))
     monkeypatch.setenv("NR3_ICP_STATE_PATH", str(tmp_path / "icp.json"))
@@ -23,20 +27,42 @@ def client():
 
 def _bridge_headers(tenant: str = "unboks") -> dict[str, str]:
     return {
-        "Authorization": "Bearer bridge-token",
+        "Authorization": "Bearer tenant-unboks-token-32-bytes-long",
         "X-Tenant-Identity": tenant,
     }
 
 
 def test_internal_overrides_requires_bridge_token(client):
     r = client.get("/internal/tenants/unboks/overrides")
-    assert r.status_code == 401
+    assert r.status_code == 403
 
     r2 = client.get(
         "/internal/tenants/unboks/overrides",
-        headers={"Authorization": "Bearer wrong"},
+        headers={
+            "Authorization": "Bearer wrong",
+            "X-Tenant-Identity": "unboks",
+        },
     )
     assert r2.status_code == 401
+
+
+def test_internal_overrides_rejects_shared_token_when_tenant_token_exists(client):
+    r = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers={
+            "Authorization": "Bearer bridge-token",
+            "X-Tenant-Identity": "unboks",
+        },
+    )
+    assert r.status_code == 401
+
+
+def test_internal_overrides_requires_tenant_identity_header(client):
+    r = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers={"Authorization": "Bearer tenant-unboks-token-32-bytes-long"},
+    )
+    assert r.status_code == 403
 
 
 def test_internal_overrides_rejects_tenant_identity_mismatch(client):

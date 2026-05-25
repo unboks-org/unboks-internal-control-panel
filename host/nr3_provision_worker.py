@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,10 @@ NGINX_SITE = env_path("NR3_PROVISION_NGINX_SITE", "/etc/nginx/sites-enabled/api-
 BRIDGE_TOKEN_FILE = env_path(
     "NR3_PROVISION_BRIDGE_TOKEN_FILE",
     "/root/clients/_shared/nr3_internal_api_token",
+)
+BRIDGE_TOKEN_DIR = env_path(
+    "NR3_PROVISION_BRIDGE_TOKEN_DIR",
+    "/root/clients/_shared/nr3_bridge_tokens",
 )
 ANTHROPIC_KEY_FILE = env_path(
     "NR3_PROVISION_ANTHROPIC_KEY_FILE",
@@ -100,10 +105,26 @@ def write_result(job_id: str, payload: dict[str, Any]) -> None:
     os.replace(tmp, final)
 
 
-def read_bridge_token() -> str:
-    token = BRIDGE_TOKEN_FILE.read_text(encoding="utf-8").strip()
+def read_or_create_tenant_bridge_token(slug: str) -> str:
+    BRIDGE_TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        BRIDGE_TOKEN_DIR.chmod(0o700)
+    except OSError:
+        pass
+    path = BRIDGE_TOKEN_DIR / slug
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        token = ""
     if not token:
-        raise RuntimeError(f"Bridge token file is empty: {BRIDGE_TOKEN_FILE}")
+        token = secrets.token_urlsafe(48)
+        atomic_write(path, token + "\n")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+    if len(token) < 32:
+        raise RuntimeError(f"Tenant bridge token is too short: {path}")
     return token
 
 
@@ -401,7 +422,7 @@ def process_job(job_path: Path) -> None:
         tenant_dir = CLIENTS_ROOT / slug
         if tenant_dir.exists():
             raise RuntimeError(f"Tenant directory already exists: {tenant_dir}")
-        token = read_bridge_token()
+        token = read_or_create_tenant_bridge_token(slug)
 
         (tenant_dir / "config").mkdir(parents=True)
         rollback_on_failure = True

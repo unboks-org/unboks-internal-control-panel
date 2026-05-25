@@ -1,4 +1,6 @@
 import hmac
+import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -9,6 +11,7 @@ from app.icp_overrides import add_sot_entry, effective_state_envelope, set_ai_to
 
 
 router = APIRouter(prefix="/internal", tags=["internal"])
+logger = logging.getLogger(__name__)
 
 
 class AgentStyleWrite(BaseModel):
@@ -29,19 +32,52 @@ def _require_internal_bridge(
     x_tenant_identity: Optional[str],
 ) -> None:
     settings = get_settings()
-    expected = settings.internal_api_token
+    identity = (x_tenant_identity or "").strip()
+    if not identity:
+        logger.warning("bridge_auth.reject tenant=%s reason=missing_identity", tenant_id)
+        raise HTTPException(status_code=403, detail="Tenant identity is required")
+    if identity != tenant_id:
+        logger.warning(
+            "bridge_auth.reject tenant=%s identity=%s reason=identity_mismatch",
+            tenant_id,
+            identity,
+        )
+        raise HTTPException(status_code=403, detail="Tenant identity mismatch")
+    expected = _tenant_bridge_token(tenant_id, settings)
+    legacy_allowed = False
+    if expected is None and settings.allow_legacy_shared_bridge_token:
+        expected = settings.internal_api_token
+        legacy_allowed = True
     if not expected:
+        logger.warning("bridge_auth.reject tenant=%s reason=tenant_token_missing", tenant_id)
         raise HTTPException(
             status_code=503,
-            detail="NR3 internal bridge token is not configured",
+            detail="Tenant bridge token is not configured",
         )
     if not authorization.startswith("Bearer "):
+        logger.warning("bridge_auth.reject tenant=%s reason=missing_bearer", tenant_id)
         raise HTTPException(status_code=401, detail="Missing bridge token")
     candidate = authorization[7:].strip()
     if not hmac.compare_digest(candidate, expected):
+        logger.warning("bridge_auth.reject tenant=%s reason=invalid_token", tenant_id)
         raise HTTPException(status_code=401, detail="Invalid bridge token")
-    if x_tenant_identity and x_tenant_identity.strip() != tenant_id:
-        raise HTTPException(status_code=403, detail="Tenant identity mismatch")
+    if legacy_allowed:
+        logger.warning("bridge_auth.legacy_shared_token tenant=%s", tenant_id)
+
+
+def _tenant_bridge_token(tenant_id: str, settings) -> Optional[str]:
+    base_dir = settings.tenant_bridge_token_dir
+    if not base_dir:
+        return None
+    safe_name = tenant_id.strip()
+    if not safe_name or "/" in safe_name or "\\" in safe_name or safe_name.startswith("."):
+        return None
+    path = os.path.join(base_dir, safe_name)
+    try:
+        token = open(path, encoding="utf-8").read().strip()
+    except OSError:
+        return None
+    return token if len(token) >= 32 else None
 
 
 @router.get("/tenants/{tenant_id}/overrides")
