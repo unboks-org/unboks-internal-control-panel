@@ -62,7 +62,8 @@ def test_create_form_renders(client):
     assert r.status_code == 200
     body = r.text
     assert "Create a new tenant" in body
-    assert "Register existing tenant" in body
+    assert "Register existing tenant" not in body
+    assert "/admin/tenants/import" not in body
     assert 'name="files"' in body
     assert 'name="send_welcome"' in body
 
