@@ -12,11 +12,51 @@ def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(tmp_path / "registry.json"))
     monkeypatch.setenv("NR3_PORT_REGISTRY_PATH", str(tmp_path / "port_registry.json"))
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "clients"))
+    monkeypatch.setenv("NR3_PUBLIC_SIGNUP_REQUESTS_PATH", str(tmp_path / "signup_requests.json"))
     monkeypatch.delenv("NR3_AUTO_PROVISION", raising=False)
+    monkeypatch.delenv("NR3_PUBLIC_SIGNUP_AUTO_PROVISION_AFTER_VERIFY", raising=False)
+    monkeypatch.delenv("NR3_SMTP_HOST", raising=False)
+    monkeypatch.delenv("NR3_SMTP_USERNAME", raising=False)
+    monkeypatch.delenv("NR3_SMTP_PASSWORD", raising=False)
     return TestClient(app)
 
 
-def test_public_signup_creates_trial_tenant_and_redirects(monkeypatch, tmp_path):
+def _signup(client, email="ada@example.com"):
+    return client.post(
+        "/signup",
+        data={
+            "full_name": "Ada Lovelace",
+            "business_name": "Lovelace Law",
+            "email": email,
+            "phone": "+599 123 4567",
+        },
+        follow_redirects=False,
+    )
+
+
+def _stored_request(tmp_path):
+    data = json.loads((tmp_path / "signup_requests.json").read_text(encoding="utf-8"))
+    return next(iter(data["requests"].values()))
+
+
+def test_public_signup_stores_request_without_creating_tenant(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    response = _signup(client)
+
+    assert response.status_code == 202
+    assert "Signup received" in response.text
+    assert not (tmp_path / "clients" / "lovelace-law").exists()
+    assert not (tmp_path / "registry.json").exists()
+    record = _stored_request(tmp_path)
+    assert record["email"] == "ada@example.com"
+    assert record["business_name"] == "Lovelace Law"
+    assert record["status"] == "verification_pending"
+    assert record["token_hash"]
+    assert "token" not in record
+
+
+def test_public_signup_honeypot_does_not_create_request(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
 
     response = client.post(
@@ -25,55 +65,83 @@ def test_public_signup_creates_trial_tenant_and_redirects(monkeypatch, tmp_path)
             "full_name": "Ada Lovelace",
             "business_name": "Lovelace Law",
             "email": "ada@example.com",
-            "phone": "+599 123 4567",
+            "website": "spam.example",
         },
         follow_redirects=False,
     )
 
-    assert response.status_code == 303
-    assert response.headers["location"] == (
+    assert response.status_code == 202
+    assert not (tmp_path / "signup_requests.json").exists()
+    assert not (tmp_path / "clients").exists()
+
+
+def test_public_signup_rate_limits_same_email(monkeypatch, tmp_path):
+    monkeypatch.setenv("NR3_PUBLIC_SIGNUP_RATE_LIMIT_PER_EMAIL_PER_DAY", "1")
+    client = _client(monkeypatch, tmp_path)
+
+    first = _signup(client, email="ada@example.com")
+    second = _signup(client, email="ada@example.com")
+
+    assert first.status_code == 202
+    assert second.status_code == 400
+    assert "too many signup attempts" in second.text.lower()
+
+
+def test_public_signup_email_verification_without_auto_provision(monkeypatch, tmp_path):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings):
+        sent.append({"to": to_email, "subject": subject, "body": body})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+
+    response = _signup(client)
+
+    assert response.status_code == 202
+    assert "Check your email" in response.text
+    assert sent
+    verify_path = sent[0]["body"].split("https://icp.unboks.org", 1)[1].split()[0]
+    verify = client.get(verify_path, follow_redirects=False)
+    assert verify.status_code == 200
+    assert "Email confirmed" in verify.text
+    assert not (tmp_path / "clients" / "lovelace-law").exists()
+    assert _stored_request(tmp_path)["status"] == "verified_pending_review"
+
+
+def test_public_signup_verified_auto_provision_requires_explicit_flag(
+    monkeypatch,
+    tmp_path,
+):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings):
+        sent.append({"to": to_email, "subject": subject, "body": body})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+    monkeypatch.setenv("NR3_PUBLIC_SIGNUP_AUTO_PROVISION_AFTER_VERIFY", "true")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+    monkeypatch.setattr("app.signup_service.send_email", fake_send_email)
+
+    response = _signup(client)
+
+    assert response.status_code == 202
+    verify_path = sent[0]["body"].split("https://icp.unboks.org", 1)[1].split()[0]
+    verify = client.get(verify_path, follow_redirects=False)
+    assert verify.status_code == 303
+    assert verify.headers["location"] == (
         "https://dashboard.unboks.org/login?workspace=lovelace-law"
     )
     cfg = tmp_path / "clients" / "lovelace-law" / "config" / "client.json"
     data = json.loads(cfg.read_text(encoding="utf-8"))
     assert data["status"] == "active"
     assert data["billing_status"] == "trialing"
-    assert data["email"] == "ada@example.com"
-    assert data["business"]["name"] == "Lovelace Law"
-    assert data["host_port"] == 8100
-    assert data["whatsapp_connect_token"]
-    assert data["whatsapp_connect_token_expires_at"]
-
-
-def test_public_signup_auto_provision_queues_without_precreating_root(
-    monkeypatch,
-    tmp_path,
-):
-    client = _client(monkeypatch, tmp_path)
-    jobs = tmp_path / "jobs"
-    results = tmp_path / "results"
-    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
-    monkeypatch.setenv("NR3_PROVISION_QUEUE_DIR", str(jobs))
-    monkeypatch.setenv("NR3_PROVISION_RESULT_DIR", str(results))
-    monkeypatch.setenv("NR3_PROVISION_TIMEOUT_SECONDS", "0")
-
-    response = client.post(
-        "/signup",
-        data={
-            "full_name": "Grace Hopper",
-            "business_name": "Grace Legal",
-            "email": "grace@example.com",
-            "phone": "",
-        },
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 303
-    assert not (tmp_path / "clients" / "grace-legal").exists()
-    queued = list(jobs.glob("*.json"))
-    assert len(queued) == 1
-    payload = json.loads(queued[0].read_text(encoding="utf-8"))
-    assert payload["slug"] == "grace-legal"
-    assert payload["client_data"]["whatsapp_connect_token"]
-    assert payload["client_data"]["whatsapp_connect_token_expires_at"]
-    assert payload["client_data"]["host_port"] == 8100
+    assert _stored_request(tmp_path)["status"] == "provisioned"

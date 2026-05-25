@@ -24,6 +24,10 @@ class Settings:
     unboks_admin_api_url: str
     zernio_webhook_secret: Optional[str] = field(default=None, repr=False)
     late_api_key: Optional[str] = field(default=None, repr=False)
+    public_signup_auto_provision_after_verify: bool = False
+    public_signup_requests_path: str = "data/public_signup_requests.json"
+    public_signup_rate_limit_per_ip_per_hour: int = 5
+    public_signup_rate_limit_per_email_per_day: int = 3
 
 
 def get_settings() -> Settings:
@@ -54,6 +58,24 @@ def get_settings() -> Settings:
         zernio_api_key=_clean_env("ZERNIO_API_KEY"),
         zernio_webhook_secret=_clean_env("ZERNIO_WEBHOOK_SECRET"),
         late_api_key=_clean_env("LATE_API_KEY") or _clean_env("ZERNIO_API_KEY"),
+        public_signup_auto_provision_after_verify=os.getenv(
+            "NR3_PUBLIC_SIGNUP_AUTO_PROVISION_AFTER_VERIFY",
+            "false",
+        ).strip().lower()
+        in {"1", "true", "yes", "on"},
+        public_signup_requests_path=os.getenv(
+            "NR3_PUBLIC_SIGNUP_REQUESTS_PATH",
+            "data/public_signup_requests.json",
+        ).strip()
+        or "data/public_signup_requests.json",
+        public_signup_rate_limit_per_ip_per_hour=int(os.getenv(
+            "NR3_PUBLIC_SIGNUP_RATE_LIMIT_PER_IP_PER_HOUR",
+            "5",
+        )),
+        public_signup_rate_limit_per_email_per_day=int(os.getenv(
+            "NR3_PUBLIC_SIGNUP_RATE_LIMIT_PER_EMAIL_PER_DAY",
+            "3",
+        )),
         zernio_api_base_url=os.getenv(
             "ZERNIO_API_BASE_URL",
             "https://zernio.com/api/v1",
