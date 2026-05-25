@@ -942,6 +942,53 @@ def _tenant_id_for_zernio_account(account_id: str) -> str | None:
         allowed = allowlist.get("zernio_accounts") or []
         if account_id in {str(item) for item in allowed}:
             return tenant.id
+    return _sync_tenant_for_zernio_account(account_id)
+
+
+def _sync_tenant_for_zernio_account(account_id: str) -> str | None:
+    """Self-heal webhook routing when Zernio completed but callback state was missed."""
+    if not account_id:
+        return None
+    try:
+        accounts = ZernioService().list_accounts(platform="whatsapp")
+    except (ZernioNotConfigured, ZernioAPIError) as exc:
+        logger.info(
+            "zernio_webhook_router_reconcile_unavailable account=%s error=%s",
+            account_id[:24],
+            str(exc)[:120],
+        )
+        return None
+
+    matched = next(
+        (
+            account
+            for account in accounts
+            if account.id == account_id and _account_is_connected(account)
+        ),
+        None,
+    )
+    if matched is None or not matched.profile_id:
+        return None
+
+    for tenant in list_tenants():
+        if _tenant_zernio_profile_id(tenant.id) != matched.profile_id:
+            continue
+        _upsert_connected_account(
+            tenant.id,
+            matched,
+            callback_payload={
+                "source": "zernio_webhook_router_reconcile",
+                "accountId": matched.id,
+                "profileId": matched.profile_id,
+                "displayPhoneNumber": _display_phone(matched) or "",
+            },
+        )
+        logger.info(
+            "zernio_webhook_router_reconciled tenant=%s account=%s",
+            tenant.id,
+            account_id[:24],
+        )
+        return tenant.id
     return None
 
 
