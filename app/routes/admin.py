@@ -65,8 +65,6 @@ REVIEW_AWAITING_STATUSES = {"form_submitted"}
 REVIEW_DECIDED_STATUSES = {"review_needs_changes", "review_approved", "tenant_ready"}
 
 AGENT_FEATURE_ACTIONS: dict[str, str] = {
-    "agent-replies": "agent_replies_enabled",
-    "auto-reply": "ai_auto_reply",
     "learning-from-operator-answers": "learning_from_operator",
 }
 
@@ -1118,12 +1116,6 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     escalation_rules_override = ai_settings.get("escalation_rules")
     sot_entries = _icp_overrides.sot_entries_for_tenant(tenant.id)
     agent_feature_states = {
-        "agent_replies": override_toggles.get(
-            "agent_replies_enabled", {}
-        ).get("value", tenant.agent.replies_enabled),
-        "auto_reply": override_toggles.get(
-            "ai_auto_reply", {}
-        ).get("value", tenant.agent.auto_reply_enabled),
         "learning": override_toggles.get(
             "learning_from_operator", {}
         ).get("value", tenant.agent.learning_enabled),

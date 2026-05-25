@@ -33,20 +33,37 @@ def client():
 
 def test_agent_toggle_writes_bridge_override(client, tmp_path):
     response = client.post(
-        "/admin/tenants/action-co/agent/auto-reply/toggle",
+        "/admin/tenants/action-co/agent/learning-from-operator-answers/toggle",
         follow_redirects=False,
     )
     assert response.status_code == 303
     assert response.headers["location"].endswith("#agent-section")
 
     bridge = json.loads((tmp_path / "ov.json").read_text())
-    toggle = bridge["tenants"]["action-co"]["feature_toggles"]["ai_auto_reply"]
+    toggle = bridge["tenants"]["action-co"]["feature_toggles"]["learning_from_operator"]
     assert toggle["value"] is True
     assert toggle["source"] == "icp_override"
 
     workspace = client.get("/admin/tenants/action-co")
     assert workspace.status_code == 200
     assert "Source: ICP override" in workspace.text
+
+
+def test_removed_agent_controls_do_not_write_bridge_overrides(client, tmp_path):
+    for removed in ("agent-replies", "auto-reply"):
+        response = client.post(
+            f"/admin/tenants/action-co/agent/{removed}/toggle",
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert "not+wired" in response.headers["location"]
+
+    bridge_path = tmp_path / "ov.json"
+    if bridge_path.exists():
+        bridge = json.loads(bridge_path.read_text())
+        toggles = bridge.get("tenants", {}).get("action-co", {}).get("feature_toggles", {})
+        assert "agent_replies_enabled" not in toggles
+        assert "ai_auto_reply" not in toggles
 
 
 def test_tenant_notes_add_pin_and_done(client, tmp_path):
