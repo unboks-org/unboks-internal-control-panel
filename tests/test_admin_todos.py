@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.todos import list_todos
+from app.todos import MAX_TODO_IMAGE_BYTES, list_todos
 
 
 def _login(tmp_path, monkeypatch) -> TestClient:
@@ -83,9 +83,49 @@ def test_create_toggle_and_delete_rich_todo(monkeypatch, tmp_path):
     assert list_todos() == ()
 
 
+def test_rejects_todo_with_too_many_pasted_images(monkeypatch, tmp_path):
+    client = _login(tmp_path, monkeypatch)
+    images = "".join(
+        f'<img src="data:image/png;base64,AAAA" alt="image {idx}">'
+        for idx in range(5)
+    )
+
+    created = client.post(
+        "/admin/todos",
+        data={
+            "content_html": f"<p>Too many screenshots</p>{images}",
+            "content_plain": "Too many screenshots",
+        },
+        follow_redirects=False,
+    )
+
+    assert created.status_code == 303
+    assert "up+to+4+pasted+images" in created.headers["location"]
+    assert list_todos() == ()
+
+
+def test_rejects_oversized_pasted_image(monkeypatch, tmp_path):
+    client = _login(tmp_path, monkeypatch)
+    oversized_base64 = "A" * (((MAX_TODO_IMAGE_BYTES + 1) * 4) // 3 + 8)
+
+    created = client.post(
+        "/admin/todos",
+        data={
+            "content_html": f'<img src="data:image/png;base64,{oversized_base64}">',
+            "content_plain": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert created.status_code == 303
+    assert "image+is+too+large" in created.headers["location"]
+    assert list_todos() == ()
+
+
 def test_admin_js_contains_todo_paste_handlers():
     js = open("app/static/js/admin.js", encoding="utf-8").read()
 
     assert "initTodoEditor" in js
     assert "data-todo-editor" in js
     assert "readAsDataURL" in js
+    assert "maxImageBytes" in js

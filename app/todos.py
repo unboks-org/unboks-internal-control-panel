@@ -14,6 +14,12 @@ from app.channel_connections import utc_now
 from app.config import get_settings
 
 
+MAX_TODO_HTML_BYTES = 2_000_000
+MAX_TODO_IMAGE_BYTES = 1_000_000
+MAX_TODO_IMAGES = 4
+MAX_TODO_PLAIN_CHARS = 8_000
+
+
 @dataclass(frozen=True)
 class TodoItem:
     id: str
@@ -85,6 +91,7 @@ class _TodoHtmlSanitizer(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=False)
         self.out: list[str] = []
+        self.image_count = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
@@ -100,9 +107,12 @@ class _TodoHtmlSanitizer(HTMLParser):
                 self.out.append("<span>")
             return
         if tag == "img":
+            if self.image_count >= MAX_TODO_IMAGES:
+                raise ValueError(f"Todo can include up to {MAX_TODO_IMAGES} pasted images.")
             src = _safe_img_src(_attr(attrs, "src"))
             if not src:
                 return
+            self.image_count += 1
             alt = html.escape(_attr(attrs, "alt") or "Pasted image", quote=True)
             self.out.append(f'<img src="{html.escape(src, quote=True)}" alt="{alt}">')
             return
@@ -152,13 +162,25 @@ def _safe_img_src(value: str) -> str:
     if lowered.startswith(("https://", "http://")):
         return value
     if re.match(r"^data:image/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$", lowered):
-        return re.sub(r"\s+", "", value)
+        compact = re.sub(r"\s+", "", value)
+        _, _, encoded = compact.partition(",")
+        padding = encoded.count("=")
+        estimated_bytes = max(0, (len(encoded) * 3) // 4 - padding)
+        if estimated_bytes > MAX_TODO_IMAGE_BYTES:
+            raise ValueError("Pasted image is too large. Use an image under 1 MB.")
+        return compact
     return ""
+
+
+def _byte_len(value: str) -> int:
+    return len(value.encode("utf-8"))
 
 
 def sanitize_html(raw_html: str, plain_text: str = "") -> str:
     raw_html = (raw_html or "").strip()
     plain_text = (plain_text or "").strip()
+    if _byte_len(raw_html) > MAX_TODO_HTML_BYTES:
+        raise ValueError("Todo is too large. Keep one todo under 2 MB.")
     if not raw_html and plain_text:
         return html.escape(plain_text).replace("\n", "<br>")
     parser = _TodoHtmlSanitizer()
@@ -172,14 +194,18 @@ def sanitize_html(raw_html: str, plain_text: str = "") -> str:
 def clean_plain_text(raw: str, fallback_html: str = "") -> str:
     text = (raw or "").strip()
     if text:
-        return text[:4000]
+        return text[:MAX_TODO_PLAIN_CHARS]
     without_tags = re.sub(r"<[^>]+>", " ", fallback_html or "")
-    return html.unescape(re.sub(r"\s+", " ", without_tags)).strip()[:4000]
+    return html.unescape(re.sub(r"\s+", " ", without_tags)).strip()[
+        :MAX_TODO_PLAIN_CHARS
+    ]
 
 
 def create_todo(content_html: str, content_plain: str) -> TodoItem:
     init_db()
     clean_html = sanitize_html(content_html, content_plain)
+    if _byte_len(clean_html) > MAX_TODO_HTML_BYTES:
+        raise ValueError("Todo is too large. Keep one todo under 2 MB.")
     clean_plain = clean_plain_text(content_plain, clean_html)
     if not clean_plain and "<img " not in clean_html:
         raise ValueError("Todo cannot be empty.")

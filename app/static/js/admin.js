@@ -611,8 +611,20 @@
     var htmlInput = form.querySelector("[data-todo-html]");
     var plainInput = form.querySelector("[data-todo-plain]");
     var submit = form.querySelector("[data-todo-submit]");
+    var limitText = form.querySelector("[data-todo-limit]");
     if (!editor || !htmlInput || !plainInput || !submit) {
       return;
+    }
+    var maxHtmlBytes = 2000000;
+    var maxImageBytes = 1000000;
+    var maxImages = 4;
+
+    function setLimitMessage(message) {
+      if (!limitText) {
+        return;
+      }
+      limitText.textContent = message || "Images are stored inside Nr3. Up to 4 pasted images, 1 MB each. Keep secrets out of screenshots.";
+      limitText.classList.toggle("danger-text", Boolean(message));
     }
 
     function textValue() {
@@ -626,7 +638,14 @@
     function syncState() {
       htmlInput.value = editor.innerHTML || "";
       plainInput.value = textValue();
-      submit.disabled = !plainInput.value && !hasImage();
+      var htmlBytes = new Blob([htmlInput.value]).size;
+      var tooLarge = htmlBytes > maxHtmlBytes;
+      submit.disabled = (!plainInput.value && !hasImage()) || tooLarge;
+      if (tooLarge) {
+        setLimitMessage("This todo is too large. Keep one todo under 2 MB.");
+      } else if (limitText && limitText.classList.contains("danger-text")) {
+        setLimitMessage("");
+      }
       editor.classList.toggle("is-empty", !plainInput.value && !hasImage());
     }
 
@@ -646,6 +665,14 @@
     }
 
     function insertImage(file) {
+      if (file.size > maxImageBytes) {
+        setLimitMessage("That image is too large. Paste an image under 1 MB.");
+        return;
+      }
+      if (editor.querySelectorAll("img").length >= maxImages) {
+        setLimitMessage("One todo can include up to 4 pasted images.");
+        return;
+      }
       var reader = new FileReader();
       reader.onload = function () {
         var img = document.createElement("img");
