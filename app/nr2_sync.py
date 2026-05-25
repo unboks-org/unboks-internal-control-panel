@@ -7,7 +7,11 @@ configured there, without copying secrets or inventing placeholder state.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+import json
+import tempfile
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -20,6 +24,8 @@ class Nr2KnowledgeSync:
     status: str
     source_url: str = ""
     error: str = ""
+    fetched_at: str = ""
+    cached: bool = False
     sot_blocks: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     info_updates: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     knowledge_files: tuple[dict[str, Any], ...] = field(default_factory=tuple)
@@ -45,6 +51,99 @@ def _api_base_for_tenant(tenant_id: str) -> str:
         "http://wtyj-{tenant}:8001/dashboard/api",
     ).strip()
     return template.format(tenant=tenant_id).rstrip("/")
+
+
+def _cache_path() -> Path:
+    return Path(os.getenv("NR3_NR2_KNOWLEDGE_CACHE_PATH", "data/nr2_knowledge_cache.json"))
+
+
+def _cache_ttl_seconds() -> int:
+    try:
+        ttl = int(os.getenv("NR3_NR2_KNOWLEDGE_CACHE_TTL_SECONDS", "900"))
+    except ValueError:
+        return 900
+    return max(0, ttl)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def _parse_dt(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _load_cache() -> dict[str, Any]:
+    path = _cache_path()
+    try:
+        with path.open(encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_cache(data: dict[str, Any]) -> None:
+    path = _cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        prefix=".nr2_knowledge_cache.", suffix=".json", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False, sort_keys=True)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _sync_from_cache(raw: Any) -> Nr2KnowledgeSync | None:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return Nr2KnowledgeSync(
+            status=str(raw.get("status") or "cached"),
+            source_url=str(raw.get("source_url") or ""),
+            error=str(raw.get("error") or ""),
+            fetched_at=str(raw.get("fetched_at") or ""),
+            cached=True,
+            sot_blocks=tuple(raw.get("sot_blocks") or ()),
+            info_updates=tuple(raw.get("info_updates") or ()),
+            knowledge_files=tuple(raw.get("knowledge_files") or ()),
+            knowledge_media=tuple(raw.get("knowledge_media") or ()),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _fresh_cached_sync(tenant_id: str) -> Nr2KnowledgeSync | None:
+    raw = _load_cache().get(tenant_id)
+    sync = _sync_from_cache(raw)
+    if sync is None:
+        return None
+    fetched = _parse_dt(sync.fetched_at)
+    ttl = _cache_ttl_seconds()
+    if ttl <= 0 or fetched is None:
+        return None
+    if (_utc_now() - fetched).total_seconds() <= ttl:
+        return sync
+    return None
+
+
+def _write_tenant_cache(tenant_id: str, sync: Nr2KnowledgeSync) -> None:
+    cache = _load_cache()
+    cache[tenant_id] = asdict(replace(sync, cached=False))
+    _save_cache(cache)
 
 
 def _clean_text(value: Any, max_len: int = 1200) -> str:
@@ -172,8 +271,19 @@ def _get_json(client: httpx.Client, base: str, path: str, token: str) -> Any:
     return response.json()
 
 
-def fetch_nr2_knowledge(tenant_id: str, *, client: httpx.Client | None = None) -> Nr2KnowledgeSync:
+def fetch_nr2_knowledge(
+    tenant_id: str,
+    *,
+    client: httpx.Client | None = None,
+    refresh: bool = False,
+) -> Nr2KnowledgeSync:
     """Pull live Company knowledge from one tenant's Nr2 runtime."""
+    if not refresh and client is None:
+        cached = _fresh_cached_sync(tenant_id)
+        if cached is not None:
+            return cached
+
+    stale_cache = _sync_from_cache(_load_cache().get(tenant_id))
     password = _tenant_password(tenant_id)
     base = _api_base_for_tenant(tenant_id)
     if not password:
@@ -209,24 +319,49 @@ def fetch_nr2_knowledge(tenant_id: str, *, client: httpx.Client | None = None) -
         media = optional("/knowledge/media")
 
         status = "ok" if not errors else "partial"
-        return Nr2KnowledgeSync(
+        sync = Nr2KnowledgeSync(
             status=status,
             source_url=base,
             error="; ".join(errors),
+            fetched_at=_utc_now().isoformat(),
             sot_blocks=_safe_sot_blocks(sot),
             info_updates=_safe_info_updates(updates),
             knowledge_files=_safe_files(files),
             knowledge_media=_safe_media(media),
         )
+        if client is None and sync.status in {"ok", "partial"}:
+            _write_tenant_cache(tenant_id, sync)
+        return sync
     except (httpx.ConnectError, httpx.TimeoutException):
+        if stale_cache is not None:
+            return replace(
+                stale_cache,
+                cached=True,
+                error=(stale_cache.error + "; " if stale_cache.error else "")
+                + "Tenant runtime is offline or unreachable; showing cached data.",
+            )
         return Nr2KnowledgeSync(status="offline", source_url=base, error="Tenant runtime is offline or unreachable.")
     except httpx.HTTPStatusError as exc:
+        if stale_cache is not None:
+            return replace(
+                stale_cache,
+                cached=True,
+                error=(stale_cache.error + "; " if stale_cache.error else "")
+                + f"Nr2 returned HTTP {exc.response.status_code}; showing cached data.",
+            )
         return Nr2KnowledgeSync(
             status="auth_failed" if exc.response.status_code in {401, 403, 405} else "unavailable",
             source_url=base,
             error=f"Nr2 returned HTTP {exc.response.status_code}.",
         )
     except (httpx.HTTPError, ValueError, KeyError) as exc:
+        if stale_cache is not None:
+            return replace(
+                stale_cache,
+                cached=True,
+                error=(stale_cache.error + "; " if stale_cache.error else "")
+                + "Nr2 sync failed; showing cached data.",
+            )
         return Nr2KnowledgeSync(status="unavailable", source_url=base, error=str(exc)[:220])
     finally:
         if owns_client:

@@ -100,10 +100,11 @@ def test_workspace_has_no_not_wired_modal_buttons(client):
     )
     expected_real_prefixes = (
         "/admin/tenants/unboks/channels/",
-        "/admin/tenants/unboks/agent/",
-        "/admin/tenants/unboks/notes",
-        "/admin/tenants/unboks/sot",
-    )
+            "/admin/tenants/unboks/agent/",
+            "/admin/tenants/unboks/notes",
+            "/admin/tenants/unboks/sot",
+            "/admin/tenants/unboks/nr2-knowledge/refresh",
+        )
     for action in real_forms:
         assert action.startswith(expected_real_prefixes), action
 

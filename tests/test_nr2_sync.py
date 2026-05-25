@@ -125,6 +125,77 @@ def test_nr2_sync_handles_optional_missing_endpoint_as_partial(monkeypatch):
     assert "/knowledge/media missing" in sync.error
 
 
+def test_nr2_sync_returns_fresh_cache_without_hitting_runtime(monkeypatch, tmp_path):
+    cache = tmp_path / "nr2_cache.json"
+    cache.write_text(
+        """
+{
+  "lawyer": {
+    "status": "ok",
+    "source_url": "https://api.example.test/api/lawyer/dashboard/api",
+    "error": "",
+    "fetched_at": "2999-01-01T00:00:00+00:00",
+    "sot_blocks": [{"title": "Cached SOT", "content": "Cached text."}],
+    "info_updates": [],
+    "knowledge_files": [],
+    "knowledge_media": []
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NR3_NR2_KNOWLEDGE_CACHE_PATH", str(cache))
+    monkeypatch.setattr(
+        "app.nr2_sync.get_tenant_client_data",
+        lambda tenant: (_ for _ in ()).throw(AssertionError("runtime should not be called")),
+    )
+
+    sync = fetch_nr2_knowledge("lawyer")
+
+    assert sync.cached is True
+    assert sync.sot_blocks[0]["title"] == "Cached SOT"
+
+
+def test_nr2_sync_refresh_bypasses_cache(monkeypatch, tmp_path):
+    cache = tmp_path / "nr2_cache.json"
+    cache.write_text(
+        """
+{
+  "lawyer": {
+    "status": "ok",
+    "source_url": "cached",
+    "fetched_at": "2999-01-01T00:00:00+00:00",
+    "sot_blocks": [{"title": "Old", "content": "Old"}]
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NR3_NR2_KNOWLEDGE_CACHE_PATH", str(cache))
+    monkeypatch.setattr(
+        "app.nr2_sync.get_tenant_client_data",
+        lambda tenant: {"password": "secret-password"},
+    )
+    monkeypatch.setenv(
+        "NR3_TENANT_API_BASE_TEMPLATE",
+        "https://api.example.test/api/{tenant}/dashboard/api",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "safe-token"})
+        if request.url.path.endswith("/source-of-truth"):
+            return httpx.Response(200, json={"blocks": [{"title": "Fresh"}]})
+        return httpx.Response(200, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    sync = fetch_nr2_knowledge("lawyer", client=client, refresh=True)
+
+    assert sync.cached is False
+    assert sync.sot_blocks[0]["title"] == "Fresh"
+
+
 def test_workspace_renders_synced_sot_items_without_jinja_dict_collision(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
@@ -137,6 +208,8 @@ def test_workspace_renders_synced_sot_items_without_jinja_dict_collision(monkeyp
         lambda tenant_id: Nr2KnowledgeSync(
             status="ok",
             source_url="https://api.unboks.org/api/test/dashboard/api",
+            fetched_at="2026-05-25T00:00:00+00:00",
+            cached=True,
             sot_blocks=(
                 {
                     "title": "Listings",
@@ -156,5 +229,36 @@ def test_workspace_renders_synced_sot_items_without_jinja_dict_collision(monkeyp
 
     assert response.status_code == 200
     assert "Nr2 company knowledge" in response.text
+    assert "Refresh from Nr2" in response.text
+    assert "(cached)" in response.text
     assert "Oceanview Apartment" in response.text
     assert "Ask discovery questions first." in response.text
+
+
+def test_workspace_refresh_route_forces_nr2_sync(monkeypatch, tmp_path):
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
+    monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
+    monkeypatch.setenv("NR3_CHANNEL_STATE_PATH", str(tmp_path / "channels.json"))
+    monkeypatch.setenv("NR3_ICP_STATE_PATH", str(tmp_path / "icp.json"))
+    (tmp_path / "tenants").mkdir()
+
+    calls = []
+
+    def fake_fetch(tenant_id: str, *, refresh: bool = False):
+        calls.append((tenant_id, refresh))
+        return Nr2KnowledgeSync(status="ok")
+
+    monkeypatch.setattr("app.routes.admin.fetch_nr2_knowledge", fake_fetch)
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+    calls.clear()
+
+    response = client.post(
+        "/admin/tenants/unboks/nr2-knowledge/refresh",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert calls == [("unboks", True)]
+    assert "action_message=Nr2+company+knowledge+refreshed." in response.headers["location"]

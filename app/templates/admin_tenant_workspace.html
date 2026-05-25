@@ -323,7 +323,7 @@
   <details class="ws-section ws-tone-green">
     <summary class="ws-summary">
       <span class="ws-title">Nr2 company knowledge</span>
-      <span class="ws-desc muted">Live read-only sync from the tenant dashboard.</span>
+      <span class="ws-desc muted">Cached read-only sync from the tenant dashboard.</span>
       <span class="ws-chevron" aria-hidden="true">&#9662;</span>
     </summary>
 
@@ -332,14 +332,19 @@
         <div>
           <h3>Nr2 company knowledge</h3>
           <p class="muted compact-note">
-            Pulled live from <code>{{ nr2_knowledge.source_url }}</code>. This shows what the tenant added in Nr2.
+            Pulled from <code>{{ nr2_knowledge.source_url }}</code>. This shows what the tenant added in Nr2.
+            {% if nr2_knowledge.fetched_at %}
+              Last sync: <code>{{ nr2_knowledge.fetched_at }}</code>{% if nr2_knowledge.cached %} (cached){% endif %}.
+            {% endif %}
           </p>
         </div>
         <div class="nr2-knowledge-actions">
           <span class="status-chip status-{{ 'ok' if nr2_knowledge.status == 'ok' else ('warn' if nr2_knowledge.status == 'partial' else 'unknown') }}">
             {{ nr2_knowledge.status }}
           </span>
-          <a class="button-secondary" href="/admin/tenants/{{ tenant.id }}#nr2-knowledge-section">Refresh</a>
+          <form method="post" action="/admin/tenants/{{ tenant.id }}/nr2-knowledge/refresh#nr2-knowledge-section">
+            <button type="submit" class="button-secondary">Refresh from Nr2</button>
+          </form>
         </div>
       </header>
 

@@ -1160,6 +1160,35 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     )
 
 
+@router.post("/admin/tenants/{tenant_id}/nr2-knowledge/refresh")
+def admin_refresh_nr2_knowledge(request: Request, tenant_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    sync = fetch_nr2_knowledge(tenant.id, refresh=True)
+    level = "ok" if sync.status in {"ok", "partial"} else "warn"
+    if sync.status == "ok":
+        message = "Nr2 company knowledge refreshed."
+    elif sync.status == "partial":
+        message = "Nr2 company knowledge refreshed with partial data."
+    else:
+        message = f"Nr2 refresh did not complete: {sync.status}."
+    return RedirectResponse(
+        url=(
+            f"/admin/tenants/{tenant.id}"
+            f"?action_message={quote_plus(message)}"
+            f"&action_level={level}"
+            "#nr2-knowledge-section"
+        ),
+        status_code=303,
+    )
+
+
 @router.get("/admin/onboarding", response_class=HTMLResponse)
 def admin_onboarding(request: Request) -> Response:
     settings = get_settings()

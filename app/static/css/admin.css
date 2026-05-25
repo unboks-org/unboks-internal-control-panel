@@ -2754,6 +2754,10 @@ button.button-disabled,
   gap: 8px;
 }
 
+.nr2-knowledge-actions form {
+  margin: 0;
+}
+
 .nr2-knowledge-stats {
   display: grid;
   gap: 8px;
