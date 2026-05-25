@@ -1,4 +1,6 @@
 import json
+import hashlib
+import hmac
 
 from fastapi.testclient import TestClient
 
@@ -18,7 +20,13 @@ def _write_tenant(root, slug="test", name="Test"):
 def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
+    monkeypatch.setenv("ZERNIO_WEBHOOK_SECRET", "test-webhook-secret")
     return TestClient(app)
+
+
+def _signature(body: bytes, secret: str = "test-webhook-secret") -> str:
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return f"sha256={digest}"
 
 
 def test_zernio_webhook_router_forwards_to_connected_tenant(monkeypatch, tmp_path):
@@ -56,19 +64,41 @@ def test_zernio_webhook_router_forwards_to_connected_tenant(monkeypatch, tmp_pat
             "text": "hello",
         },
     }
+    body = json.dumps(payload).encode("utf-8")
     response = client.post(
         "/internal/api/zernio/webhook-router",
-        json=payload,
-        headers={"X-Zernio-Signature": "sig_123"},
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Zernio-Signature": _signature(body),
+        },
     )
 
     assert response.status_code == 200
     assert seen["tenant_id"] == "test"
     assert json.loads(seen["body"]) == payload
-    assert seen["signature"] == "sig_123"
+    assert seen["signature"] == _signature(body)
 
 
 def test_zernio_webhook_router_accepts_unmapped_account(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    body = json.dumps({"event": "message.received", "data": {"accountId": "unknown"}}).encode(
+        "utf-8"
+    )
+    response = client.post(
+        "/internal/api/zernio/webhook-router",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Zernio-Signature": _signature(body),
+        },
+    )
+
+    assert response.status_code == 202
+
+
+def test_zernio_webhook_router_rejects_missing_signature(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
 
     response = client.post(
@@ -76,4 +106,35 @@ def test_zernio_webhook_router_accepts_unmapped_account(monkeypatch, tmp_path):
         json={"event": "message.received", "data": {"accountId": "unknown"}},
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 401
+
+
+def test_zernio_webhook_router_rejects_invalid_signature(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/internal/api/zernio/webhook-router",
+        json={"event": "message.received", "data": {"accountId": "unknown"}},
+        headers={"X-Zernio-Signature": "sha256=bad"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_zernio_webhook_router_rejects_when_secret_missing(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.delenv("ZERNIO_WEBHOOK_SECRET", raising=False)
+    body = json.dumps({"event": "message.received", "data": {"accountId": "unknown"}}).encode(
+        "utf-8"
+    )
+
+    response = client.post(
+        "/internal/api/zernio/webhook-router",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Zernio-Signature": _signature(body),
+        },
+    )
+
+    assert response.status_code == 503

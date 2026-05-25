@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 import hmac
 from datetime import datetime, timezone
 from typing import Optional
@@ -894,6 +895,28 @@ def _zernio_payload_account_id(payload: dict) -> str:
     return ""
 
 
+def _signature_header(request: Request) -> str:
+    return (
+        request.headers.get("X-Zernio-Signature")
+        or request.headers.get("X-Hub-Signature-256")
+        or request.headers.get("X-Signature")
+        or ""
+    ).strip()
+
+
+def _verify_zernio_webhook_signature(body: bytes, signature: str, secret: str) -> bool:
+    if not body or not signature or not secret:
+        return False
+    algorithm = "sha256"
+    received = signature
+    if "=" in signature:
+        algorithm, received = signature.split("=", 1)
+    if algorithm.lower() != "sha256":
+        return False
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(received.strip(), expected)
+
+
 def _tenant_id_for_zernio_account(account_id: str) -> str | None:
     connection = channel_connections.get_tenant_channel_connection_by_account_id(
         account_id
@@ -932,6 +955,18 @@ async def _forward_zernio_webhook_to_tenant(
 async def zernio_webhook_router(request: Request) -> PlainTextResponse:
     """Route the single Zernio webhook stream to the owning tenant container."""
     body = await request.body()
+    settings = get_settings()
+    if not settings.zernio_webhook_secret:
+        logger.error("zernio_webhook_router_secret_missing")
+        return PlainTextResponse("Webhook secret not configured", status_code=503)
+
+    signature = _signature_header(request)
+    if not _verify_zernio_webhook_signature(
+        body, signature, settings.zernio_webhook_secret
+    ):
+        logger.warning("zernio_webhook_router_bad_signature")
+        return PlainTextResponse("Invalid signature", status_code=401)
+
     try:
         payload = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -955,7 +990,7 @@ async def zernio_webhook_router(request: Request) -> PlainTextResponse:
         status_code, response_text = await _forward_zernio_webhook_to_tenant(
             tenant_id=tenant_id,
             body=body,
-            signature=request.headers.get("X-Zernio-Signature", ""),
+            signature=signature,
             content_type=request.headers.get("Content-Type", "application/json"),
         )
     except Exception as exc:
