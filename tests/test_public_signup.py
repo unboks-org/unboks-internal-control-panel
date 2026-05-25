@@ -40,6 +40,7 @@ def test_public_signup_creates_trial_tenant_and_redirects(monkeypatch, tmp_path)
     assert data["email"] == "ada@example.com"
     assert data["business"]["name"] == "Lovelace Law"
     assert data["whatsapp_connect_token"]
+    assert data["whatsapp_connect_token_expires_at"]
 
 
 def test_public_signup_auto_provision_queues_without_precreating_root(
@@ -72,3 +73,4 @@ def test_public_signup_auto_provision_queues_without_precreating_root(
     payload = json.loads(queued[0].read_text(encoding="utf-8"))
     assert payload["slug"] == "grace-legal"
     assert payload["client_data"]["whatsapp_connect_token"]
+    assert payload["client_data"]["whatsapp_connect_token_expires_at"]

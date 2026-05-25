@@ -153,8 +153,9 @@ def create_public_signup_tenant(
     slug = _unique_slug(clean_name)
     password = secrets.token_urlsafe(12)
     access_key = secrets.token_urlsafe(24)
-    whatsapp_connect_token = secrets.token_urlsafe(32)
     created = _now()
+    whatsapp_connect_token = secrets.token_urlsafe(32)
+    whatsapp_connect_token_expires_at = (created + timedelta(days=30)).isoformat()
     trial_ends = created + timedelta(days=14)
     host_port = _host_port(slug)
     dashboard_url = f"https://dashboard.unboks.org/login?workspace={slug}"
@@ -174,6 +175,7 @@ def create_public_signup_tenant(
         "contact_person": clean_full_name,
         "email": clean_email,
         "whatsapp_connect_token": whatsapp_connect_token,
+        "whatsapp_connect_token_expires_at": whatsapp_connect_token_expires_at,
         "business": {
             "slug": slug,
             "name": clean_name,

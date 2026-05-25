@@ -50,7 +50,7 @@ import logging
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus
 
 
@@ -699,8 +699,11 @@ async def admin_tenant_create_submit(
     # the dashboard's API calls. Generated separately from the
     # dashboard password so they can rotate independently.
     access_key = secrets.token_urlsafe(24)
-    whatsapp_connect_token = secrets.token_urlsafe(32)
     created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    whatsapp_connect_token = secrets.token_urlsafe(32)
+    whatsapp_connect_token_expires_at = (
+        datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=30)
+    ).isoformat()
     dashboard_url = f"https://dashboard.unboks.org/login?workspace={safe_slug}"
 
     # Deterministic host port derived from the slug (range 8100-8199).
@@ -718,6 +721,7 @@ async def admin_tenant_create_submit(
         "password": initial_token,
         "access_key": access_key,
         "whatsapp_connect_token": whatsapp_connect_token,
+        "whatsapp_connect_token_expires_at": whatsapp_connect_token_expires_at,
         "status": "active" if status.strip().lower() == "active" else "inactive",
         "created_at": created_at,
     }

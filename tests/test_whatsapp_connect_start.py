@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -7,11 +8,14 @@ from app.main import app
 from app.zernio import ZernioAPIError, ZernioConnectUrl, ZernioProfile
 
 
-def _write_tenant(root, slug="lawyer", name="Lawyer"):
+def _write_tenant(root, slug="lawyer", name="Lawyer", extra=None):
     config_dir = root / slug / "config"
     config_dir.mkdir(parents=True)
+    data = {"slug": slug, "name": name, "status": "active"}
+    if extra:
+        data.update(extra)
     (config_dir / "client.json").write_text(
-        json.dumps({"slug": slug, "name": name, "status": "active"}),
+        json.dumps(data),
         encoding="utf-8",
     )
 
@@ -194,3 +198,61 @@ def test_whatsapp_connect_start_handles_zernio_error(monkeypatch, tmp_path):
 
     assert response.status_code == 502
     assert response.json()["detail"] == "Zernio rejected the request."
+
+
+def test_customer_whatsapp_start_rejects_expired_public_token(monkeypatch, tmp_path):
+    tenants_root = tmp_path / "tenants"
+    expired = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    _write_tenant(
+        tenants_root,
+        extra={
+            "whatsapp_connect_token": "expired-token",
+            "whatsapp_connect_token_expires_at": expired,
+        },
+    )
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/connect/whatsapp/customer/start",
+        params={"tenantId": "lawyer", "token": "expired-token"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        "/connect/whatsapp/result?status=failed&tenantId=lawyer"
+    )
+
+
+def test_customer_whatsapp_start_accepts_unexpired_public_token(monkeypatch, tmp_path):
+    tenants_root = tmp_path / "tenants"
+    expires = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    _write_tenant(
+        tenants_root,
+        extra={
+            "whatsapp_connect_token": "valid-token",
+            "whatsapp_connect_token_expires_at": expires,
+        },
+    )
+    client = _client(monkeypatch, tmp_path)
+
+    class FakeZernioService:
+        def create_profile(self, *, name, description=None, color=None):
+            return ZernioProfile(id="profile_lawyer", name=name)
+
+        def get_connect_url(self, *, platform, profile_id, redirect_url, headless=False):
+            return ZernioConnectUrl(
+                auth_url="https://facebook.com/connect/lawyer",
+                state="state_for_public_start",
+            )
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", FakeZernioService)
+
+    response = client.get(
+        "/connect/whatsapp/customer/start",
+        params={"tenantId": "lawyer", "token": "valid-token"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "https://facebook.com/connect/lawyer"

@@ -314,6 +314,16 @@ def _public_whatsapp_token_valid(tenant_id: str, token: str) -> bool:
         return False
     data = get_tenant_client_data(tenant_id)
     expected = data.get("whatsapp_connect_token")
+    expires_at = data.get("whatsapp_connect_token_expires_at")
+    if isinstance(expires_at, str) and expires_at.strip():
+        try:
+            parsed = datetime.fromisoformat(expires_at.strip())
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > parsed:
+                return False
+        except ValueError:
+            return False
     return (
         isinstance(expected, str)
         and bool(expected.strip())
