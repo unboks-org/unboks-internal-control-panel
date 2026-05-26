@@ -45,6 +45,7 @@ def test_workspace_has_expected_sections(client):
     assert aria_labels == [
         "Channels",
         "AI Agent",
+        "API Usage and Health",
         "Nr2 company knowledge",
         "Escalations",
         "Tenant notes",

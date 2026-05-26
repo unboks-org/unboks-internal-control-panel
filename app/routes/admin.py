@@ -1260,6 +1260,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     from app import channel_state as _channel_state
     from app import icp_overrides as _icp_overrides
     from app import tenant_notes as _tenant_notes
+    from app import api_usage as _api_usage
     override_toggles = _icp_overrides.feature_toggles_for_tenant(tenant.id)
     ai_settings = _icp_overrides.ai_agent_settings_for_tenant(tenant.id)
     tone_override = ai_settings.get("tone")
@@ -1284,6 +1285,8 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     notes = sorted_notes(stored_notes + tenant.notes)
     nr2_knowledge = fetch_nr2_knowledge(tenant.id)
     account_details = tenant_account_details(tenant.id)
+    api_usage_health = _api_usage.platform_api_health()
+    tenant_api_health = _api_usage.tenant_api_health(tenant.id)
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
@@ -1306,6 +1309,8 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "notes": notes,
             "note_priorities": NOTE_PRIORITIES,
             "nr2_knowledge": nr2_knowledge,
+            "api_usage_health": api_usage_health,
+            "tenant_api_health": tenant_api_health,
         },
     )
 

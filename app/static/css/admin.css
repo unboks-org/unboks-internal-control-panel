@@ -2918,13 +2918,63 @@ button.button-disabled,
   white-space: nowrap;
 }
 
+.api-health-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.api-health-filters {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.api-health-filters label {
+  color: var(--color-muted);
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+}
+
+.api-health-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.api-health-table-wrap {
+  overflow-x: auto;
+}
+
+.api-health-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 980px;
+  width: 100%;
+}
+
+.api-health-table th,
+.api-health-table td {
+  border-bottom: 1px solid #edf0f4;
+  padding: 9px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.api-health-table th {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
 @media (max-width: 760px) {
   .nr2-knowledge-header {
     flex-direction: column;
   }
 
   .nr2-knowledge-stats,
-  .nr2-knowledge-grid {
+  .nr2-knowledge-grid,
+  .api-health-grid,
+  .api-health-filters {
     grid-template-columns: 1fr;
   }
 }
