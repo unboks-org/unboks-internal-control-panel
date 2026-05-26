@@ -46,6 +46,27 @@ def test_api_usage_health_reads_tenant_runtime_db(monkeypatch, tmp_path):
             10, 5, 15, 0.001, 123, 0, "billing_quota", "insufficient credits", 1,
         ),
     )
+    conn.execute(
+        "CREATE TABLE api_usage_alerts ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, alert_key TEXT UNIQUE, tenant_id TEXT, "
+        "provider TEXT, severity TEXT, category TEXT, message TEXT, details_json TEXT, "
+        "created_at TEXT, updated_at TEXT, active INTEGER)"
+    )
+    conn.execute(
+        "INSERT INTO api_usage_alerts VALUES (NULL,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "clinica-roberto:anthropic:billing_quota",
+            "clinica-roberto",
+            "anthropic",
+            "critical",
+            "billing_quota",
+            "Provider returned a billing, quota, or authentication error.",
+            "{}",
+            datetime.now(timezone.utc).isoformat(),
+            datetime.now(timezone.utc).isoformat(),
+            1,
+        ),
+    )
     conn.commit()
     conn.close()
 
@@ -55,10 +76,12 @@ def test_api_usage_health_reads_tenant_runtime_db(monkeypatch, tmp_path):
     assert tenant.thirty_days.calls == 1
     assert tenant.error_count == 1
     assert tenant.fallback_count == 1
-    assert tenant.status == "warning"
+    assert tenant.status == "critical"
+    assert tenant.alerts
     platform = platform_api_health()
     assert platform["totals"]["api_errors"] == 1
-    assert platform["provider_health"] == "warning"
+    assert platform["provider_health"] == "critical"
+    assert platform["alerts"]
 
 
 def test_workspace_renders_api_usage_section(monkeypatch, tmp_path):

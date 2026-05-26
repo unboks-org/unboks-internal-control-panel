@@ -405,6 +405,14 @@
         </div>
       {% endif %}
 
+      {% if api_usage_health.alerts %}
+        <div class="form-feedback form-feedback-warn" role="status">
+          {% for alert in api_usage_health.alerts %}
+            <div>{{ alert }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
       <div class="api-health-table-wrap">
         <table class="api-health-table">
           <thead>

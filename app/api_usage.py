@@ -33,6 +33,7 @@ class TenantApiHealth:
     status: str
     tracked: bool
     warnings: tuple[str, ...] = ()
+    alerts: tuple[str, ...] = ()
 
 
 def _tenant_root() -> Path:
@@ -99,6 +100,7 @@ def tenant_api_health(tenant_id: str) -> TenantApiHealth:
             status="warning" if warnings else "unknown",
             tracked=False,
             warnings=warnings,
+            alerts=(),
         )
     conn = sqlite3.connect(db_path)
     try:
@@ -116,6 +118,7 @@ def tenant_api_health(tenant_id: str) -> TenantApiHealth:
                 status="warning" if warnings else "unknown",
                 tracked=False,
                 warnings=warnings,
+                alerts=(),
             )
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
@@ -135,12 +138,27 @@ def tenant_api_health(tenant_id: str) -> TenantApiHealth:
             "SELECT timestamp FROM api_usage_events "
             "WHERE success=1 ORDER BY timestamp DESC LIMIT 1"
         ).fetchone()
+        alerts = ()
+        has_alerts_table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'api_usage_alerts'"
+        ).fetchone()
+        if has_alerts_table:
+            alert_rows = conn.execute(
+                "SELECT severity, category, message FROM api_usage_alerts "
+                "WHERE active=1 ORDER BY "
+                "CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, "
+                "updated_at DESC LIMIT 5"
+            ).fetchall()
+            alerts = tuple(
+                f"{row[0].title()}: {row[1]} - {row[2]}"
+                for row in alert_rows
+            )
         errors = int(counts[0] or 0)
         fallbacks = int(counts[1] or 0)
         status = "healthy"
-        if warnings or errors or fallbacks:
+        if warnings or errors or fallbacks or alerts:
             status = "warning"
-        if errors + fallbacks >= 3:
+        if errors + fallbacks >= 3 or any(alert.startswith("Critical:") for alert in alerts):
             status = "critical"
         return TenantApiHealth(
             tenant_id=tenant_id,
@@ -158,6 +176,7 @@ def tenant_api_health(tenant_id: str) -> TenantApiHealth:
             status=status,
             tracked=True,
             warnings=warnings,
+            alerts=alerts,
         )
     finally:
         conn.close()
@@ -189,4 +208,5 @@ def platform_api_health() -> dict[str, Any]:
         "last_provider_error": last_errors[0] if last_errors else "None",
         "projected_monthly_spend": round(totals["estimated_cost"], 4),
         "tenants": tenants,
+        "alerts": [alert for tenant in tenants for alert in tenant.alerts][:10],
     }
