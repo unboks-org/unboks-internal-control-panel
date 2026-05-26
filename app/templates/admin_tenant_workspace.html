@@ -64,6 +64,46 @@
     </div>
   </header>
 
+  <details id="tenant-details-section" class="tenant-details-editor">
+    <summary>
+      <span>Edit tenant details</span>
+      <span class="muted">Business name, contact, website, address, and logo URL.</span>
+    </summary>
+    <form method="post" action="/admin/tenants/{{ tenant.id }}/details" class="tenant-details-form">
+      <label>
+        <span>Business name</span>
+        <input name="name" type="text" value="{{ tenant_account.name }}" required>
+      </label>
+      <label>
+        <span>Contact name</span>
+        <input name="contact_person" type="text" value="{{ tenant_account.contact_person }}">
+      </label>
+      <label>
+        <span>Contact email</span>
+        <input name="email" type="email" value="{{ tenant_account.email }}">
+      </label>
+      <label>
+        <span>Phone / WhatsApp</span>
+        <input name="phone" type="text" value="{{ tenant_account.phone }}">
+      </label>
+      <label>
+        <span>Website</span>
+        <input name="website" type="url" value="{{ tenant_account.website }}">
+      </label>
+      <label>
+        <span>Address</span>
+        <input name="address" type="text" value="{{ tenant_account.address }}">
+      </label>
+      <label class="tenant-details-wide">
+        <span>Logo URL</span>
+        <input name="logo_url" type="url" value="{{ tenant_account.logo_url }}">
+      </label>
+      <div class="tenant-details-actions">
+        <button type="submit" class="button-secondary">Save tenant details</button>
+      </div>
+    </form>
+  </details>
+
   {# 3b. Setup checklist #}
 
   {# 4. Channels control #}

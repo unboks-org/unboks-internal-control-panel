@@ -438,6 +438,106 @@ def tenant_contact_details(tenant_id: str) -> dict[str, str]:
     }
 
 
+def tenant_account_details(tenant_id: str) -> dict[str, str]:
+    """Safe editable display/contact fields for the tenant workspace."""
+    tenant = get_tenant(tenant_id)
+    data = get_tenant_client_data(tenant_id)
+    business = data.get("business")
+    source = business if isinstance(business, dict) and business else data
+
+    def first_text(*keys: str, fallback: str = "") -> str:
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return fallback
+
+    return {
+        "name": first_text("name", "business_name", fallback=tenant.name if tenant else tenant_id),
+        "contact_person": first_text("contact_person", "contact_name", "owner_name"),
+        "email": first_text("email", "contact_email", "owner_email"),
+        "phone": first_text("whatsapp", "phone", "telephone"),
+        "website": first_text("website", "url"),
+        "address": first_text("address", "location"),
+        "logo_url": first_text("logo_url", "logo", "logoUrl"),
+    }
+
+
+def update_tenant_account_details(
+    tenant_id: str,
+    *,
+    name: str,
+    contact_person: str = "",
+    email: str = "",
+    phone: str = "",
+    website: str = "",
+    address: str = "",
+    logo_url: str = "",
+) -> None:
+    """Update safe tenant account details in client.json and registry.
+
+    This deliberately avoids secrets, access keys, channel credentials,
+    provider tokens, and runtime controls.
+    """
+    safe_slug = validate_slug(tenant_id)
+    clean = {
+        "name": (name or "").strip() or safe_slug,
+        "contact_person": (contact_person or "").strip(),
+        "email": (email or "").strip(),
+        "phone": (phone or "").strip(),
+        "website": (website or "").strip(),
+        "address": (address or "").strip(),
+        "logo_url": (logo_url or "").strip(),
+    }
+
+    client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    if client_dir:
+        client_path = Path(client_dir) / safe_slug / "config" / "client.json"
+        if client_path.exists():
+            with exclusive_file_lock(client_path.with_suffix(client_path.suffix + ".lock")):
+                try:
+                    data = json.loads(client_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                    data = {}
+                if not isinstance(data, dict):
+                    data = {}
+                data["slug"] = safe_slug
+                data["name"] = clean["name"]
+                data["contact_person"] = clean["contact_person"]
+                data["email"] = clean["email"]
+                data["whatsapp"] = clean["phone"]
+                data["phone"] = clean["phone"]
+                data["website"] = clean["website"]
+                data["address"] = clean["address"]
+                data["logo_url"] = clean["logo_url"]
+                business = data.get("business")
+                if isinstance(business, dict) and business:
+                    business["slug"] = safe_slug
+                    business["name"] = clean["name"]
+                    business["contact_person"] = clean["contact_person"]
+                    business["email"] = clean["email"]
+                    business["whatsapp"] = clean["phone"]
+                    business["phone"] = clean["phone"]
+                    business["website"] = clean["website"]
+                    business["address"] = clean["address"]
+                    business["logo_url"] = clean["logo_url"]
+                client_path.write_text(
+                    json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+
+    existing = get_tenant(safe_slug)
+    status = existing.status if existing else "active"
+    register_tenant({
+        "slug": safe_slug,
+        "name": clean["name"],
+        "status": status,
+    })
+
+
 # Tenant creation (used by the Add-New-Tenant wizard).
 #
 # Pure filesystem operation — writes <client_dir>/<slug>/config/client.json

@@ -102,6 +102,53 @@ def test_tenant_notes_add_pin_and_done(client, tmp_path):
     assert notes["tenants"]["action-co"][0]["follow_up_done"] is True
 
 
+def test_tenant_details_form_updates_safe_client_fields(client, tmp_path):
+    response = client.post(
+        "/admin/tenants/action-co/details",
+        data={
+            "name": "Action Company Updated",
+            "contact_person": "Ada Operator",
+            "email": "ada@example.com",
+            "phone": "+59996880000",
+            "website": "https://example.com",
+            "address": "Main Street 1",
+            "logo_url": "https://example.com/logo.png",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("#tenant-details-section")
+
+    client_json = json.loads(
+        (tmp_path / "tenants" / "action-co" / "config" / "client.json").read_text()
+    )
+    assert client_json["name"] == "Action Company Updated"
+    assert client_json["contact_person"] == "Ada Operator"
+    assert client_json["email"] == "ada@example.com"
+    assert client_json["whatsapp"] == "+59996880000"
+    assert client_json["website"] == "https://example.com"
+    assert client_json["address"] == "Main Street 1"
+    assert client_json["logo_url"] == "https://example.com/logo.png"
+    assert "password" in client_json
+    assert "access_key" in client_json
+
+    workspace = client.get("/admin/tenants/action-co")
+    assert workspace.status_code == 200
+    assert "Action Company Updated" in workspace.text
+    assert "Ada Operator" in workspace.text
+    assert "https://example.com/logo.png" in workspace.text
+
+
+def test_tenant_details_form_rejects_invalid_email(client):
+    response = client.post(
+        "/admin/tenants/action-co/details",
+        data={"name": "Action Co", "email": "not-an-email"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "valid+contact+email" in response.headers["location"]
+
+
 def test_suspend_requires_confirmation_and_disables_bridge_state(client, tmp_path):
     client.post(
         "/admin/tenants/action-co/channels/whatsapp/toggle",

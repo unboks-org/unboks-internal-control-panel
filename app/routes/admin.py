@@ -41,6 +41,8 @@ from app.tenants import (
     list_tenants,
     register_tenant,
     sorted_notes,
+    tenant_account_details,
+    update_tenant_account_details,
     update_tenant_status,
     validate_slug,
     RESERVED_SLUGS,
@@ -499,6 +501,75 @@ def admin_mark_tenant_note_follow_up_done(
         "notes-section",
         message="Follow-up marked done." if changed else "Note was not found.",
         level="ok" if changed else "warn",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/details")
+def admin_update_tenant_details(
+    request: Request,
+    tenant_id: str,
+    name: str = Form(default=""),
+    contact_person: str = Form(default=""),
+    email: str = Form(default=""),
+    phone: str = Form(default=""),
+    website: str = Form(default=""),
+    address: str = Form(default=""),
+    logo_url: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    clean_name = (name or "").strip()
+    if not clean_name:
+        return _workspace_redirect(
+            tenant_id,
+            "tenant-details-section",
+            message="Business name is required.",
+            level="warn",
+        )
+    clean_email = (email or "").strip()
+    if clean_email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", clean_email):
+        return _workspace_redirect(
+            tenant_id,
+            "tenant-details-section",
+            message="Enter a valid contact email or leave it empty.",
+            level="warn",
+        )
+    try:
+        update_tenant_account_details(
+            tenant_id,
+            name=clean_name,
+            contact_person=contact_person,
+            email=clean_email,
+            phone=phone,
+            website=website,
+            address=address,
+            logo_url=logo_url,
+        )
+    except TenantCreateError as exc:
+        return _workspace_redirect(
+            tenant_id,
+            "tenant-details-section",
+            message=str(exc),
+            level="warn",
+        )
+    except OSError as exc:
+        logger.warning("tenant_details.save_failed slug=%s err=%r", tenant_id, exc)
+        return _workspace_redirect(
+            tenant_id,
+            "tenant-details-section",
+            message="Tenant details could not be saved.",
+            level="warn",
+        )
+    return _workspace_redirect(
+        tenant_id,
+        "tenant-details-section",
+        message="Tenant details saved.",
+        level="ok",
     )
 
 
@@ -1212,6 +1283,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     stored_notes = _tenant_notes.list_notes(tenant.id)
     notes = sorted_notes(stored_notes + tenant.notes)
     nr2_knowledge = fetch_nr2_knowledge(tenant.id)
+    account_details = tenant_account_details(tenant.id)
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
@@ -1220,6 +1292,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "channel_keys": _channel_state.CHANNEL_KEYS,
             **_shell_context("tenants", active_tenant=tenant),
             "tenant": tenant,
+            "tenant_account": account_details,
             "action_message": request.query_params.get("action_message", ""),
             "action_level": request.query_params.get("action_level", "ok"),
             "agent_feature_states": agent_feature_states,
