@@ -360,6 +360,86 @@
   </section>
   </details>
 
+  <details id="api-usage-health-section" class="ws-section ws-tone-cyan">
+    <summary class="ws-summary">
+      <span class="ws-title">API Usage &amp; Health</span>
+      <span class="ws-desc muted">Provider usage, fallback risk, and tenant config warnings.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
+    <section class="api-health-panel" aria-label="API Usage and Health">
+      <header class="agent-panel-header">
+        <div>
+          <h3>API Usage &amp; Health</h3>
+          <p class="muted compact-note">Real data from tenant runtime telemetry. Missing metrics are shown as not tracked yet.</p>
+        </div>
+        <span class="status-chip status-{{ 'error' if api_usage_health.provider_health == 'critical' else 'warn' if api_usage_health.provider_health == 'warning' else 'ok' }}">
+          {{ api_usage_health.provider_health|title }}
+        </span>
+      </header>
+
+      <div class="api-health-filters" aria-label="API usage filters">
+        <label>Time range <select name="api_range"><option>Today</option><option>7 days</option><option selected>30 days</option></select></label>
+        <label>Tenant <select name="api_tenant"><option selected>{{ tenant.name }}</option></select></label>
+        <label>Provider <select name="api_provider"><option selected>Anthropic</option></select></label>
+        <label>Channel <select name="api_channel"><option selected>All channels</option></select></label>
+        <label>Status <select name="api_status"><option selected>All statuses</option><option>Healthy</option><option>Warning</option><option>Critical</option></select></label>
+      </div>
+
+      <div class="api-health-grid">
+        <div class="agent-block"><h4>Today usage</h4><p class="agent-summary">{{ api_usage_health.totals.today_calls }} calls / {{ api_usage_health.totals.today_tokens }} tokens</p></div>
+        <div class="agent-block"><h4>7-day usage</h4><p class="agent-summary">{{ api_usage_health.totals.seven_day_calls }} calls / {{ api_usage_health.totals.seven_day_tokens }} tokens</p></div>
+        <div class="agent-block"><h4>30-day usage</h4><p class="agent-summary">{{ api_usage_health.totals.thirty_day_calls }} calls / {{ api_usage_health.totals.thirty_day_tokens }} tokens</p></div>
+        <div class="agent-block"><h4>Estimated cost</h4><p class="agent-summary">${{ "%.4f"|format(api_usage_health.totals.estimated_cost) }}</p></div>
+        <div class="agent-block"><h4>API errors</h4><p class="agent-summary">{{ api_usage_health.totals.api_errors }}</p></div>
+        <div class="agent-block"><h4>Fallback replies</h4><p class="agent-summary">{{ api_usage_health.totals.fallbacks }}</p></div>
+        <div class="agent-block"><h4>Last provider error</h4><p class="agent-summary">{{ api_usage_health.last_provider_error }}</p></div>
+        <div class="agent-block"><h4>Projected monthly spend</h4><p class="agent-summary">${{ "%.4f"|format(api_usage_health.projected_monthly_spend) }}</p></div>
+      </div>
+
+      {% if tenant_api_health.warnings %}
+        <div class="form-feedback form-feedback-warn" role="status">
+          {% for warning in tenant_api_health.warnings %}
+            <div>{{ warning }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <div class="api-health-table-wrap">
+        <table class="api-health-table">
+          <thead>
+            <tr>
+              <th>Tenant</th>
+              <th>Calls today / 7d / 30d</th>
+              <th>Tokens today / 7d / 30d</th>
+              <th>Cost today / 7d / 30d</th>
+              <th>Errors</th>
+              <th>Fallbacks</th>
+              <th>Last API error</th>
+              <th>Last success</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in api_usage_health.tenants %}
+              <tr>
+                <td>{{ row.tenant_name }}</td>
+                <td>{{ row.today.calls }} / {{ row.seven_days.calls }} / {{ row.thirty_days.calls }}</td>
+                <td>{{ row.today.tokens }} / {{ row.seven_days.tokens }} / {{ row.thirty_days.tokens }}</td>
+                <td>${{ "%.4f"|format(row.today.cost) }} / ${{ "%.4f"|format(row.seven_days.cost) }} / ${{ "%.4f"|format(row.thirty_days.cost) }}</td>
+                <td>{{ row.error_count }}</td>
+                <td>{{ row.fallback_count }}</td>
+                <td>{{ row.last_error }}</td>
+                <td>{{ row.last_success }}</td>
+                <td><span class="status-chip status-{{ 'error' if row.status == 'critical' else 'warn' if row.status == 'warning' else 'ok' if row.status == 'healthy' else 'unknown' }}">{{ row.status|title }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </details>
+
   <details class="ws-section ws-tone-green">
     <summary class="ws-summary">
       <span class="ws-title">Nr2 company knowledge</span>
