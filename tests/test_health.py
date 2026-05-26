@@ -208,7 +208,7 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
         "Control learning and escalation behavior.",
         "View escalation rules, open escalations, and alert routing.",
         "Keep private internal notes for the Unboks team.",
-        "Suspend or cut off tenant access.",
+        "Pause or restore tenant access.",
     ):
         assert desc in workspace.text
     # Anchor targets for the kept-section headers only.

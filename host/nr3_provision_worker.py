@@ -358,24 +358,32 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
     if action == "delete_tenant":
         process_delete_tenant(job_id, job, slug)
         return
-    if action != "suspend_tenant":
+    if action not in {"suspend_tenant", "unpause_tenant"}:
         raise RuntimeError(f"Unsupported tenant action: {action!r}")
 
     tenant_dir = CLIENTS_ROOT / slug
     if not tenant_dir.is_dir():
         raise RuntimeError(f"Tenant directory not found: {tenant_dir}")
     details: list[str] = []
-    update_client_status(tenant_dir, "inactive")
-    details.append("client.json status set to inactive")
-    run(["docker", "compose", "stop"], cwd=tenant_dir)
-    details.append(f"docker compose stop completed for {slug}")
+    if action == "suspend_tenant":
+        update_client_status(tenant_dir, "inactive")
+        details.append("client.json status set to inactive")
+        run(["docker", "compose", "stop"], cwd=tenant_dir)
+        details.append(f"docker compose stop completed for {slug}")
+        message = f"Tenant {slug} was made inactive on the VPS."
+    else:
+        update_client_status(tenant_dir, "active")
+        details.append("client.json status set to active")
+        run(["docker", "compose", "up", "-d"], cwd=tenant_dir)
+        details.append(f"docker compose up -d completed for {slug}")
+        message = f"Tenant {slug} was made active on the VPS."
     dashboard_url = str(job.get("dashboard_url") or f"https://dashboard.unboks.org/{slug}")
     write_result(job_id, {
         "status": "succeeded",
         "job_type": "tenant_action",
-        "action": "suspend_tenant",
+        "action": action,
         "slug": slug,
-        "message": f"Tenant {slug} was made inactive on the VPS.",
+        "message": message,
         "details": details,
         "dashboard_url": dashboard_url,
     })

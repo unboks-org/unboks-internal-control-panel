@@ -131,3 +131,48 @@ def test_suspend_requires_confirmation_and_disables_bridge_state(client, tmp_pat
     assert toggles["agent_replies_enabled"]["value"] is False
     assert toggles["learning_from_operator"]["value"] is False
     assert toggles["tenant_suspended"]["value"] is True
+    client_json = json.loads(
+        (tmp_path / "tenants" / "action-co" / "config" / "client.json").read_text()
+    )
+    assert client_json["status"] == "inactive"
+
+
+def test_unpause_requires_confirmation_and_restores_bridge_state(client, tmp_path):
+    client.post(
+        "/admin/tenants/action-co/suspend",
+        data={"confirmation": "suspend action-co"},
+        follow_redirects=False,
+    )
+
+    bad = client.post(
+        "/admin/tenants/action-co/unpause",
+        data={"confirmation": "wrong"},
+        follow_redirects=False,
+    )
+    assert bad.status_code == 303
+    assert "Type+exactly" in bad.headers["location"]
+
+    workspace = client.get("/admin/tenants/action-co")
+    assert workspace.status_code == 200
+    assert "unpause action-co" in workspace.text
+
+    unpaused = client.post(
+        "/admin/tenants/action-co/unpause",
+        data={"confirmation": "unpause action-co"},
+        follow_redirects=False,
+    )
+    assert unpaused.status_code == 303
+    assert unpaused.headers["location"].endswith("#danger-section")
+
+    bridge = json.loads((tmp_path / "ov.json").read_text())
+    toggles = bridge["tenants"]["action-co"]["feature_toggles"]
+    assert toggles["whatsapp_inbox"]["value"] is True
+    assert toggles["email_inbox"]["value"] is True
+    assert toggles["ai_auto_reply"]["value"] is True
+    assert toggles["agent_replies_enabled"]["value"] is True
+    assert toggles["learning_from_operator"]["value"] is True
+    assert toggles["tenant_suspended"]["value"] is False
+    client_json = json.loads(
+        (tmp_path / "tenants" / "action-co" / "config" / "client.json").read_text()
+    )
+    assert client_json["status"] == "active"

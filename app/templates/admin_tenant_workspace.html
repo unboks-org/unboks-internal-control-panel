@@ -612,23 +612,31 @@
   <details class="ws-section ws-tone-danger">
     <summary class="ws-summary">
       <span class="ws-title">Danger zone</span>
-      <span class="ws-desc muted">Suspend or cut off tenant access.</span>
+      <span class="ws-desc muted">Pause or restore tenant access.</span>
       <span class="ws-chevron" aria-hidden="true">&#9662;</span>
     </summary>
 
   <section class="danger-zone" aria-label="Danger zone">
     <div>
       <h3>Danger zone</h3>
-      <p class="muted">Suspend cuts off the tenant from all channels and the AI agent. Used for non-payment, abuse, or emergency stop.</p>
+      <p class="muted">Pause cuts off the tenant from all channels and the AI agent. Unpause restores the tenant to active service.</p>
     </div>
     {% if is_reserved_tenant %}
       <p class="muted compact-note">The master Unboks tenant is protected from suspension.</p>
     {% else %}
-      <form method="post" action="/admin/tenants/{{ tenant.id }}/suspend" class="danger-form">
-        <label for="suspend-confirm-{{ tenant.id }}">Type <code>suspend {{ tenant.id }}</code></label>
-        <input id="suspend-confirm-{{ tenant.id }}" name="confirmation" type="text" autocomplete="off" placeholder="suspend {{ tenant.id }}">
-        <button type="submit" class="danger-btn">Suspend / cut off tenant</button>
-      </form>
+      {% if tenant.status == 'active' %}
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/suspend" class="danger-form">
+          <label for="suspend-confirm-{{ tenant.id }}">Type <code>suspend {{ tenant.id }}</code></label>
+          <input id="suspend-confirm-{{ tenant.id }}" name="confirmation" type="text" autocomplete="off" placeholder="suspend {{ tenant.id }}">
+          <button type="submit" class="danger-btn">Suspend / cut off tenant</button>
+        </form>
+      {% else %}
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/unpause" class="danger-form danger-form-restore">
+          <label for="unpause-confirm-{{ tenant.id }}">Type <code>unpause {{ tenant.id }}</code></label>
+          <input id="unpause-confirm-{{ tenant.id }}" name="confirmation" type="text" autocomplete="off" placeholder="unpause {{ tenant.id }}">
+          <button type="submit" class="button-secondary">Unpause tenant</button>
+        </form>
+      {% endif %}
       <div class="danger-delete" data-delete-tenant data-tenant-id="{{ tenant.id }}">
         <h4>Delete Tenant (Permanent Wipe)</h4>
         <p>This action is irreversible and will permanently delete the tenant and all its data.</p>

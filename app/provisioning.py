@@ -214,7 +214,7 @@ def queue_tenant_host_action(
             message="Host action worker is disabled.",
             dashboard_url=dashboard_url,
         )
-    if action not in {"suspend_tenant", "delete_tenant"}:
+    if action not in {"suspend_tenant", "unpause_tenant", "delete_tenant"}:
         return AutoProvisionResult(
             status="failed",
             message=f"Unsupported host action: {action}",
@@ -226,12 +226,12 @@ def queue_tenant_host_action(
     jobs_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
     with exclusive_file_lock(_provision_lock_path(jobs_dir, f"{slug}-{action}")):
-        active = _active_job_for_slug(jobs_dir, slug, action=action)
+        active = _active_job_for_slug(jobs_dir, slug)
         if active is not None:
             existing_job_id, filename = active
             return AutoProvisionResult(
                 status="queued",
-                message=f"Host action {action} is already active for tenant {slug} ({filename}).",
+                message=f"Host action is already active for tenant {slug} ({filename}).",
                 job_id=existing_job_id,
                 dashboard_url=dashboard_url,
             )

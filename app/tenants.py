@@ -258,6 +258,48 @@ def register_tenant(client_data: dict) -> None:
         _save_registry(data)
 
 
+def update_tenant_status(slug: str, status: str) -> bool:
+    """Best-effort status update for the ICP-visible tenant row.
+
+    The host worker remains responsible for runtime state. This updates
+    any mounted client.json plus the lightweight registry so the operator
+    sees active/inactive honestly on the next render.
+    """
+    safe_slug = validate_slug(slug)
+    normalized = (status or "").strip().lower()
+    if normalized not in _ALLOWED_STATUSES:
+        raise TenantCreateError(f"Unsupported tenant status: {status}")
+
+    changed = False
+    client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    if client_dir:
+        client_path = Path(client_dir) / safe_slug / "config" / "client.json"
+        if client_path.exists():
+            with exclusive_file_lock(client_path.with_suffix(client_path.suffix + ".lock")):
+                try:
+                    data = json.loads(client_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                    data = None
+                if isinstance(data, dict):
+                    data["status"] = normalized
+                    business = data.get("business")
+                    if isinstance(business, dict) and business:
+                        business["status"] = normalized
+                    client_path.write_text(
+                        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
+                    changed = True
+
+    existing = get_tenant(safe_slug)
+    register_tenant({
+        "slug": safe_slug,
+        "name": existing.name if existing else safe_slug,
+        "status": normalized,
+    })
+    return changed
+
+
 def unregister_tenant(slug: str) -> bool:
     """Remove ``slug`` from the lightweight ICP registry.
 

@@ -41,6 +41,7 @@ from app.tenants import (
     list_tenants,
     register_tenant,
     sorted_notes,
+    update_tenant_status,
     validate_slug,
     RESERVED_SLUGS,
 )
@@ -547,6 +548,10 @@ def admin_suspend_tenant(
         action="suspend_tenant",
         dashboard_url=f"https://dashboard.unboks.org/login?workspace={tenant_id}",
     )
+    try:
+        update_tenant_status(tenant_id, "inactive")
+    except Exception as exc:
+        logger.warning("tenant_suspend.status_update_failed slug=%s err=%r", tenant_id, exc)
     if result.status == "succeeded":
         message = "Tenant is inactive: channels and AI disabled, container stopped."
         level = "ok"
@@ -559,6 +564,79 @@ def admin_suspend_tenant(
     else:
         message = (
             "Tenant bridge overrides were set inactive, but host container stop "
+            f"failed: {result.message}"
+        )
+        level = "warn"
+    return _workspace_redirect(
+        tenant_id,
+        "danger-section",
+        message=message,
+        level=level,
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/unpause")
+def admin_unpause_tenant(
+    request: Request,
+    tenant_id: str,
+    confirmation: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    if tenant_id in RESERVED_SLUGS:
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message="The Unboks master tenant cannot be changed from Nr 3.",
+            level="warn",
+        )
+    expected = f"unpause {tenant_id}"
+    if (confirmation or "").strip() != expected:
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message=f"Type exactly '{expected}' to unpause this tenant.",
+            level="warn",
+        )
+    from app import channel_state, icp_overrides
+    channel_state.set_all_channels(tenant_id, True)
+    for feature_key in (
+        "agent_replies_enabled",
+        "ai_auto_reply",
+        "learning_from_operator",
+        "tenant_suspended",
+    ):
+        icp_overrides.set_feature_toggle(
+            tenant_id,
+            feature_key,
+            feature_key != "tenant_suspended",
+        )
+    result = queue_tenant_host_action(
+        slug=tenant_id,
+        action="unpause_tenant",
+        dashboard_url=f"https://dashboard.unboks.org/login?workspace={tenant_id}",
+    )
+    try:
+        update_tenant_status(tenant_id, "active")
+    except Exception as exc:
+        logger.warning("tenant_unpause.status_update_failed slug=%s err=%r", tenant_id, exc)
+    if result.status == "succeeded":
+        message = "Tenant is active again: channels and AI restored, container started."
+        level = "ok"
+    elif result.status in {"queued", "disabled"}:
+        message = (
+            "Tenant bridge overrides were set active. Host container start is "
+            f"{result.status}: {result.message}"
+        )
+        level = "warn"
+    else:
+        message = (
+            "Tenant bridge overrides were set active, but host container start "
             f"failed: {result.message}"
         )
         level = "warn"
