@@ -9,6 +9,7 @@ def _isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
     monkeypatch.setenv("NR3_INTERNAL_API_TOKEN", "bridge-token")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
     token_dir = tmp_path / "bridge_tokens"
     token_dir.mkdir()
     (token_dir / "unboks").write_text("tenant-unboks-token-32-bytes-long", encoding="utf-8")
@@ -83,6 +84,7 @@ def test_internal_overrides_reports_empty_available_envelope(client):
     assert body["available"] is True
     assert body["tenant_id"] == "unboks"
     assert body["feature_toggles"] == {}
+    assert body["channel_connections"] == {}
     assert body["display_metadata"] == {}
     assert body["sot_entries"] == []
     assert body["ai_agent_settings"] == {
@@ -244,3 +246,30 @@ def test_sot_entry_add_and_delete_are_visible_to_nr2_bridge(client):
     )
     assert bridge_after_delete.status_code == 200
     assert bridge_after_delete.json()["sot_entries"] == []
+
+
+def test_whatsapp_connection_is_visible_to_nr2_bridge(client):
+    from app import channel_connections
+
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="unboks",
+        status="connected",
+        zernio_profile_id="profile_unboks",
+        zernio_account_id="account_unboks",
+        phone_number_id="phone_unboks",
+        display_phone_number="+599 9 688 1585",
+        last_request_id="cr_unboks",
+    )
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+
+    assert bridge.status_code == 200
+    whatsapp = bridge.json()["channel_connections"]["whatsapp"]
+    assert whatsapp["provider"] == "zernio"
+    assert whatsapp["status"] == "connected"
+    assert whatsapp["connected"] is True
+    assert whatsapp["display_phone_number"] == "+599 9 688 1585"
+    assert whatsapp["zernio_account_id"] == "account_unboks"
