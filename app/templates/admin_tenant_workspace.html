@@ -647,6 +647,118 @@
   </section>
   </details>
 
+  <details id="tenant-backup-section" class="ws-section ws-tone-blue">
+    <summary class="ws-summary">
+      <span class="ws-title">Tenant Backup &amp; Restore</span>
+      <span class="ws-desc muted">Export, validate, restore, or clone tenant data.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
+    <section class="backup-panel" aria-label="Tenant Backup and Restore">
+      <header class="backup-panel-header">
+        <div>
+          <h3>Tenant Backup &amp; Restore</h3>
+          <p class="muted compact-note">
+            Export package version <code>{{ backup_summary.export_version }}</code>.
+            Secrets and provider tokens are not exported in plain text.
+          </p>
+        </div>
+        <span class="status-chip status-{{ 'ok' if backup_summary.has_client_json else 'warn' }}">
+          {{ 'client.json found' if backup_summary.has_client_json else 'partial export' }}
+        </span>
+      </header>
+
+      <div class="backup-warning">
+        <strong>Important:</strong>
+        Provider tokens, passwords, API keys, auth URLs, and <code>platform.env</code> values are excluded or redacted.
+        WhatsApp and other provider channels may need reconnecting after restore or clone.
+      </div>
+
+      <div class="backup-grid">
+        <div class="backup-card">
+          <h4>Export tenant data</h4>
+          <p class="muted compact-note">
+            Creates a ZIP with manifest, checksums, safe account data, prompt/SOT data,
+            channel metadata, settings, and selected optional sections.
+          </p>
+          <form method="post" action="/admin/tenants/{{ tenant.id }}/backup/export" class="backup-form">
+            <label class="backup-check">
+              <input type="checkbox" name="include_history" value="1">
+              <span>Include conversation/escalation history when indexed</span>
+            </label>
+            <label class="backup-check">
+              <input type="checkbox" name="include_files" value="1">
+              <span>Include uploaded files stored locally</span>
+            </label>
+            <label class="backup-check">
+              <input type="checkbox" name="include_logs" value="1">
+              <span>Include tenant audit logs</span>
+            </label>
+            <label class="backup-check">
+              <input type="checkbox" name="include_archived" value="1">
+              <span>Include inactive/archived data when indexed</span>
+            </label>
+            <button type="submit" class="button-secondary">Export tenant data</button>
+          </form>
+        </div>
+
+        <div class="backup-card">
+          <h4>Validate import package</h4>
+          <p class="muted compact-note">
+            Dry-run a ZIP before applying it. The validator checks schema, required files,
+            tenant slug, version, and checksums.
+          </p>
+          <form method="post" action="/admin/tenants/{{ tenant.id }}/backup/import/validate" enctype="multipart/form-data" class="backup-form">
+            <input type="file" name="package" accept=".zip,application/zip" required>
+            <button type="submit" class="button-secondary">Validate only / dry run</button>
+          </form>
+        </div>
+
+        <div class="backup-card">
+          <h4>Restore into this tenant</h4>
+          <p class="muted compact-note">
+            Creates an automatic rollback export before overwriting safe tenant data.
+            Type the current slug to confirm.
+          </p>
+          <form method="post" action="/admin/tenants/{{ tenant.id }}/backup/import" enctype="multipart/form-data" class="backup-form">
+            <input type="hidden" name="mode" value="restore_existing">
+            <input type="file" name="package" accept=".zip,application/zip" required>
+            <label>
+              <span>Type <code>{{ tenant.id }}</code> to confirm</span>
+              <input type="text" name="confirmation" autocomplete="off" placeholder="{{ tenant.id }}" required>
+            </label>
+            <button type="submit" class="danger-btn">Restore into existing tenant</button>
+          </form>
+        </div>
+
+        <div class="backup-card">
+          <h4>Restore as new tenant / clone</h4>
+          <p class="muted compact-note">
+            Creates a new tenant from the package with a new slug. External channels are
+            marked as requiring reconnect.
+          </p>
+          <form method="post" action="/admin/tenants/{{ tenant.id }}/backup/import" enctype="multipart/form-data" class="backup-form">
+            <input type="hidden" name="mode" value="clone_new">
+            <input type="file" name="package" accept=".zip,application/zip" required>
+            <label>
+              <span>New tenant slug</span>
+              <input type="text" name="new_slug" autocomplete="off" placeholder="new-tenant" required>
+            </label>
+            <label>
+              <span>New business name</span>
+              <input type="text" name="new_name" placeholder="New tenant name">
+            </label>
+            <label>
+              <span>Type the new slug again to confirm</span>
+              <input type="text" name="confirmation" autocomplete="off" placeholder="new-tenant" required>
+            </label>
+            <button type="submit" class="button-secondary">Restore as clone</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </details>
+
   {# 6. Danger zone #}
   <span id="danger-section"></span>
   <details class="ws-section ws-tone-danger">
