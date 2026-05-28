@@ -206,6 +206,18 @@
       <span class="status-chip status-{{ 'ok' if tenant.health.ai_agent == 'ok' else 'unknown' }}">{{ tenant.health.ai_agent }}</span>
     </header>
 
+    {% if prompt_audit %}
+      <div class="form-feedback form-feedback-{{ 'warn' if prompt_audit.conflicts else 'success' }}" role="status">
+        Prompt Conflicts:
+        {% if prompt_audit.conflicts %}
+          {{ prompt_audit.conflicts | length }} open issue{{ '' if prompt_audit.conflicts | length == 1 else 's' }}.
+        {% else %}
+          no indexed conflicts detected.
+        {% endif %}
+        <a href="/admin/prompt-conflicts?tenant={{ tenant.id }}">Review prompt map</a>
+      </div>
+    {% endif %}
+
     <div class="agent-toggle-row">
       <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/learning-from-operator-answers/toggle" class="agent-toggle-form">
         <button type="submit" class="agent-toggle">

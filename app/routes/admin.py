@@ -29,6 +29,16 @@ from app.security import (
 )
 from app.provisioning import auto_provision_tenant, queue_tenant_host_action
 from app.nr2_sync import fetch_nr2_knowledge
+from app.prompt_conflicts import (
+    PRIORITY_ORDER,
+    audit_tenant_prompts,
+    make_pending_source,
+    platform_prompt_audit,
+    set_conflict_state,
+    set_source_disabled,
+    set_source_priority,
+    validate_prompt_change,
+)
 from app.port_registry import PortRegistryError, reserve_tenant_port
 from app.tenants import (
     ESCALATION_MODES,
@@ -226,6 +236,125 @@ def admin_tenants_index(request: Request) -> Response:
     return RedirectResponse(url="/admin/settings", status_code=303)
 
 
+def _prompt_conflict_warning_response(
+    request: Request,
+    tenant_id: str,
+    *,
+    action_label: str,
+    post_url: str,
+    form_data: dict,
+    conflicts,
+) -> Response:
+    tenant = get_tenant(tenant_id)
+    return templates.TemplateResponse(
+        request,
+        "admin_prompt_conflict_warning.html",
+        {
+            **_shell_context("prompt_conflicts", active_tenant=tenant),
+            "tenant": tenant,
+            "action_label": action_label,
+            "post_url": post_url,
+            "form_data": form_data,
+            "conflicts": conflicts,
+        },
+        status_code=409,
+    )
+
+
+@router.get("/admin/prompt-conflicts", response_class=HTMLResponse)
+def admin_prompt_conflicts(request: Request, tenant: str = "") -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    audits = platform_prompt_audit()
+    active_tenant = get_tenant(tenant) if tenant else None
+    selected_id = active_tenant.id if active_tenant else (
+        next(iter(audits.keys()), "")
+    )
+    selected_audit = audits.get(selected_id) if selected_id else None
+    return templates.TemplateResponse(
+        request,
+        "admin_prompt_conflicts.html",
+        {
+            **_shell_context("prompt_conflicts", active_tenant=active_tenant),
+            "audits": audits,
+            "selected_audit": selected_audit,
+            "selected_tenant_id": selected_id,
+            "priority_options": PRIORITY_ORDER,
+        },
+    )
+
+
+@router.post("/admin/prompt-conflicts/source-priority")
+def admin_prompt_conflict_set_priority(
+    request: Request,
+    tenant_id: str = Form(default=""),
+    source_id: str = Form(default=""),
+    priority: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        set_source_priority(source_id, priority)
+        message = "Prompt source priority updated."
+        level = "ok"
+    except ValueError as exc:
+        message = str(exc)
+        level = "warn"
+    return RedirectResponse(
+        url=f"/admin/prompt-conflicts?tenant={quote_plus(tenant_id)}"
+        f"&action_message={quote_plus(message)}&action_level={level}",
+        status_code=303,
+    )
+
+
+@router.post("/admin/prompt-conflicts/source-disable")
+def admin_prompt_conflict_disable_source(
+    request: Request,
+    tenant_id: str = Form(default=""),
+    source_id: str = Form(default=""),
+    disabled: str = Form(default="1"),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    set_source_disabled(source_id, disabled == "1")
+    message = "Prompt source disabled." if disabled == "1" else "Prompt source re-enabled."
+    return RedirectResponse(
+        url=f"/admin/prompt-conflicts?tenant={quote_plus(tenant_id)}"
+        f"&action_message={quote_plus(message)}&action_level=ok",
+        status_code=303,
+    )
+
+
+@router.post("/admin/prompt-conflicts/conflict-state")
+def admin_prompt_conflict_state(
+    request: Request,
+    tenant_id: str = Form(default=""),
+    conflict_id: str = Form(default=""),
+    action: str = Form(default="ignore"),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if action == "resolve":
+        set_conflict_state(conflict_id, resolved=True, ignored=False)
+        message = "Conflict marked resolved."
+    else:
+        set_conflict_state(conflict_id, ignored=True, resolved=False)
+        message = "Conflict ignored for now."
+    return RedirectResponse(
+        url=f"/admin/prompt-conflicts?tenant={quote_plus(tenant_id)}"
+        f"&action_message={quote_plus(message)}&action_level=ok",
+        status_code=303,
+    )
+
+
 
 @router.post("/admin/tenants/{tenant_id}/channels/{channel}/toggle")
 def admin_toggle_channel(
@@ -315,6 +444,7 @@ def admin_save_agent_tone(
     tenant_id: str,
     tone: str = Form(default=""),
     tone_notes: str = Form(default=""),
+    confirm_prompt_override: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -322,6 +452,28 @@ def admin_save_agent_tone(
         return redirect
     if get_tenant(tenant_id) is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
+    pending = make_pending_source(
+        tenant_id,
+        name="Pending Nr3 tone override",
+        location="Nr3 tenant workspace tone form",
+        priority="Tone/style",
+        text="\n".join(part for part in ((tone or "").strip(), (tone_notes or "").strip()) if part),
+        used_in=("WhatsApp", "Email", "Instagram"),
+    )
+    conflicts = validate_prompt_change(tenant_id, pending) if pending.text else ()
+    if conflicts and confirm_prompt_override != "1":
+        return _prompt_conflict_warning_response(
+            request,
+            tenant_id,
+            action_label="Save tone override anyway",
+            post_url=f"/admin/tenants/{tenant_id}/agent/tone",
+            form_data={
+                "tone": tone,
+                "tone_notes": tone_notes,
+                "confirm_prompt_override": "1",
+            },
+            conflicts=conflicts,
+        )
     from app import icp_overrides
     icp_overrides.set_ai_tone(
         tenant_id,
@@ -342,6 +494,7 @@ def admin_save_agent_escalation_rules(
     tenant_id: str,
     soft_escalation_when: str = Form(default=""),
     hard_escalation_when: str = Form(default=""),
+    confirm_prompt_override: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -349,6 +502,34 @@ def admin_save_agent_escalation_rules(
         return redirect
     if get_tenant(tenant_id) is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
+    pending = make_pending_source(
+        tenant_id,
+        name="Pending Nr3 escalation rules override",
+        location="Nr3 tenant workspace escalation rules form",
+        priority="Tenant-specific hard restrictions",
+        text="\n".join(
+            part for part in (
+                f"soft_escalation: {(soft_escalation_when or '').strip()}",
+                f"hard_escalation: {(hard_escalation_when or '').strip()}",
+            )
+            if part.split(":", 1)[-1].strip()
+        ),
+        used_in=("WhatsApp", "Email", "Escalations"),
+    )
+    conflicts = validate_prompt_change(tenant_id, pending) if pending.text else ()
+    if conflicts and confirm_prompt_override != "1":
+        return _prompt_conflict_warning_response(
+            request,
+            tenant_id,
+            action_label="Save escalation rules anyway",
+            post_url=f"/admin/tenants/{tenant_id}/agent/escalation-rules",
+            form_data={
+                "soft_escalation_when": soft_escalation_when,
+                "hard_escalation_when": hard_escalation_when,
+                "confirm_prompt_override": "1",
+            },
+            conflicts=conflicts,
+        )
     from app import icp_overrides
     icp_overrides.set_escalation_rules(
         tenant_id,
@@ -377,6 +558,7 @@ def admin_add_sot_entry(
     title: str = Form(default=""),
     category: str = Form(default="general"),
     content: str = Form(default=""),
+    confirm_prompt_override: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -384,6 +566,29 @@ def admin_add_sot_entry(
         return redirect
     if get_tenant(tenant_id) is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
+    pending = make_pending_source(
+        tenant_id,
+        name=f"Pending Nr3 SOT: {(title or '').strip() or 'Untitled'}",
+        location="Nr3 tenant workspace SOT form",
+        priority="SOT/company facts",
+        text="\n".join(part for part in ((title or "").strip(), (category or "").strip(), (content or "").strip()) if part),
+        used_in=("WhatsApp", "Email", "Instagram"),
+    )
+    conflicts = validate_prompt_change(tenant_id, pending) if pending.text else ()
+    if conflicts and confirm_prompt_override != "1":
+        return _prompt_conflict_warning_response(
+            request,
+            tenant_id,
+            action_label="Add Source of Truth anyway",
+            post_url=f"/admin/tenants/{tenant_id}/sot",
+            form_data={
+                "title": title,
+                "category": category,
+                "content": content,
+                "confirm_prompt_override": "1",
+            },
+            conflicts=conflicts,
+        )
     from app import icp_overrides
     try:
         icp_overrides.add_sot_entry(
@@ -1284,6 +1489,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     notes = sorted_notes(stored_notes + tenant.notes)
     nr2_knowledge = fetch_nr2_knowledge(tenant.id)
     account_details = tenant_account_details(tenant.id)
+    prompt_audit = audit_tenant_prompts(tenant.id)
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
@@ -1306,6 +1512,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "notes": notes,
             "note_priorities": NOTE_PRIORITIES,
             "nr2_knowledge": nr2_knowledge,
+            "prompt_audit": prompt_audit,
         },
     )
 

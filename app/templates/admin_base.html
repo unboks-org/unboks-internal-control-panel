@@ -124,6 +124,14 @@
           <span>Todo</span>
         </a>
         <a
+          href="/admin/prompt-conflicts"
+          class="nav-item {% if active == 'prompt_conflicts' %}active{% endif %}"
+          {% if active == 'prompt_conflicts' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Prompt conflicts</span>
+        </a>
+        <a
           href="/admin/settings"
           class="nav-item {% if active == 'settings' %}active{% endif %}"
           {% if active == 'settings' %}aria-current="page"{% endif %}
