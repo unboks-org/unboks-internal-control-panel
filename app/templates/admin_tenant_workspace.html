@@ -217,6 +217,38 @@
 
     <div class="agent-grid">
       <div class="agent-block">
+        <h4>AI Agent name</h4>
+        <p class="agent-summary">
+          Active name: <strong>{{ effective_agent_name }}</strong>
+          <span class="status-chip status-{{ 'ok' if agent_name_source == 'admin_override' else 'unknown' }}">
+            {% if agent_name_source == 'admin_override' %}Admin override active{% elif agent_name_source == 'tenant' %}Tenant-set in Nr2{% else %}Default{% endif %}
+          </span>
+        </p>
+        {% if tenant_agent_name %}
+          <p class="muted compact-note">Tenant-selected name: {{ tenant_agent_name }}</p>
+        {% else %}
+          <p class="muted compact-note">Default name is {{ default_agent_name }} until a tenant or admin value is saved.</p>
+        {% endif %}
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/name" class="agent-inline-form">
+          <label class="agent-form-field">
+            <span>Admin override</span>
+            <input
+              type="text"
+              name="agent_name"
+              maxlength="40"
+              value="{{ agent_identity_override.name if agent_identity_override else '' }}"
+              placeholder="{{ effective_agent_name }}">
+          </label>
+          <div class="agent-form-actions">
+            <button type="submit" class="button-secondary">Save name</button>
+            {% if agent_identity_override %}
+              <button type="submit" formaction="/admin/tenants/{{ tenant.id }}/agent/name/clear" class="button-secondary">Clear admin override</button>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+
+      <div class="agent-block">
         <h4>Escalation behavior</h4>
         <ul class="escalation-list">
           {% for value, label in escalation_modes %}

@@ -47,6 +47,7 @@ from app.tenants import (
     validate_slug,
     RESERVED_SLUGS,
 )
+from app.agent_identity import DEFAULT_AGENT_NAME, validate_agent_name
 
 import json
 import logging
@@ -333,6 +334,87 @@ def admin_save_agent_tone(
         tenant_id,
         "agent-section",
         message="Tone override saved." if clean_tone else "Tone override cleared.",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/agent/name")
+def admin_save_agent_name(
+    request: Request,
+    tenant_id: str,
+    agent_name: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    ok, clean_name, error = validate_agent_name(agent_name)
+    if not ok:
+        return _workspace_redirect(
+            tenant_id,
+            "agent-section",
+            message=error,
+            level="error",
+        )
+    from app import audit_log, icp_overrides
+    previous = (
+        icp_overrides.ai_agent_settings_for_tenant(tenant_id)
+        .get("agent_identity")
+    )
+    icp_overrides.set_agent_identity_override(tenant_id, clean_name)
+    audit_log.record_event(
+        actor="nr3-admin",
+        tenant_id=tenant_id,
+        action="agent_name_override_set",
+        result="success",
+        metadata={
+            "old_value": previous.get("name") if isinstance(previous, dict) else None,
+            "new_value": clean_name,
+            "source": "nr3",
+            "admin_override": True,
+        },
+    )
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message="AI Agent name override saved.",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/agent/name/clear")
+def admin_clear_agent_name(
+    request: Request,
+    tenant_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app import audit_log, icp_overrides
+    previous = (
+        icp_overrides.ai_agent_settings_for_tenant(tenant_id)
+        .get("agent_identity")
+    )
+    icp_overrides.clear_agent_identity_override(tenant_id)
+    audit_log.record_event(
+        actor="nr3-admin",
+        tenant_id=tenant_id,
+        action="agent_name_override_cleared",
+        result="success",
+        metadata={
+            "old_value": previous.get("name") if isinstance(previous, dict) else None,
+            "new_value": None,
+            "source": "nr3",
+            "admin_override": False,
+        },
+    )
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message="AI Agent name override cleared.",
     )
 
 
@@ -1264,6 +1346,24 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     ai_settings = _icp_overrides.ai_agent_settings_for_tenant(tenant.id)
     tone_override = ai_settings.get("tone")
     escalation_rules_override = ai_settings.get("escalation_rules")
+    agent_identity_override = ai_settings.get("agent_identity")
+    raw_client = get_tenant_client_data(tenant.id)
+    business = raw_client.get("business") if isinstance(raw_client.get("business"), dict) else {}
+    tenant_agent_name = (
+        business.get("agent_name")
+        or raw_client.get("agent_name")
+        or ""
+    )
+    effective_agent_name = (
+        agent_identity_override.get("name")
+        if isinstance(agent_identity_override, dict)
+        else (tenant_agent_name or DEFAULT_AGENT_NAME)
+    )
+    agent_name_source = (
+        "admin_override"
+        if agent_identity_override
+        else ("tenant" if tenant_agent_name else "default")
+    )
     sot_entries = _icp_overrides.sot_entries_for_tenant(tenant.id)
     agent_feature_states = {
         "learning": override_toggles.get(
@@ -1300,6 +1400,11 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "ai_settings": ai_settings,
             "tone_override": tone_override,
             "escalation_rules_override": escalation_rules_override,
+            "agent_identity_override": agent_identity_override,
+            "tenant_agent_name": tenant_agent_name,
+            "effective_agent_name": effective_agent_name,
+            "agent_name_source": agent_name_source,
+            "default_agent_name": DEFAULT_AGENT_NAME,
             "sot_entries": sot_entries,
             "is_reserved_tenant": tenant.id in RESERVED_SLUGS,
             "escalation_modes": ESCALATION_MODES,
