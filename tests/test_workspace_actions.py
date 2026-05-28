@@ -149,6 +149,39 @@ def test_tenant_details_form_rejects_invalid_email(client):
     assert "valid+contact+email" in response.headers["location"]
 
 
+def test_send_password_reset_email_calls_nr2_and_audits(client, monkeypatch):
+    client.post(
+        "/admin/tenants/action-co/details",
+        data={
+            "name": "Action Co",
+            "contact_person": "Ada Operator",
+            "email": "ada@example.com",
+            "phone": "",
+            "website": "",
+            "address": "",
+            "logo_url": "",
+        },
+        follow_redirects=False,
+    )
+    called = {}
+
+    def fake_send(tenant_id, email):
+        called["tenant_id"] = tenant_id
+        called["email"] = email
+        return True, "Password reset email requested."
+
+    monkeypatch.setattr("app.routes.admin.send_password_reset_request", fake_send)
+    response = client.post(
+        "/admin/tenants/action-co/send-password-reset",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert called == {
+        "tenant_id": "action-co",
+        "email": "ada@example.com",
+    }
+
+
 def test_suspend_requires_confirmation_and_disables_bridge_state(client, tmp_path):
     client.post(
         "/admin/tenants/action-co/channels/whatsapp/toggle",
