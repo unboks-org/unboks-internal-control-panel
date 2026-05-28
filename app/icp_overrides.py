@@ -427,7 +427,37 @@ def effective_state_envelope(tenant_id: str) -> dict[str, Any]:
         "available": True,
         "tenant_id": tenant_id,
         "feature_toggles": feature_toggles_for_tenant(tenant_id),
+        "channel_connections": channel_connections_for_tenant(tenant_id),
         "display_metadata": {},
         "sot_entries": sot_entries_for_tenant(tenant_id),
         "ai_agent_settings": ai_agent_settings_for_tenant(tenant_id),
+    }
+
+
+def channel_connections_for_tenant(tenant_id: str) -> dict[str, Any]:
+    """Return provider-backed channel connection state for Nr2 consumers."""
+    try:
+        from app import channel_connections
+
+        connection = channel_connections.get_tenant_channel_connection(tenant_id)
+    except Exception as exc:
+        logger.warning(
+            "icp_overrides.channel_connections_failed tenant=%s error=%s",
+            tenant_id,
+            str(exc)[:200],
+        )
+        return {}
+    if connection is None:
+        return {}
+    return {
+        connection.channel: {
+            "provider": connection.provider,
+            "status": connection.status,
+            "connected": connection.status == "connected",
+            "display_phone_number": connection.display_phone_number,
+            "phone_number_id": connection.phone_number_id,
+            "zernio_account_id": connection.zernio_account_id,
+            "connected_at": connection.connected_at,
+            "updated_at": connection.updated_at,
+        }
     }
