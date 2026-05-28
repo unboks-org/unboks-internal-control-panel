@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Form, Request, File, UploadFile
-from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.templating import Jinja2Templates
 from typing import Optional
 
@@ -30,6 +30,7 @@ from app.security import (
 from app.provisioning import auto_provision_tenant, queue_tenant_host_action
 from app.nr2_sync import fetch_nr2_knowledge
 from app.port_registry import PortRegistryError, reserve_tenant_port
+from app import tenant_backup
 from app.tenants import (
     ESCALATION_MODES,
     NOTE_PRIORITIES,
@@ -1284,6 +1285,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     notes = sorted_notes(stored_notes + tenant.notes)
     nr2_knowledge = fetch_nr2_knowledge(tenant.id)
     account_details = tenant_account_details(tenant.id)
+    backup_summary = tenant_backup.export_summary(tenant.id)
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
@@ -1306,7 +1308,173 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "notes": notes,
             "note_priorities": NOTE_PRIORITIES,
             "nr2_knowledge": nr2_knowledge,
+            "backup_summary": backup_summary,
         },
+    )
+
+
+@router.get("/admin/tenants/{tenant_id}/backup/export-summary")
+def admin_tenant_export_summary(request: Request, tenant_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return JSONResponse({"error": "tenant_not_found"}, status_code=404)
+    return JSONResponse(tenant_backup.export_summary(tenant.id))
+
+
+@router.post("/admin/tenants/{tenant_id}/backup/export")
+def admin_create_tenant_export(
+    request: Request,
+    tenant_id: str,
+    include_history: str = Form(default=""),
+    include_files: str = Form(default=""),
+    include_logs: str = Form(default=""),
+    include_archived: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    try:
+        result = tenant_backup.create_tenant_export(
+            tenant.id,
+            include_history=bool(include_history),
+            include_files=bool(include_files),
+            include_logs=bool(include_logs),
+            include_archived=bool(include_archived),
+        )
+    except Exception as exc:
+        message = quote_plus(f"Export failed: {exc}")
+        return RedirectResponse(
+            url=f"/admin/tenants/{tenant.id}?action_level=warn&action_message={message}#tenant-backup-section",
+            status_code=303,
+        )
+    return FileResponse(
+        result.zip_path,
+        media_type="application/zip",
+        filename=result.zip_path.name,
+    )
+
+
+@router.get("/admin/tenants/{tenant_id}/backup/exports/{job_id}/download")
+def admin_download_tenant_export(
+    request: Request,
+    tenant_id: str,
+    job_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return JSONResponse({"error": "tenant_not_found"}, status_code=404)
+    path = tenant_backup.export_path_for_job(tenant.id, job_id)
+    if path is None:
+        return JSONResponse({"error": "export_not_found"}, status_code=404)
+    return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
+@router.get("/admin/tenants/{tenant_id}/backup/jobs/{job_id}")
+def admin_tenant_backup_job_status(
+    request: Request,
+    tenant_id: str,
+    job_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return JSONResponse({"error": "tenant_not_found"}, status_code=404)
+    job = tenant_backup.job_status(job_id)
+    if not job or job.get("tenant_id") != tenant.id:
+        return JSONResponse({"error": "job_not_found"}, status_code=404)
+    return JSONResponse(job)
+
+
+@router.post("/admin/tenants/{tenant_id}/backup/import/validate")
+async def admin_validate_tenant_import(
+    request: Request,
+    tenant_id: str,
+    package: UploadFile = File(...),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return JSONResponse({"error": "tenant_not_found"}, status_code=404)
+    upload_path = tenant_backup.save_upload_to_temp(
+        package.filename or "tenant-backup.zip",
+        await package.read(),
+    )
+    validation = tenant_backup.validate_import_package(upload_path)
+    payload = {
+        "ok": validation.ok,
+        "errors": validation.errors,
+        "warnings": validation.warnings,
+        "summary": validation.summary,
+        "uploadPath": str(upload_path) if validation.ok else "",
+    }
+    status = 200 if validation.ok else 400
+    return JSONResponse(payload, status_code=status)
+
+
+@router.post("/admin/tenants/{tenant_id}/backup/import")
+async def admin_import_tenant_backup(
+    request: Request,
+    tenant_id: str,
+    package: UploadFile = File(...),
+    mode: str = Form(default="validate"),
+    confirmation: str = Form(default=""),
+    new_slug: str = Form(default=""),
+    new_name: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    upload_path = tenant_backup.save_upload_to_temp(
+        package.filename or "tenant-backup.zip",
+        await package.read(),
+    )
+    try:
+        result = tenant_backup.import_tenant_backup(
+            upload_path,
+            mode=mode,
+            target_tenant_id=tenant.id,
+            confirmation=confirmation,
+            new_slug=new_slug,
+            new_name=new_name,
+        )
+    except Exception as exc:
+        message = quote_plus(f"Import failed: {exc}")
+        return RedirectResponse(
+            url=f"/admin/tenants/{tenant.id}?action_level=warn&action_message={message}#tenant-backup-section",
+            status_code=303,
+        )
+    finally:
+        tenant_backup.cleanup_temp_upload(upload_path)
+    target = result.target_tenant_id
+    message = quote_plus(
+        "Import validation passed." if result.mode == "validate"
+        else f"Import completed for {target}. Channels may need reconnecting."
+    )
+    return RedirectResponse(
+        url=f"/admin/tenants/{target}?action_message={message}#tenant-backup-section",
+        status_code=303,
     )
 
 
