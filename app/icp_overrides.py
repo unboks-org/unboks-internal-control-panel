@@ -138,6 +138,20 @@ def _normalize_escalation_rules(raw: Any) -> dict[str, Any] | None:
     }
 
 
+def _normalize_agent_identity(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    name = _clean_text(raw.get("name"))
+    if not name:
+        return None
+    return {
+        "name": name,
+        "source": raw.get("source") or "icp_override",
+        "updated_at": raw.get("updated_at"),
+        "updated_by": raw.get("updated_by"),
+    }
+
+
 def _normalize_sot_entry(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -296,6 +310,42 @@ def set_escalation_rules(
     )
 
 
+def set_agent_identity_override(
+    tenant_id: str,
+    name: str,
+    *,
+    updated_by: str = "nr3-admin",
+) -> dict[str, Any]:
+    data = _load_all()
+    tenant_state = _tenant_state(data, tenant_id)
+    settings = tenant_state.setdefault("ai_agent_settings", {})
+    clean_name = _clean_text(name)
+    settings["agent_identity"] = {
+        "name": clean_name,
+        "source": "icp_override",
+        "updated_at": _now(),
+        "updated_by": updated_by,
+    }
+    settings.setdefault("tone", None)
+    settings.setdefault("escalation_rules", None)
+    _save_all(data)
+    logger.info("icp_overrides.set_agent_identity tenant=%s", tenant_id)
+    return settings["agent_identity"]
+
+
+def clear_agent_identity_override(tenant_id: str) -> bool:
+    data = _load_all()
+    tenant_state = _tenant_state(data, tenant_id)
+    settings = tenant_state.setdefault("ai_agent_settings", {})
+    had_value = settings.get("agent_identity") is not None
+    settings["agent_identity"] = None
+    settings.setdefault("tone", None)
+    settings.setdefault("escalation_rules", None)
+    _save_all(data)
+    logger.info("icp_overrides.clear_agent_identity tenant=%s", tenant_id)
+    return had_value
+
+
 def ai_agent_settings_for_tenant(tenant_id: str) -> dict[str, Any]:
     data = _load_all()
     tenants = data.get("tenants") if isinstance(data, dict) else {}
@@ -312,6 +362,7 @@ def ai_agent_settings_for_tenant(tenant_id: str) -> dict[str, Any]:
         "escalation_rules": _normalize_escalation_rules(
             raw.get("escalation_rules")
         ),
+        "agent_identity": _normalize_agent_identity(raw.get("agent_identity")),
     }
 
 

@@ -88,6 +88,7 @@ def test_internal_overrides_reports_empty_available_envelope(client):
     assert body["ai_agent_settings"] == {
         "tone": None,
         "escalation_rules": None,
+        "agent_identity": None,
     }
 
 
@@ -146,6 +147,58 @@ def test_agent_tone_override_is_visible_to_nr2_bridge(client):
     assert tone["tone"] == "Calm, concise, professional"
     assert tone["notes"] == "Use plain language and avoid legal promises."
     assert tone["source"] == "icp_override"
+
+
+def test_agent_name_override_is_visible_to_nr2_bridge(client):
+    client.post("/login", data={"password": "test-password"})
+    r = client.post(
+        "/admin/tenants/unboks/agent/name",
+        data={"agent_name": "Sofia"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].endswith("#agent-section")
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge.status_code == 200
+    identity = bridge.json()["ai_agent_settings"]["agent_identity"]
+    assert identity["name"] == "Sofia"
+    assert identity["source"] == "icp_override"
+
+
+def test_agent_name_override_can_be_cleared(client):
+    client.post("/login", data={"password": "test-password"})
+    client.post(
+        "/admin/tenants/unboks/agent/name",
+        data={"agent_name": "Sofia"},
+        follow_redirects=False,
+    )
+    cleared = client.post(
+        "/admin/tenants/unboks/agent/name/clear",
+        follow_redirects=False,
+    )
+    assert cleared.status_code == 303
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge.status_code == 200
+    assert bridge.json()["ai_agent_settings"]["agent_identity"] is None
+
+
+def test_agent_name_rejects_misleading_name(client):
+    client.post("/login", data={"password": "test-password"})
+    r = client.post(
+        "/admin/tenants/unboks/agent/name",
+        data={"agent_name": "Doctor Roberto"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "mislead" in r.headers["location"]
 
 
 def test_agent_escalation_rules_override_is_visible_to_nr2_bridge(client):
