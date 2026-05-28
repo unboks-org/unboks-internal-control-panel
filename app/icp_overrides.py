@@ -16,6 +16,8 @@ import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
+from app import channel_connections
+
 
 logger = logging.getLogger(__name__)
 
@@ -421,12 +423,45 @@ def feature_toggles_for_tenant(tenant_id: str) -> dict[str, dict[str, Any]]:
     return result
 
 
+def channel_connections_for_tenant(tenant_id: str) -> dict[str, dict[str, Any]]:
+    """Return non-secret channel connection state for Nr2.
+
+    This is status metadata only. It intentionally excludes provider tokens,
+    request state tokens, and raw callback payloads.
+    """
+    whatsapp = channel_connections.get_tenant_channel_connection(
+        tenant_id,
+        channel="whatsapp",
+        provider="zernio",
+    )
+    if whatsapp is None:
+        return {
+            "whatsapp": {
+                "provider": "zernio",
+                "status": "not_connected",
+                "connected": False,
+            }
+        }
+    return {
+        "whatsapp": {
+            "provider": whatsapp.provider,
+            "status": whatsapp.status,
+            "connected": whatsapp.status == "connected",
+            "display_phone_number": whatsapp.display_phone_number,
+            "phone_number_id": whatsapp.phone_number_id,
+            "connected_at": whatsapp.connected_at,
+            "updated_at": whatsapp.updated_at,
+        }
+    }
+
+
 def effective_state_envelope(tenant_id: str) -> dict[str, Any]:
     """Return the exact envelope shape Nr2 expects from the bridge."""
     return {
         "available": True,
         "tenant_id": tenant_id,
         "feature_toggles": feature_toggles_for_tenant(tenant_id),
+        "channel_connections": channel_connections_for_tenant(tenant_id),
         "display_metadata": {},
         "sot_entries": sot_entries_for_tenant(tenant_id),
         "ai_agent_settings": ai_agent_settings_for_tenant(tenant_id),
