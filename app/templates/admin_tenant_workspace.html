@@ -360,6 +360,71 @@
   </section>
   </details>
 
+  <details class="ws-section ws-tone-peach">
+    <summary class="ws-summary">
+      <span class="ws-title">Safety / Moderation</span>
+      <span class="ws-desc muted">Auto-block serious abuse and repeated profanity.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
+    <section id="auto-block-section" class="agent-panel" aria-label="Auto-Block Rules">
+      <header class="agent-panel-header">
+        <div>
+          <h3>Auto-Block Rules</h3>
+          <p class="muted compact-note">
+            Serious abuse blocks immediately. Profanity blocks only after the configured repeated threshold.
+          </p>
+        </div>
+        <span class="status-chip status-{{ 'ok' if auto_block_sync.ok else 'unknown' }}">
+          {{ 'connected' if auto_block_sync.ok else auto_block_sync.status }}
+        </span>
+      </header>
+
+      {% if not auto_block_sync.ok %}
+        <p class="muted compact-note">Cannot load Nr2 auto-block settings: {{ auto_block_sync.error }}</p>
+      {% else %}
+        {% set zero = auto_block_settings.zero_tolerance %}
+        {% set repeated = auto_block_settings.repeated_profanity %}
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/auto-block" class="agent-inline-form">
+          <label class="agent-toggle">
+            <span class="agent-toggle-label">Auto-block enabled</span>
+            <input type="checkbox" name="enabled" {% if auto_block_settings.enabled %}checked{% endif %}>
+          </label>
+          <div class="agent-grid">
+            <div class="agent-block">
+              <h4>Zero tolerance</h4>
+              <label><input type="checkbox" name="hate_speech" {% if zero.hate_speech %}checked{% endif %}> Racial slurs / hate speech</label>
+              <label><input type="checkbox" name="severe_insult" {% if zero.severe_insult %}checked{% endif %}> Severe insults / personal abuse</label>
+              <label><input type="checkbox" name="threat" {% if zero.threat %}checked{% endif %}> Threats or intimidation</label>
+              <label><input type="checkbox" name="sexual_harassment" {% if zero.sexual_harassment %}checked{% endif %}> Sexual harassment</label>
+              <label><input type="checkbox" name="fraud_scam" {% if zero.fraud_scam %}checked{% endif %}> Fraud/scam behavior</label>
+              <label><input type="checkbox" name="severe_abuse" {% if zero.severe_abuse %}checked{% endif %}> Other severe abusive behavior</label>
+            </div>
+            <div class="agent-block">
+              <h4>Repeated profanity</h4>
+              <label><input type="checkbox" name="repeated_profanity_enabled" {% if repeated.enabled %}checked{% endif %}> Block repeated profanity / bad words</label>
+              <label class="agent-form-field">
+                <span>Block after</span>
+                <select name="repeated_profanity_threshold">
+                  {% for option in [2, 3, 5] %}
+                    <option value="{{ option }}" {% if repeated.threshold == option %}selected{% endif %}>{{ option }} messages</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label><input type="checkbox" name="warn_before_block" {% if repeated.warn_before_block %}checked{% endif %}> Warn before blocking for repeated profanity</label>
+              <p class="muted compact-note">
+                Every block creates an Auto-block review escalation with reason and evidence.
+              </p>
+            </div>
+          </div>
+          <div class="agent-form-actions">
+            <button type="submit" class="button-secondary">Save auto-block rules</button>
+          </div>
+        </form>
+      {% endif %}
+    </section>
+  </details>
+
   <details class="ws-section ws-tone-green">
     <summary class="ws-summary">
       <span class="ws-title">Nr2 company knowledge</span>

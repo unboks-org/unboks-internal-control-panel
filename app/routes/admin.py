@@ -28,7 +28,11 @@ from app.security import (
     verify_admin_password,
 )
 from app.provisioning import auto_provision_tenant, queue_tenant_host_action
-from app.nr2_sync import fetch_nr2_knowledge
+from app.nr2_sync import (
+    fetch_auto_block_settings,
+    fetch_nr2_knowledge,
+    update_auto_block_settings,
+)
 from app.port_registry import PortRegistryError, reserve_tenant_port
 from app.tenants import (
     ESCALATION_MODES,
@@ -367,6 +371,62 @@ def admin_save_agent_escalation_rules(
             if has_rules
             else "Escalation rules override cleared."
         ),
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/auto-block")
+def admin_save_auto_block_settings(
+    request: Request,
+    tenant_id: str,
+    enabled: Optional[str] = Form(default=None),
+    hate_speech: Optional[str] = Form(default=None),
+    severe_insult: Optional[str] = Form(default=None),
+    threat: Optional[str] = Form(default=None),
+    sexual_harassment: Optional[str] = Form(default=None),
+    fraud_scam: Optional[str] = Form(default=None),
+    severe_abuse: Optional[str] = Form(default=None),
+    repeated_profanity_enabled: Optional[str] = Form(default=None),
+    repeated_profanity_threshold: int = Form(default=3),
+    warn_before_block: Optional[str] = Form(default=None),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    payload = {
+        "enabled": enabled == "on",
+        "zero_tolerance": {
+            "hate_speech": hate_speech == "on",
+            "severe_insult": severe_insult == "on",
+            "threat": threat == "on",
+            "sexual_harassment": sexual_harassment == "on",
+            "fraud_scam": fraud_scam == "on",
+            "severe_abuse": severe_abuse == "on",
+        },
+        "repeated_profanity": {
+            "enabled": repeated_profanity_enabled == "on",
+            "threshold": repeated_profanity_threshold,
+            "warn_before_block": warn_before_block == "on",
+        },
+        "final_block_notice_enabled": False,
+    }
+    sync = update_auto_block_settings(tenant_id, payload)
+    from app import audit_log
+    audit_log.record_event(
+        actor="nr3-admin",
+        tenant_id=tenant_id,
+        action="auto_block_settings_updated",
+        result="success" if sync.ok else "failed",
+        safe_summary="Auto-block settings updated." if sync.ok else sync.error,
+        metadata={"source_url": sync.source_url},
+    )
+    return _workspace_redirect(
+        tenant_id,
+        "auto-block-section",
+        message="Auto-block settings saved." if sync.ok else f"Auto-block settings not saved: {sync.error}",
+        level="ok" if sync.ok else "warn",
     )
 
 
@@ -1283,6 +1343,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     stored_notes = _tenant_notes.list_notes(tenant.id)
     notes = sorted_notes(stored_notes + tenant.notes)
     nr2_knowledge = fetch_nr2_knowledge(tenant.id)
+    auto_block_sync = fetch_auto_block_settings(tenant.id)
     account_details = tenant_account_details(tenant.id)
     return templates.TemplateResponse(
         request,
@@ -1306,6 +1367,8 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "notes": notes,
             "note_priorities": NOTE_PRIORITIES,
             "nr2_knowledge": nr2_knowledge,
+            "auto_block_sync": auto_block_sync,
+            "auto_block_settings": auto_block_sync.settings,
         },
     )
 

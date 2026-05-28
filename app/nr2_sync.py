@@ -45,6 +45,18 @@ class Nr2KnowledgeSync:
         )
 
 
+@dataclass(frozen=True)
+class Nr2AutoBlockSync:
+    status: str
+    source_url: str = ""
+    error: str = ""
+    settings: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
 def _api_base_for_tenant(tenant_id: str) -> str:
     template = os.getenv(
         "NR3_TENANT_API_BASE_TEMPLATE",
@@ -363,6 +375,80 @@ def fetch_nr2_knowledge(
                 + "Nr2 sync failed; showing cached data.",
             )
         return Nr2KnowledgeSync(status="unavailable", source_url=base, error=str(exc)[:220])
+
+
+def _login_token(http: httpx.Client, base: str, tenant_id: str) -> tuple[str, str]:
+    password = _tenant_password(tenant_id)
+    if not password:
+        return "", "No dashboard password/access key found in tenant client.json."
+    login = http.post(f"{base}/login", json={"password": password})
+    login.raise_for_status()
+    token = login.json().get("token")
+    if not isinstance(token, str) or not token:
+        return "", "Nr2 login returned no token."
+    return token, ""
+
+
+def fetch_auto_block_settings(
+    tenant_id: str,
+    *,
+    client: httpx.Client | None = None,
+) -> Nr2AutoBlockSync:
+    base = _api_base_for_tenant(tenant_id)
+    owns_client = client is None
+    http = client or httpx.Client(timeout=3)
+    try:
+        token, error = _login_token(http, base, tenant_id)
+        if error:
+            return Nr2AutoBlockSync(status="missing_credentials", source_url=base, error=error)
+        data = _get_json(http, base, "/settings/auto-block", token)
+        return Nr2AutoBlockSync(status="ok", source_url=base, settings=data if isinstance(data, dict) else {})
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return Nr2AutoBlockSync(status="offline", source_url=base, error="Tenant runtime is offline or unreachable.")
+    except httpx.HTTPStatusError as exc:
+        return Nr2AutoBlockSync(
+            status="auth_failed" if exc.response.status_code in {401, 403, 405} else "unavailable",
+            source_url=base,
+            error=f"Nr2 returned HTTP {exc.response.status_code}.",
+        )
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return Nr2AutoBlockSync(status="unavailable", source_url=base, error=str(exc)[:220])
+    finally:
+        if owns_client:
+            http.close()
+
+
+def update_auto_block_settings(
+    tenant_id: str,
+    settings: dict[str, Any],
+    *,
+    client: httpx.Client | None = None,
+) -> Nr2AutoBlockSync:
+    base = _api_base_for_tenant(tenant_id)
+    owns_client = client is None
+    http = client or httpx.Client(timeout=3)
+    try:
+        token, error = _login_token(http, base, tenant_id)
+        if error:
+            return Nr2AutoBlockSync(status="missing_credentials", source_url=base, error=error)
+        response = http.put(
+            f"{base}/settings/auto-block",
+            headers={"Authorization": f"Bearer {token}"},
+            json=settings,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return Nr2AutoBlockSync(status="ok", source_url=base, settings=data if isinstance(data, dict) else {})
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return Nr2AutoBlockSync(status="offline", source_url=base, error="Tenant runtime is offline or unreachable.")
+    except httpx.HTTPStatusError as exc:
+        return Nr2AutoBlockSync(
+            status="auth_failed" if exc.response.status_code in {401, 403, 405} else "unavailable",
+            source_url=base,
+            error=f"Nr2 returned HTTP {exc.response.status_code}.",
+        )
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return Nr2AutoBlockSync(status="unavailable", source_url=base, error=str(exc)[:220])
     finally:
         if owns_client:
             http.close()
