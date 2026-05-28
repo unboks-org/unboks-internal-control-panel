@@ -1,0 +1,51 @@
+{% extends "admin_base.html" %}
+
+{% block content %}
+  <section class="page-section prompt-conflicts-page">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Prompt validation</p>
+        <h1>Conflict detected before save</h1>
+        <p class="muted">
+          This prompt change creates a critical contradiction with active safety or tenant rules.
+        </p>
+      </div>
+      <span class="status-chip status-error">Blocked for review</span>
+    </div>
+
+    <div class="prompt-conflict-list">
+      {% for conflict in conflicts %}
+        <article class="prompt-conflict-item severity-critical">
+          <div class="prompt-conflict-top">
+            <span class="status-chip status-error">{{ conflict.severity }}</span>
+            <strong>{{ conflict.title }}</strong>
+          </div>
+          <p>{{ conflict.why }}</p>
+          <div class="prompt-compare">
+            <div>
+              <small>Existing source</small>
+              <strong>{{ conflict.source_a.name }}</strong>
+              <pre>{{ conflict.instruction_a }}</pre>
+            </div>
+            <div>
+              <small>New change</small>
+              <strong>{{ conflict.source_b.name }}</strong>
+              <pre>{{ conflict.instruction_b }}</pre>
+            </div>
+          </div>
+          <p class="muted"><strong>Recommended fix:</strong> {{ conflict.recommended_fix }}</p>
+        </article>
+      {% endfor %}
+    </div>
+
+    <div class="prompt-actions">
+      <a class="button-secondary" href="/admin/tenants/{{ tenant.id }}#agent-section">Go back and fix</a>
+      <form method="post" action="{{ post_url }}">
+        {% for key, value in form_data.items() %}
+          <input type="hidden" name="{{ key }}" value="{{ value }}">
+        {% endfor %}
+        <button type="submit" class="button-danger">{{ action_label }}</button>
+      </form>
+    </div>
+  </section>
+{% endblock %}
