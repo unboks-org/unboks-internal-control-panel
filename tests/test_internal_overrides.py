@@ -83,12 +83,37 @@ def test_internal_overrides_reports_empty_available_envelope(client):
     assert body["available"] is True
     assert body["tenant_id"] == "unboks"
     assert body["feature_toggles"] == {}
+    assert body["channel_connections"]["whatsapp"]["status"] == "not_connected"
+    assert body["channel_connections"]["whatsapp"]["connected"] is False
     assert body["display_metadata"] == {}
     assert body["sot_entries"] == []
     assert body["ai_agent_settings"] == {
         "tone": None,
         "escalation_rules": None,
     }
+
+
+def test_internal_overrides_reports_whatsapp_connected_status(client):
+    from app import channel_connections
+
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="unboks",
+        status="connected",
+        zernio_account_id="acct_123",
+        phone_number_id="phone_123",
+        display_phone_number="+599 9 123 4567",
+    )
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge.status_code == 200
+    whatsapp = bridge.json()["channel_connections"]["whatsapp"]
+    assert whatsapp["status"] == "connected"
+    assert whatsapp["connected"] is True
+    assert whatsapp["display_phone_number"] == "+599 9 123 4567"
+    assert "token" not in whatsapp
 
 
 def test_channel_toggle_is_visible_to_nr2_bridge(client):
