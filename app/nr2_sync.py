@@ -366,3 +366,35 @@ def fetch_nr2_knowledge(
     finally:
         if owns_client:
             http.close()
+
+
+def send_password_reset_request(
+    tenant_id: str,
+    email: str,
+    *,
+    client: httpx.Client | None = None,
+) -> tuple[bool, str]:
+    """Ask a tenant's Nr2 runtime to send a reset link.
+
+    The Nr2 endpoint is intentionally generic and unauthenticated so it cannot
+    leak whether the email exists. Nr3 only calls it after reading the tenant
+    contact email from client.json.
+    """
+    clean_email = (email or "").strip()
+    if not clean_email:
+        return False, "Tenant contact email is missing."
+    base = _api_base_for_tenant(tenant_id)
+    owns_client = client is None
+    http = client or httpx.Client(timeout=5)
+    try:
+        response = http.post(
+            f"{base}/auth/forgot-password",
+            json={"email": clean_email},
+        )
+        response.raise_for_status()
+        return True, "Password reset email requested."
+    except Exception as exc:
+        return False, f"Nr2 reset request failed: {str(exc)[:160]}"
+    finally:
+        if owns_client:
+            http.close()

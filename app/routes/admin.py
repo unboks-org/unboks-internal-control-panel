@@ -28,7 +28,7 @@ from app.security import (
     verify_admin_password,
 )
 from app.provisioning import auto_provision_tenant, queue_tenant_host_action
-from app.nr2_sync import fetch_nr2_knowledge
+from app.nr2_sync import fetch_nr2_knowledge, send_password_reset_request
 from app.port_registry import PortRegistryError, reserve_tenant_port
 from app.tenants import (
     ESCALATION_MODES,
@@ -570,6 +570,57 @@ def admin_update_tenant_details(
         "tenant-details-section",
         message="Tenant details saved.",
         level="ok",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/send-password-reset")
+def admin_send_tenant_password_reset(
+    request: Request,
+    tenant_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    contact = tenant_account_details(tenant_id)
+    target_email = (contact.get("email") or "").strip()
+    from app import audit_log
+    if not target_email:
+        audit_log.record_event(
+            actor="nr3-admin",
+            tenant_id=tenant_id,
+            action="password_reset_email_requested",
+            result="failed",
+            safe_summary="Tenant contact email is missing.",
+            metadata={"target_email": ""},
+        )
+        return _workspace_redirect(
+            tenant_id,
+            "tenant-details-section",
+            message="Tenant contact email is missing.",
+            level="warn",
+        )
+    ok, message = send_password_reset_request(tenant_id, target_email)
+    audit_log.record_event(
+        actor="nr3-admin",
+        tenant_id=tenant_id,
+        action="password_reset_email_requested",
+        result="success" if ok else "failed",
+        safe_summary=message,
+        metadata={"target_email": target_email},
+    )
+    return _workspace_redirect(
+        tenant_id,
+        "tenant-details-section",
+        message=(
+            f"Password reset email requested for {target_email}."
+            if ok
+            else message
+        ),
+        level="ok" if ok else "warn",
     )
 
 

@@ -98,10 +98,20 @@
         <span>Logo URL</span>
         <input name="logo_url" type="url" value="{{ tenant_account.logo_url }}">
       </label>
-      <div class="tenant-details-actions">
-        <button type="submit" class="button-secondary">Save tenant details</button>
-      </div>
-    </form>
+    <div class="tenant-details-actions">
+      <button type="submit" class="button-secondary">Save tenant details</button>
+    </div>
+  </form>
+    <div class="tenant-details-actions">
+      <form method="post" action="/admin/tenants/{{ tenant.id }}/send-password-reset">
+        <button type="submit" class="button-secondary" {% if not tenant_account.email %}disabled{% endif %}>
+          Send password reset email
+        </button>
+      </form>
+      <p class="muted compact-note">
+        Sends a secure reset link to {{ tenant_account.email or 'the tenant contact email once saved' }}. Passwords are never shown here.
+      </p>
+    </div>
   </details>
 
   {# 3b. Setup checklist #}
