@@ -326,6 +326,85 @@ def set_agent_name_override(
     )
 
 
+def _normalize_response_timing(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    preset = str(raw.get("preset") or "balanced").strip().lower()
+    if preset not in {"fast", "balanced", "patient"}:
+        preset = "balanced"
+    preset_delay = {"fast": 5.0, "balanced": 12.0, "patient": 15.0}[preset]
+    try:
+        delay = float(raw.get("delay_seconds", preset_delay))
+    except (TypeError, ValueError):
+        delay = preset_delay
+    try:
+        max_wait = float(raw.get("max_wait_seconds", 25.0))
+    except (TypeError, ValueError):
+        max_wait = 25.0
+    delay = max(3.0, min(20.0, delay))
+    max_wait = max(delay, min(45.0, max_wait))
+    return {
+        "message_batching_enabled": bool(raw.get("message_batching_enabled", True)),
+        "preset": preset,
+        "delay_seconds": delay,
+        "max_wait_seconds": max_wait,
+    }
+
+
+def set_response_timing_override(
+    tenant_id: str,
+    *,
+    enabled: bool = True,
+    preset: str = "balanced",
+    delay_seconds: float = 12.0,
+    max_wait_seconds: float = 25.0,
+    clear: bool = False,
+    updated_by: str = "nr3-admin",
+) -> None:
+    """Set or clear the admin response timing override for one tenant."""
+    data = _load_all()
+    tenant_state = _tenant_state(data, tenant_id)
+    if clear:
+        tenant_state["response_timing"] = None
+    else:
+        settings = _normalize_response_timing({
+            "message_batching_enabled": enabled,
+            "preset": preset,
+            "delay_seconds": delay_seconds,
+            "max_wait_seconds": max_wait_seconds,
+        })
+        tenant_state["response_timing"] = {
+            "settings": settings,
+            "source": "icp_override",
+            "updated_at": _now(),
+            "updated_by": updated_by,
+        }
+    _save_all(data)
+    logger.info(
+        "icp_overrides.set_response_timing tenant=%s present=%s",
+        tenant_id,
+        not clear,
+    )
+
+
+def response_timing_for_tenant(tenant_id: str) -> dict[str, Any] | None:
+    data = _load_all()
+    tenants = data.get("tenants") if isinstance(data, dict) else {}
+    tenant_state = tenants.get(tenant_id) if isinstance(tenants, dict) else {}
+    raw = tenant_state.get("response_timing") if isinstance(tenant_state, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    settings = _normalize_response_timing(raw.get("settings"))
+    if not settings:
+        return None
+    return {
+        "settings": settings,
+        "source": raw.get("source") or "icp_override",
+        "updated_at": raw.get("updated_at"),
+        "updated_by": raw.get("updated_by"),
+    }
+
+
 def ai_agent_settings_for_tenant(tenant_id: str) -> dict[str, Any]:
     data = _load_all()
     tenants = data.get("tenants") if isinstance(data, dict) else {}
@@ -466,6 +545,7 @@ def effective_state_envelope(tenant_id: str) -> dict[str, Any]:
         "display_metadata": {},
         "sot_entries": sot_entries_for_tenant(tenant_id),
         "ai_agent_settings": ai_agent_settings_for_tenant(tenant_id),
+        "response_timing": response_timing_for_tenant(tenant_id),
     }
 
 

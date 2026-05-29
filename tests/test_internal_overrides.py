@@ -92,6 +92,7 @@ def test_internal_overrides_reports_empty_available_envelope(client):
         "escalation_rules": None,
         "agent_name": None,
     }
+    assert body["response_timing"] is None
 
 
 def test_channel_toggle_is_visible_to_nr2_bridge(client):
@@ -169,6 +170,32 @@ def test_agent_name_override_is_visible_to_nr2_bridge(client):
     agent_name = bridge.json()["ai_agent_settings"]["agent_name"]
     assert agent_name["name"] == "Sofia"
     assert agent_name["source"] == "icp_override"
+
+
+def test_response_timing_override_is_visible_to_nr2_bridge(client):
+    client.post("/login", data={"password": "test-password"})
+    r = client.post(
+        "/admin/tenants/unboks/agent/response-timing",
+        data={
+            "preset": "patient",
+            "delay_seconds": "15",
+            "max_wait_seconds": "30",
+            "batching_enabled": "on",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge.status_code == 200
+    timing = bridge.json()["response_timing"]
+    assert timing["source"] == "icp_override"
+    assert timing["settings"]["preset"] == "patient"
+    assert timing["settings"]["delay_seconds"] == 15.0
+    assert timing["settings"]["max_wait_seconds"] == 30.0
 
 
 def test_agent_escalation_rules_override_is_visible_to_nr2_bridge(client):

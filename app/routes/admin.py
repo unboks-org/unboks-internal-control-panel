@@ -432,6 +432,54 @@ def admin_save_agent_name_override(
     )
 
 
+@router.post("/admin/tenants/{tenant_id}/agent/response-timing")
+def admin_save_response_timing_override(
+    request: Request,
+    tenant_id: str,
+    preset: str = Form(default="balanced"),
+    delay_seconds: str = Form(default="12"),
+    max_wait_seconds: str = Form(default="25"),
+    batching_enabled: str = Form(default=""),
+    clear_override: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app import icp_overrides
+    if clear_override:
+        icp_overrides.set_response_timing_override(tenant_id, clear=True)
+        return _workspace_redirect(
+            tenant_id,
+            "agent-section",
+            message="Response timing override cleared.",
+        )
+    try:
+        delay = float(delay_seconds)
+        max_wait = float(max_wait_seconds)
+    except ValueError:
+        return _workspace_redirect(
+            tenant_id,
+            "agent-section",
+            message="Response timing values must be numbers.",
+            level="warn",
+        )
+    icp_overrides.set_response_timing_override(
+        tenant_id,
+        enabled=(batching_enabled == "on"),
+        preset=preset,
+        delay_seconds=delay,
+        max_wait_seconds=max_wait,
+    )
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message="Response timing override saved.",
+    )
+
+
 @router.post("/admin/tenants/{tenant_id}/auto-block")
 def admin_save_auto_block_settings(
     request: Request,
@@ -1436,6 +1484,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     tone_override = ai_settings.get("tone")
     escalation_rules_override = ai_settings.get("escalation_rules")
     agent_name_override = ai_settings.get("agent_name")
+    response_timing_override = _icp_overrides.response_timing_for_tenant(tenant.id)
     sot_entries = _icp_overrides.sot_entries_for_tenant(tenant.id)
     agent_feature_states = {
         "learning": override_toggles.get(
@@ -1448,6 +1497,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             any(key in override_toggles for key in AGENT_FEATURE_ACTIONS.values())
             or bool(tone_override)
             or bool(agent_name_override)
+            or bool(response_timing_override)
             or bool(sot_entries)
             or bool(escalation_rules_override)
         )
@@ -1479,6 +1529,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "tone_override": tone_override,
             "escalation_rules_override": escalation_rules_override,
             "agent_name_override": agent_name_override,
+            "response_timing_override": response_timing_override,
             "sot_entries": sot_entries,
             "is_reserved_tenant": tenant.id in RESERVED_SLUGS,
             "escalation_modes": ESCALATION_MODES,
