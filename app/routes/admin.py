@@ -436,9 +436,13 @@ def admin_save_agent_name_override(
 def admin_save_response_timing_override(
     request: Request,
     tenant_id: str,
+    mode: str = Form(default="preset"),
     preset: str = Form(default="balanced"),
     delay_seconds: str = Form(default="12"),
     max_wait_seconds: str = Form(default="25"),
+    custom_delay_seconds: str = Form(default="12"),
+    random_min_seconds: str = Form(default="5"),
+    random_max_seconds: str = Form(default="25"),
     batching_enabled: str = Form(default=""),
     clear_override: str = Form(default=""),
 ) -> Response:
@@ -459,6 +463,9 @@ def admin_save_response_timing_override(
     try:
         delay = float(delay_seconds)
         max_wait = float(max_wait_seconds)
+        custom_delay = float(custom_delay_seconds)
+        random_min = float(random_min_seconds)
+        random_max = float(random_max_seconds)
     except ValueError:
         return _workspace_redirect(
             tenant_id,
@@ -469,9 +476,13 @@ def admin_save_response_timing_override(
     icp_overrides.set_response_timing_override(
         tenant_id,
         enabled=(batching_enabled == "on"),
+        mode=mode,
         preset=preset,
         delay_seconds=delay,
         max_wait_seconds=max_wait,
+        custom_delay_seconds=custom_delay,
+        random_min_seconds=random_min,
+        random_max_seconds=random_max,
     )
     return _workspace_redirect(
         tenant_id,

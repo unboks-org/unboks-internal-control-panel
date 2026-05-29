@@ -329,25 +329,48 @@ def set_agent_name_override(
 def _normalize_response_timing(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
+    mode = str(raw.get("mode") or "preset").strip().lower()
+    if mode not in {"preset", "custom", "random"}:
+        mode = "preset"
     preset = str(raw.get("preset") or "balanced").strip().lower()
     if preset not in {"fast", "balanced", "patient"}:
         preset = "balanced"
     preset_delay = {"fast": 5.0, "balanced": 12.0, "patient": 15.0}[preset]
+    def _seconds(key: str, default: float) -> float:
+        try:
+            value = float(raw.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(5.0, min(300.0, value))
+
+    custom_delay = _seconds("custom_delay_seconds", raw.get("delay_seconds", 12.0))
+    random_min = _seconds("random_min_seconds", 5.0)
+    random_max = _seconds("random_max_seconds", 25.0)
+    if random_min > random_max:
+        random_min, random_max = random_max, random_min
     try:
         delay = float(raw.get("delay_seconds", preset_delay))
     except (TypeError, ValueError):
         delay = preset_delay
+    if mode == "custom":
+        delay = custom_delay
+    elif mode == "random":
+        delay = random_min
     try:
-        max_wait = float(raw.get("max_wait_seconds", 25.0))
+        max_wait = float(raw.get("max_wait_seconds", random_max if mode == "random" else delay if mode == "custom" else 25.0))
     except (TypeError, ValueError):
         max_wait = 25.0
-    delay = max(3.0, min(20.0, delay))
-    max_wait = max(delay, min(45.0, max_wait))
+    delay = max(5.0, min(300.0, delay))
+    max_wait = max(delay, min(300.0, max_wait))
     return {
         "message_batching_enabled": bool(raw.get("message_batching_enabled", True)),
+        "mode": mode,
         "preset": preset,
         "delay_seconds": delay,
         "max_wait_seconds": max_wait,
+        "custom_delay_seconds": custom_delay,
+        "random_min_seconds": random_min,
+        "random_max_seconds": random_max,
     }
 
 
@@ -355,9 +378,13 @@ def set_response_timing_override(
     tenant_id: str,
     *,
     enabled: bool = True,
+    mode: str = "preset",
     preset: str = "balanced",
     delay_seconds: float = 12.0,
     max_wait_seconds: float = 25.0,
+    custom_delay_seconds: float = 12.0,
+    random_min_seconds: float = 5.0,
+    random_max_seconds: float = 25.0,
     clear: bool = False,
     updated_by: str = "nr3-admin",
 ) -> None:
@@ -369,9 +396,13 @@ def set_response_timing_override(
     else:
         settings = _normalize_response_timing({
             "message_batching_enabled": enabled,
+            "mode": mode,
             "preset": preset,
             "delay_seconds": delay_seconds,
             "max_wait_seconds": max_wait_seconds,
+            "custom_delay_seconds": custom_delay_seconds,
+            "random_min_seconds": random_min_seconds,
+            "random_max_seconds": random_max_seconds,
         })
         tenant_state["response_timing"] = {
             "settings": settings,

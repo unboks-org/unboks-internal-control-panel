@@ -273,7 +273,7 @@
         <p class="agent-summary">
           {% if rt %}
             {{ 'Batching on' if rt.message_batching_enabled else 'Immediate replies' }}
-            · {{ rt.delay_seconds|round|int }}s delay · {{ rt.max_wait_seconds|round|int }}s max
+            · {% if rt.mode == 'random' %}random {{ rt.random_min_seconds|round|int }}-{{ rt.random_max_seconds|round|int }}s{% else %}{{ rt.delay_seconds|round|int }}s delay{% endif %}
           {% else %}
             Balanced default · 12s delay · 25s max
           {% endif %}
@@ -285,6 +285,14 @@
         {% endif %}
         <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/response-timing" class="agent-inline-form">
           <label class="agent-form-field">
+            <span>Mode</span>
+            <select name="mode">
+              {% for value, label in [('preset', 'Preset'), ('custom', 'Custom seconds'), ('random', 'Random range')] %}
+                <option value="{{ value }}" {% if rt and rt.mode == value %}selected{% elif not rt and value == 'preset' %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="agent-form-field">
             <span>Preset</span>
             <select name="preset">
               {% for value, label in [('fast', 'Fast (5s)'), ('balanced', 'Balanced (12s)'), ('patient', 'Patient (15s)')] %}
@@ -294,14 +302,20 @@
           </label>
           <div class="agent-sot-row">
             <label class="agent-form-field">
-              <span>Delay seconds</span>
-              <input type="number" name="delay_seconds" min="3" max="20" value="{{ rt.delay_seconds if rt else 12 }}">
+              <span>Custom seconds</span>
+              <input type="number" name="custom_delay_seconds" min="5" max="300" value="{{ rt.custom_delay_seconds if rt else 12 }}">
             </label>
             <label class="agent-form-field">
-              <span>Max wait seconds</span>
-              <input type="number" name="max_wait_seconds" min="5" max="45" value="{{ rt.max_wait_seconds if rt else 25 }}">
+              <span>Random min seconds</span>
+              <input type="number" name="random_min_seconds" min="5" max="300" value="{{ rt.random_min_seconds if rt else 5 }}">
+            </label>
+            <label class="agent-form-field">
+              <span>Random max seconds</span>
+              <input type="number" name="random_max_seconds" min="5" max="300" value="{{ rt.random_max_seconds if rt else 25 }}">
             </label>
           </div>
+          <input type="hidden" name="delay_seconds" value="{{ rt.delay_seconds if rt else 12 }}">
+          <input type="hidden" name="max_wait_seconds" value="{{ rt.max_wait_seconds if rt else 25 }}">
           <label class="agent-checkbox">
             <input type="checkbox" name="batching_enabled" {% if not rt or rt.message_batching_enabled %}checked{% endif %}>
             <span>Batch quick messages before replying</span>
