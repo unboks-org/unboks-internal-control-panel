@@ -217,6 +217,39 @@
 
     <div class="agent-grid">
       <div class="agent-block">
+        <h4>AI Agent name</h4>
+        <p class="agent-summary">
+          {% if agent_name_override %}
+            {{ agent_name_override.name }}
+          {% else %}
+            Marina
+          {% endif %}
+        </p>
+        {% if agent_name_override %}
+          <p class="muted compact-note">Admin override active. Tenant dashboard value is overridden.</p>
+        {% else %}
+          <p class="muted compact-note">Default or tenant-set in Nr2 Settings. Set an admin override only when needed.</p>
+        {% endif %}
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/name" class="agent-inline-form">
+          <label class="agent-form-field">
+            <span>Admin override</span>
+            <input
+              type="text"
+              name="agent_name"
+              maxlength="40"
+              value="{{ agent_name_override.name if agent_name_override else '' }}"
+              placeholder="Marina">
+          </label>
+          <div class="agent-form-actions">
+            <button type="submit" class="button-secondary">Save name</button>
+            {% if agent_name_override %}
+              <button type="submit" name="clear_override" value="1" class="text-button">Clear override</button>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+
+      <div class="agent-block">
         <h4>Escalation behavior</h4>
         <ul class="escalation-list">
           {% for value, label in escalation_modes %}

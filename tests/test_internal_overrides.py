@@ -90,6 +90,7 @@ def test_internal_overrides_reports_empty_available_envelope(client):
     assert body["ai_agent_settings"] == {
         "tone": None,
         "escalation_rules": None,
+        "agent_name": None,
     }
 
 
@@ -148,6 +149,26 @@ def test_agent_tone_override_is_visible_to_nr2_bridge(client):
     assert tone["tone"] == "Calm, concise, professional"
     assert tone["notes"] == "Use plain language and avoid legal promises."
     assert tone["source"] == "icp_override"
+
+
+def test_agent_name_override_is_visible_to_nr2_bridge(client):
+    client.post("/login", data={"password": "test-password"})
+    r = client.post(
+        "/admin/tenants/unboks/agent/name",
+        data={"agent_name": "Sofia"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].endswith("#agent-section")
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    assert bridge.status_code == 200
+    agent_name = bridge.json()["ai_agent_settings"]["agent_name"]
+    assert agent_name["name"] == "Sofia"
+    assert agent_name["source"] == "icp_override"
 
 
 def test_agent_escalation_rules_override_is_visible_to_nr2_bridge(client):
