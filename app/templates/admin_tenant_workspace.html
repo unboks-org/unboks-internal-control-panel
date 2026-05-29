@@ -502,6 +502,19 @@
               {% endfor %}
             </ul>
           {% endif %}
+          <h4>Indexed runtime paths</h4>
+          <ul class="nr2-mini-list">
+            {% set runtime_paths = namespace(count=0) %}
+            {% for source in prompt_conflict_report.indexed_sources %}
+              {% if source.name.startswith('Runtime:') %}
+                {% set runtime_paths.count = runtime_paths.count + 1 %}
+                <li><strong>{{ source.name }}</strong>: {{ source.source_location }}</li>
+              {% endif %}
+            {% endfor %}
+            {% if runtime_paths.count == 0 %}
+              <li>Runtime prompt manifest is not available for this tenant yet.</li>
+            {% endif %}
+          </ul>
         </div>
       </div>
     </section>
