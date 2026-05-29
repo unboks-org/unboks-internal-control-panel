@@ -34,6 +34,11 @@ from app.nr2_sync import (
     update_auto_block_settings,
 )
 from app.port_registry import PortRegistryError, reserve_tenant_port
+from app.prompt_conflicts import (
+    build_prompt_conflict_report,
+    dangerous_candidate_conflicts,
+    mark_reviewed,
+)
 from app.tenants import (
     ESCALATION_MODES,
     NOTE_PRIORITIES,
@@ -326,6 +331,20 @@ def admin_save_agent_tone(
         return redirect
     if get_tenant(tenant_id) is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
+    candidate = "\n".join(part for part in (tone, tone_notes) if part.strip())
+    conflicts = dangerous_candidate_conflicts(
+        tenant_id,
+        name="Pending Nr3 tone override",
+        text=candidate,
+        priority="tone_style",
+    )
+    if conflicts:
+        return _workspace_redirect(
+            tenant_id,
+            "prompt-conflicts-section",
+            message=f"Tone override not saved: {conflicts[0].title}.",
+            level="warn",
+        )
     from app import icp_overrides
     icp_overrides.set_ai_tone(
         tenant_id,
@@ -483,6 +502,19 @@ def admin_add_sot_entry(
         return redirect
     if get_tenant(tenant_id) is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
+    conflicts = dangerous_candidate_conflicts(
+        tenant_id,
+        name="Pending Nr3 Source of Truth entry",
+        text=content,
+        priority="sot_company_facts",
+    )
+    if conflicts:
+        return _workspace_redirect(
+            tenant_id,
+            "prompt-conflicts-section",
+            message=f"Source of Truth not saved: {conflicts[0].title}.",
+            level="warn",
+        )
     from app import icp_overrides
     try:
         icp_overrides.add_sot_entry(
@@ -1424,6 +1456,10 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     stored_notes = _tenant_notes.list_notes(tenant.id)
     notes = sorted_notes(stored_notes + tenant.notes)
     nr2_knowledge = fetch_nr2_knowledge(tenant.id)
+    prompt_conflict_report = build_prompt_conflict_report(
+        tenant.id,
+        nr2_knowledge=nr2_knowledge,
+    )
     auto_block_sync = fetch_auto_block_settings(tenant.id)
     account_details = tenant_account_details(tenant.id)
     return templates.TemplateResponse(
@@ -1449,6 +1485,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "notes": notes,
             "note_priorities": NOTE_PRIORITIES,
             "nr2_knowledge": nr2_knowledge,
+            "prompt_conflict_report": prompt_conflict_report,
             "auto_block_sync": auto_block_sync,
             "auto_block_settings": auto_block_sync.settings,
         },
@@ -1479,6 +1516,30 @@ def admin_refresh_nr2_knowledge(request: Request, tenant_id: str) -> Response:
             f"?action_message={quote_plus(message)}"
             f"&action_level={level}"
             "#nr2-knowledge-section"
+        ),
+        status_code=303,
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/prompt-conflicts/{conflict_id}/reviewed")
+def admin_mark_prompt_conflict_reviewed(
+    request: Request,
+    tenant_id: str,
+    conflict_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    mark_reviewed(tenant.id, conflict_id)
+    return RedirectResponse(
+        url=(
+            f"/admin/tenants/{tenant.id}"
+            "?action_message=Prompt+conflict+marked+reviewed."
+            "#prompt-conflicts-section"
         ),
         status_code=303,
     )

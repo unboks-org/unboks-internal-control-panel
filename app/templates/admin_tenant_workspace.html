@@ -393,6 +393,120 @@
   </section>
   </details>
 
+  <details class="ws-section ws-tone-cyan">
+    <summary class="ws-summary">
+      <span class="ws-title">Prompt Conflicts</span>
+      <span class="ws-desc muted">Find conflicting instructions before they damage replies.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
+    <section id="prompt-conflicts-section" class="agent-panel" aria-label="Prompt Conflicts">
+      <header class="agent-panel-header">
+        <div>
+          <h3>Prompt Conflicts</h3>
+          <p class="muted compact-note">
+            Real indexed sources from Nr3, Nr2 knowledge, and tenant config. Runtime prompt builders are listed when they still need indexing.
+          </p>
+        </div>
+        <span class="status-chip status-{{ 'down' if prompt_conflict_report.active_conflicts else 'ok' }}">
+          {{ prompt_conflict_report.active_conflicts | length }} active
+        </span>
+      </header>
+
+      <div class="nr2-knowledge-stats">
+        <div class="data-stat">
+          <span class="data-stat-label">Indexed sources</span>
+          <span class="data-stat-value">{{ prompt_conflict_report.indexed_sources | length }}</span>
+        </div>
+        <div class="data-stat">
+          <span class="data-stat-label">Not indexed yet</span>
+          <span class="data-stat-value">{{ prompt_conflict_report.not_indexed_sources | length }}</span>
+        </div>
+        <div class="data-stat">
+          <span class="data-stat-label">Warnings</span>
+          <span class="data-stat-value">{{ prompt_conflict_report.conflicts | length }}</span>
+        </div>
+        <div class="data-stat">
+          <span class="data-stat-label">Reviewed</span>
+          <span class="data-stat-value">{{ prompt_conflict_report.reviewed_conflict_ids | length }}</span>
+        </div>
+      </div>
+
+      <div class="agent-grid">
+        <div class="agent-block agent-block-wide">
+          <h4>Active warnings</h4>
+          {% if prompt_conflict_report.active_conflicts %}
+            <ul class="agent-sot-list" role="list">
+              {% for conflict in prompt_conflict_report.active_conflicts %}
+                <li class="agent-sot-item">
+                  <div class="agent-sot-header">
+                    <div>
+                      <span class="status-chip status-{{ 'down' if conflict.severity == 'Critical' else 'warn' }}">{{ conflict.severity }}</span>
+                      <strong>{{ conflict.title }}</strong>
+                    </div>
+                    <form method="post" action="/admin/tenants/{{ tenant.id }}/prompt-conflicts/{{ conflict.id }}/reviewed">
+                      <button type="submit" class="text-button">Mark reviewed</button>
+                    </form>
+                  </div>
+                  <p><strong>{{ conflict.source_a }}</strong>: {{ conflict.instruction_a }}</p>
+                  <p><strong>{{ conflict.source_b }}</strong>: {{ conflict.instruction_b }}</p>
+                  <p class="muted compact-note">Current winner: {{ conflict.current_winner }}</p>
+                  <p>{{ conflict.why_it_matters }}</p>
+                  <p class="muted compact-note">Recommended fix: {{ conflict.recommended_fix }}</p>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="muted compact-note">No active prompt conflicts detected from indexed sources.</p>
+          {% endif %}
+        </div>
+
+        <div class="agent-block">
+          <h4>Safety locks</h4>
+          <ul class="nr2-mini-list">
+            {% for rule in prompt_conflict_report.safety_locks %}
+              <li>{{ rule }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        <div class="agent-block">
+          <h4>Priority order</h4>
+          <ol class="nr2-mini-list">
+            {% for priority in prompt_conflict_report.priority_order %}
+              <li>{{ priority | replace('_', ' ') }}</li>
+            {% endfor %}
+          </ol>
+        </div>
+
+        <div class="agent-block agent-block-wide">
+          <h4>Effective prompt preview</h4>
+          <p class="muted compact-note">
+            Shows the currently indexed active rules in winning order. This is intentionally conservative and labels runtime code sources that still need a manifest.
+          </p>
+          <ul class="nr2-list">
+            {% for source in prompt_conflict_report.effective_prompt_preview.active_rules[:8] %}
+              <li>
+                <strong>{{ source.name }}</strong>
+                <span class="status-chip status-ok">{{ source.priority | replace('_', ' ') }}</span>
+                <p>{{ source.text }}</p>
+                <p class="muted compact-note">{{ source.source_location }} | Used in: {{ source.used_in | join(', ') }}</p>
+              </li>
+            {% endfor %}
+          </ul>
+          {% if prompt_conflict_report.not_indexed_sources %}
+            <h4>Extraction roadmap</h4>
+            <ul class="nr2-mini-list">
+              {% for source in prompt_conflict_report.not_indexed_sources %}
+                <li><strong>{{ source.name }}</strong>: {{ source.source_location }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+  </details>
+
   <details class="ws-section ws-tone-peach">
     <summary class="ws-summary">
       <span class="ws-title">Safety / Moderation</span>

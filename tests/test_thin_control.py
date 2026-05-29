@@ -45,12 +45,13 @@ def test_workspace_has_expected_sections(client):
     assert aria_labels == [
         "Channels",
         "AI Agent",
+        "Prompt Conflicts",
         "Auto-Block Rules",
-            "Nr2 company knowledge",
-            "Escalations",
-            "Tenant notes",
-            "Tenant Backup & Restore",
-            "Danger zone",
+        "Nr2 company knowledge",
+        "Escalations",
+        "Tenant notes",
+        "Tenant Backup & Restore",
+        "Danger zone",
     ], f"section drift: {aria_labels}"
 
 
@@ -105,10 +106,11 @@ def test_workspace_has_no_not_wired_modal_buttons(client):
         "/admin/tenants/unboks/details",
         "/admin/tenants/unboks/agent/",
         "/admin/tenants/unboks/notes",
-            "/admin/tenants/unboks/sot",
-            "/admin/tenants/unboks/nr2-knowledge/refresh",
-            "/admin/tenants/unboks/backup/import",
-        )
+        "/admin/tenants/unboks/sot",
+        "/admin/tenants/unboks/prompt-conflicts/",
+        "/admin/tenants/unboks/nr2-knowledge/refresh",
+        "/admin/tenants/unboks/backup/import",
+    )
     for action in real_forms:
         assert action.startswith(expected_real_prefixes), action
 
