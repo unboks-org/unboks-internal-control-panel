@@ -28,6 +28,7 @@ from app.tenants import (
     get_tenant_client_data,
     list_tenants,
     tenant_contact_details,
+    update_tenant_channel_account_allowlist,
 )
 from app.zernio import (
     ZernioAccountSummary,
@@ -195,7 +196,7 @@ def _upsert_connected_account(
     }
     if callback_payload:
         metadata["callback"] = callback_payload
-    return channel_connections.upsert_tenant_channel_connection(
+    connection = channel_connections.upsert_tenant_channel_connection(
         tenant_id=tenant_id,
         status="connected",
         zernio_profile_id=account.profile_id,
@@ -207,6 +208,21 @@ def _upsert_connected_account(
         last_request_id=request_id,
         last_error=None,
     )
+    allowlist_written = update_tenant_channel_account_allowlist(
+        tenant_id,
+        zernio_account_id=account.id,
+        note=(
+            "Nr3 WhatsApp connection: strict Zernio account allowlist for "
+            f"{_display_phone(account) or account.username or 'connected WhatsApp'}."
+        ),
+    )
+    if not allowlist_written:
+        logger.warning(
+            "whatsapp_connected_allowlist_not_written tenant=%s account=%s",
+            tenant_id,
+            account.id[:24],
+        )
+    return connection
 
 
 def _sync_whatsapp_connection_from_zernio(

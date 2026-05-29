@@ -211,3 +211,13 @@ def test_whatsapp_status_reconciles_connected_zernio_account(monkeypatch, tmp_pa
     stored = channel_connections.get_connection_request(created.id)
     assert stored is not None
     assert stored.status == "connected"
+    client_json = json.loads(
+        (tenants_root / "lawyer" / "config" / "client.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert client_json["channel_account_allowlist"] == {
+        "mode": "strict",
+        "zernio_accounts": ["account_1"],
+        "notes": "Nr3 WhatsApp connection: strict Zernio account allowlist for +599 9 694 5527.",
+    }
