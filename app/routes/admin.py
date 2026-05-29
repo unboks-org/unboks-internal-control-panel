@@ -779,6 +779,46 @@ def admin_unpause_tenant(
     )
 
 
+@router.post("/admin/tenants/{tenant_id}/password-reset/send")
+def admin_send_tenant_password_reset(
+    request: Request,
+    tenant_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    from app.password_recovery import request_reset
+    from app.tenants import tenant_contact_details
+
+    contact = tenant_contact_details(tenant_id)
+    email = contact.get("email", "")
+    if not email:
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message="No tenant contact email is configured.",
+            level="warn",
+        )
+    request_reset(
+        tenant_id=tenant_id,
+        email=email,
+        ip_address=request.client.host if request.client else "internal_admin",
+        settings=settings,
+        actor="internal_admin",
+    )
+    return _workspace_redirect(
+        tenant_id,
+        "danger-section",
+        message=f"Password reset email requested for {email}.",
+        level="ok",
+    )
+
+
 @router.post("/admin/tenants/import", response_class=HTMLResponse)
 def admin_tenant_import_existing(
     request: Request,

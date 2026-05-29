@@ -201,6 +201,7 @@ def queue_tenant_host_action(
     dashboard_url: str = "",
     typed_slug: str = "",
     final_confirmation: str = "",
+    new_password: str = "",
 ) -> AutoProvisionResult:
     """Queue a privileged host action such as suspending a tenant.
 
@@ -214,7 +215,12 @@ def queue_tenant_host_action(
             message="Host action worker is disabled.",
             dashboard_url=dashboard_url,
         )
-    if action not in {"suspend_tenant", "unpause_tenant", "delete_tenant"}:
+    if action not in {
+        "suspend_tenant",
+        "unpause_tenant",
+        "delete_tenant",
+        "reset_dashboard_password",
+    }:
         return AutoProvisionResult(
             status="failed",
             message=f"Unsupported host action: {action}",
@@ -253,6 +259,8 @@ def queue_tenant_host_action(
             payload["typed_slug"] = typed_slug
         if final_confirmation:
             payload["final_confirmation"] = final_confirmation
+        if new_password:
+            payload["new_password"] = new_password
         tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp_path, job_path)
 

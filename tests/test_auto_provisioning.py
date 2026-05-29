@@ -127,6 +127,31 @@ def test_host_action_queue_writes_unpause_job(monkeypatch, tmp_path):
     assert payload["slug"] == "acme"
 
 
+def test_host_action_queue_writes_password_reset_job(monkeypatch, tmp_path):
+    jobs = tmp_path / "jobs"
+    results = tmp_path / "results"
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
+    monkeypatch.setenv("NR3_PROVISION_QUEUE_DIR", str(jobs))
+    monkeypatch.setenv("NR3_PROVISION_RESULT_DIR", str(results))
+    monkeypatch.setenv("NR3_PROVISION_TIMEOUT_SECONDS", "0")
+
+    result = queue_tenant_host_action(
+        slug="acme",
+        action="reset_dashboard_password",
+        dashboard_url="https://dashboard.unboks.org/acme",
+        new_password="Better-Password-123",
+    )
+
+    assert result.status == "queued"
+    job_files = list(jobs.glob("*.json"))
+    assert len(job_files) == 1
+    payload = json.loads(job_files[0].read_text())
+    assert payload["job_type"] == "tenant_action"
+    assert payload["action"] == "reset_dashboard_password"
+    assert payload["slug"] == "acme"
+    assert payload["new_password"] == "Better-Password-123"
+
+
 def test_host_action_queue_writes_delete_job(monkeypatch, tmp_path):
     jobs = tmp_path / "jobs"
     results = tmp_path / "results"
