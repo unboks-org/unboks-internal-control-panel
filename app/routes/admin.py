@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Form, Request, File, UploadFile
-from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from starlette.templating import Jinja2Templates
 from typing import Optional
 
@@ -1482,6 +1482,80 @@ def admin_refresh_nr2_knowledge(request: Request, tenant_id: str) -> Response:
         ),
         status_code=303,
     )
+
+
+@router.get("/admin/tenants/{tenant_id}/backup/export")
+def admin_export_tenant_backup(
+    request: Request,
+    tenant_id: str,
+    include_history: Optional[str] = None,
+    include_files: Optional[str] = None,
+    include_logs: Optional[str] = None,
+    include_inactive: Optional[str] = None,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app.tenant_backup import build_export_package
+    try:
+        package = build_export_package(
+            tenant_id,
+            include_history=include_history is not None,
+            include_files=include_files is not None,
+            include_logs=include_logs is not None,
+            include_inactive=include_inactive is not None,
+        )
+    except ValueError as exc:
+        return _workspace_redirect(tenant_id, "backup-section", message=str(exc), level="warn")
+    return FileResponse(package, media_type="application/zip", filename=package.name)
+
+
+@router.post("/admin/tenants/{tenant_id}/backup/import")
+def admin_import_tenant_backup(
+    request: Request,
+    tenant_id: str,
+    backup_file: UploadFile = File(...),
+    import_mode: str = Form(default="validate"),
+    new_slug: str = Form(default=""),
+    confirmation: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app.tenant_backup import import_uploaded_package
+    try:
+        result = import_uploaded_package(
+            backup_file.file,
+            target_tenant=tenant_id,
+            mode=import_mode,
+            new_slug=new_slug,
+            confirmation=confirmation,
+        )
+    except ValueError as exc:
+        return _workspace_redirect(tenant_id, "backup-section", message=str(exc), level="warn")
+
+    if result["status"] == "validated":
+        summary = result["summary"]
+        msg = (
+            f"Backup validated: {summary['tenant_slug']} "
+            f"({summary.get('export_timestamp') or 'unknown date'}). "
+            "No data was changed."
+        )
+        return _workspace_redirect(tenant_id, "backup-section", message=msg)
+
+    target = result["target_tenant"]
+    msg = (
+        f"Tenant backup imported to {target}. "
+        f"Rollback package: {result['rollback_package']}. "
+        "Provider channels may need reconnecting."
+    )
+    return _workspace_redirect(target, "backup-section", message=msg)
 
 
 @router.get("/admin/onboarding", response_class=HTMLResponse)

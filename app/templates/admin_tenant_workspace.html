@@ -745,6 +745,70 @@
   </section>
   </details>
 
+  {# 6. Tenant backup and restore #}
+  <span id="backup-section"></span>
+  <details class="ws-section ws-tone-cyan">
+    <summary class="ws-summary">
+      <span class="ws-title">Tenant Backup & Restore</span>
+      <span class="ws-desc muted">Export, validate, restore, or clone tenant configuration safely.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
+  <section class="agent-panel" aria-label="Tenant Backup & Restore">
+    <header class="agent-panel-header">
+      <div>
+        <h3>Tenant Backup & Restore</h3>
+        <p class="muted compact-note">Secrets and provider tokens are not exported in plain text. Restored channels may need reconnecting.</p>
+      </div>
+    </header>
+    <div class="agent-grid">
+      <div class="agent-block">
+        <h4>Export tenant data</h4>
+        <p class="muted compact-note">Creates a ZIP with manifest, tenant settings, prompt/SOT data, channel metadata, notes, checksums, and restore instructions.</p>
+        <form method="get" action="/admin/tenants/{{ tenant.id }}/backup/export" class="agent-inline-form">
+          <label class="agent-checkbox"><input type="checkbox" name="include_history" value="1"> Include conversation/escalation history metadata</label>
+          <label class="agent-checkbox"><input type="checkbox" name="include_files" value="1"> Include uploaded files manifest</label>
+          <label class="agent-checkbox"><input type="checkbox" name="include_logs" value="1"> Include audit logs</label>
+          <label class="agent-checkbox"><input type="checkbox" name="include_inactive" value="1"> Include inactive/archived data where indexed</label>
+          <div class="agent-form-actions">
+            <button type="submit" class="button-secondary">Export tenant data</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="agent-block">
+        <h4>Import tenant backup</h4>
+        <p class="muted compact-note">Run Validate only first. Restore creates a rollback export automatically before applying changes.</p>
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/backup/import" enctype="multipart/form-data" class="agent-inline-form">
+          <label class="agent-form-field">
+            <span>Backup ZIP</span>
+            <input type="file" name="backup_file" accept=".zip,application/zip" required>
+          </label>
+          <label class="agent-form-field">
+            <span>Import mode</span>
+            <select name="import_mode">
+              <option value="validate">Validate only / dry run</option>
+              <option value="restore">Restore into this tenant</option>
+              <option value="clone">Restore as new tenant / clone</option>
+            </select>
+          </label>
+          <label class="agent-form-field">
+            <span>New slug for clone</span>
+            <input type="text" name="new_slug" placeholder="new-tenant-slug">
+          </label>
+          <label class="agent-form-field">
+            <span>Confirmation</span>
+            <input type="text" name="confirmation" placeholder="{{ tenant.id }} for restore, IMPORT CLONE for clone">
+          </label>
+          <div class="agent-form-actions">
+            <button type="submit" class="button-secondary">Validate / import backup</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+  </details>
+
   {# 6. Danger zone #}
   <span id="danger-section"></span>
   <details class="ws-section ws-tone-danger">
