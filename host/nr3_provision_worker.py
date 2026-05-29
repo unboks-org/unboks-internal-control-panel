@@ -286,6 +286,40 @@ def update_client_status(tenant_dir: Path, status: str) -> None:
     )
 
 
+def update_dashboard_password(tenant_dir: Path, slug: str, new_password: str) -> None:
+    client_path = tenant_dir / "config" / "client.json"
+    data = json.loads(client_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise RuntimeError(f"client.json is not an object: {client_path}")
+    data["password"] = new_password
+    data["dashboard_access_key"] = new_password
+    data["password_updated_at"] = utc_now()
+    business = data.get("business")
+    if isinstance(business, dict) and business:
+        business["password_updated_at"] = data["password_updated_at"]
+    client_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    env_path = tenant_dir / "config" / "platform.env"
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    else:
+        lines = [f"# platform.env for tenant {slug}"]
+    replaced = False
+    out: list[str] = []
+    for line in lines:
+        if line.startswith("DASHBOARD_PASSWORD="):
+            out.append(f"DASHBOARD_PASSWORD={new_password}")
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        out.append(f"DASHBOARD_PASSWORD={new_password}")
+    env_path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+
+
 def backup_tenant_before_delete(slug: str, tenant_dir: Path) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     backup_dir = DELETED_TENANTS_ROOT / f"{slug}-{stamp}"
@@ -358,14 +392,30 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
     if action == "delete_tenant":
         process_delete_tenant(job_id, job, slug)
         return
-    if action not in {"suspend_tenant", "unpause_tenant"}:
+    if action not in {"suspend_tenant", "unpause_tenant", "reset_dashboard_password"}:
         raise RuntimeError(f"Unsupported tenant action: {action!r}")
 
     tenant_dir = CLIENTS_ROOT / slug
     if not tenant_dir.is_dir():
         raise RuntimeError(f"Tenant directory not found: {tenant_dir}")
     details: list[str] = []
-    if action == "suspend_tenant":
+    if action == "reset_dashboard_password":
+        new_password = str(job.get("new_password") or "").strip()
+        if len(new_password) < 10:
+            raise RuntimeError("New dashboard password is missing or too short.")
+        update_dashboard_password(tenant_dir, slug, new_password)
+        details.append("client.json and platform.env dashboard password updated")
+        running = run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            check=False,
+        )
+        if running.returncode == 0 and f"wtyj-{slug}" in running.stdout.splitlines():
+            run(["docker", "compose", "up", "-d", "--force-recreate"], cwd=tenant_dir)
+            details.append(f"running container wtyj-{slug} recreated")
+        else:
+            details.append(f"container wtyj-{slug} was not running; files updated only")
+        message = f"Dashboard password reset for tenant {slug}."
+    elif action == "suspend_tenant":
         update_client_status(tenant_dir, "inactive")
         details.append("client.json status set to inactive")
         run(["docker", "compose", "stop"], cwd=tenant_dir)

@@ -742,6 +742,23 @@
           <button type="submit" class="button-secondary">Unpause tenant</button>
         </form>
       {% endif %}
+      <div class="danger-delete">
+        <h4>Password recovery</h4>
+        <p>Send a secure one-time password reset link to the tenant contact email.</p>
+        <p class="muted compact-note">
+          Contact email:
+          {% if tenant_account.email %}
+            <code>{{ tenant_account.email }}</code>
+          {% else %}
+            <span>not configured</span>
+          {% endif %}
+        </p>
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/password-reset/send" class="danger-form danger-form-restore">
+          <button type="submit" class="button-secondary" {% if not tenant_account.email %}disabled{% endif %}>
+            Send password reset email
+          </button>
+        </form>
+      </div>
       <div class="danger-delete" data-delete-tenant data-tenant-id="{{ tenant.id }}">
         <h4>Delete Tenant (Permanent Wipe)</h4>
         <p>This action is irreversible and will permanently delete the tenant and all its data.</p>
