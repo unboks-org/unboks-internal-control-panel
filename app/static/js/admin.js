@@ -222,6 +222,44 @@
     });
   }
 
+  function initManualCopyActions() {
+    document.querySelectorAll("[data-manual-copy]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var block = btn.parentElement && btn.parentElement.querySelector("[data-manual-copy-text]");
+        var text = block ? (block.textContent || "").trim() : "";
+        if (!text) return;
+
+        function done(label) {
+          var old = btn.textContent;
+          btn.textContent = label;
+          window.setTimeout(function () { btn.textContent = old; }, 1800);
+        }
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(
+            function () { done("Copied"); },
+            function () { done("Copy failed"); }
+          );
+          return;
+        }
+
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand("copy");
+          done("Copied");
+        } catch (_) {
+          done("Copy failed");
+        }
+        ta.remove();
+      });
+    });
+  }
+
   function initWhatsAppConnectionCard() {
     var card = document.querySelector("[data-whatsapp-connect]");
     if (!card || !window.fetch) {
@@ -724,6 +762,7 @@
     initTenantSelector();
     initCreateTenantWizard();
     initTenantCreatedActions();
+    initManualCopyActions();
     initWhatsAppConnectionCard();
     initWhatsAppConnectedToast();
     initTenantPermanentDelete();

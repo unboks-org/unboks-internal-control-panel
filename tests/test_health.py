@@ -133,8 +133,9 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert "Unboks" in shell.text
     assert "Consulta Despertares" not in shell.text
     assert "BlueFinn Charters" not in shell.text
-    # Sidebar must only show TENANTS and SETTINGS — Home was removed; no Onboarding/Reviews
+    # Sidebar must only show operator essentials — no old dashboard/review clutter.
     assert "sidebar-nav" in shell.text
+    assert ">Manual<" in shell.text
     assert ">Settings<" in shell.text
     sidebar = shell.text.split('class="sidebar-nav"', 1)[1].split("</nav>", 1)[0]
     assert "Home" not in sidebar
@@ -145,7 +146,18 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert "Anomaly monitor" not in sidebar
     assert "Pending changes" not in sidebar
     assert "Push audit" not in sidebar
+    assert "Manual" in sidebar
     assert "Settings" in sidebar
+
+    manual_page = client.get("/admin/manual")
+    assert manual_page.status_code == 200
+    assert "Onboarding Manual" in manual_page.text
+    assert "Golden path" in manual_page.text
+    assert "Copy checklist" in manual_page.text
+    assert "data-manual-copy-text" in manual_page.text
+    assert "Standard Operating Rules" in manual_page.text
+    assert "tenant-selector" in manual_page.text
+    assert "sidebar-nav" in manual_page.text
 
     settings_page = client.get("/admin/settings")
     assert settings_page.status_code == 200
@@ -335,6 +347,18 @@ def test_admin_send_email_route_requires_auth(monkeypatch, tmp_path) -> None:
         "/admin/onboarding/leads/1/send-email",
         follow_redirects=False,
     )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_admin_manual_requires_auth(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    client = TestClient(app)
+
+    response = client.get("/admin/manual", follow_redirects=False)
 
     assert response.status_code == 303
     assert response.headers["location"] == "/login"
