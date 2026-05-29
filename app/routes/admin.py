@@ -374,6 +374,45 @@ def admin_save_agent_escalation_rules(
     )
 
 
+@router.post("/admin/tenants/{tenant_id}/agent/name")
+def admin_save_agent_name_override(
+    request: Request,
+    tenant_id: str,
+    agent_name: str = Form(default=""),
+    clear_override: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    from app import icp_overrides
+    if clear_override:
+        icp_overrides.set_agent_name_override(tenant_id, "")
+        return _workspace_redirect(
+            tenant_id,
+            "agent-section",
+            message="AI Agent name override cleared.",
+        )
+    from app.agent_identity import validate_agent_name
+    try:
+        clean_name = validate_agent_name(agent_name)
+    except ValueError as exc:
+        return _workspace_redirect(
+            tenant_id,
+            "agent-section",
+            message=str(exc),
+            level="warn",
+        )
+    icp_overrides.set_agent_name_override(tenant_id, clean_name)
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message="AI Agent name override saved.",
+    )
+
+
 @router.post("/admin/tenants/{tenant_id}/auto-block")
 def admin_save_auto_block_settings(
     request: Request,
@@ -1364,6 +1403,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     ai_settings = _icp_overrides.ai_agent_settings_for_tenant(tenant.id)
     tone_override = ai_settings.get("tone")
     escalation_rules_override = ai_settings.get("escalation_rules")
+    agent_name_override = ai_settings.get("agent_name")
     sot_entries = _icp_overrides.sot_entries_for_tenant(tenant.id)
     agent_feature_states = {
         "learning": override_toggles.get(
@@ -1375,6 +1415,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
         if (
             any(key in override_toggles for key in AGENT_FEATURE_ACTIONS.values())
             or bool(tone_override)
+            or bool(agent_name_override)
             or bool(sot_entries)
             or bool(escalation_rules_override)
         )
@@ -1401,6 +1442,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "ai_settings": ai_settings,
             "tone_override": tone_override,
             "escalation_rules_override": escalation_rules_override,
+            "agent_name_override": agent_name_override,
             "sot_entries": sot_entries,
             "is_reserved_tenant": tenant.id in RESERVED_SLUGS,
             "escalation_modes": ESCALATION_MODES,

@@ -296,6 +296,36 @@ def set_escalation_rules(
     )
 
 
+def set_agent_name_override(
+    tenant_id: str,
+    name: str,
+    *,
+    updated_by: str = "nr3-admin",
+) -> None:
+    """Set or clear the admin AI Agent name override for one tenant."""
+    data = _load_all()
+    tenant_state = _tenant_state(data, tenant_id)
+    settings = tenant_state.setdefault("ai_agent_settings", {})
+    clean_name = _clean_text(name)
+    if clean_name:
+        settings["agent_name"] = {
+            "name": clean_name,
+            "source": "icp_override",
+            "updated_at": _now(),
+            "updated_by": updated_by,
+        }
+    else:
+        settings["agent_name"] = None
+    settings.setdefault("tone", None)
+    settings.setdefault("escalation_rules", None)
+    _save_all(data)
+    logger.info(
+        "icp_overrides.set_agent_name tenant=%s present=%s",
+        tenant_id,
+        bool(clean_name),
+    )
+
+
 def ai_agent_settings_for_tenant(tenant_id: str) -> dict[str, Any]:
     data = _load_all()
     tenants = data.get("tenants") if isinstance(data, dict) else {}
@@ -311,6 +341,11 @@ def ai_agent_settings_for_tenant(tenant_id: str) -> dict[str, Any]:
         "tone": _normalize_tone(raw.get("tone")),
         "escalation_rules": _normalize_escalation_rules(
             raw.get("escalation_rules")
+        ),
+        "agent_name": (
+            raw.get("agent_name")
+            if isinstance(raw.get("agent_name"), dict)
+            else None
         ),
     }
 
