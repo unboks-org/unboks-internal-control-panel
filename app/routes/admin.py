@@ -1756,25 +1756,6 @@ def admin_delete_todo(request: Request, todo_id: str) -> Response:
     return RedirectResponse(url="/admin/todos", status_code=303)
 
 
-@router.get("/admin/manual", response_class=HTMLResponse)
-def admin_manual(request: Request) -> Response:
-    settings = get_settings()
-    redirect = require_admin(request, settings)
-    if redirect:
-        return redirect
-    tenants = list_tenants()
-    active_count = sum(1 for tenant in tenants if tenant.status == "active")
-    return templates.TemplateResponse(
-        request,
-        "admin_manual.html",
-        {
-            **_shell_context("manual"),
-            "tenant_count": len(tenants),
-            "active_tenant_count": active_count,
-        },
-    )
-
-
 @router.get("/admin/settings", response_class=HTMLResponse)
 def admin_settings(request: Request) -> Response:
     settings = get_settings()
