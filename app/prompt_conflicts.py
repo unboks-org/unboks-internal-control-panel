@@ -1,8 +1,9 @@
 """Prompt source registry and conflict checks for Nr3.
 
 This module does not pretend to see sources it cannot read. Machine-readable
-Nr3/Nr2/client.json sources are indexed; live runtime prompt builders are listed
-as "not_indexed_yet" until a dedicated runtime manifest exists.
+Nr3/Nr2/client.json sources are indexed. Runtime prompt builders are indexed
+from the authenticated Nr2 runtime prompt manifest when the tenant runtime
+supports it.
 """
 
 from __future__ import annotations
@@ -216,27 +217,52 @@ def collect_prompt_sources(tenant_id: str, nr2_knowledge: Nr2KnowledgeSync | Non
                 priority="temporary_campaigns",
                 text=_text(update),
             ))
+        manifest = nr2_knowledge.runtime_prompt_manifest
+        manifest_sources = manifest.get("sources") if isinstance(manifest, dict) else None
+        if isinstance(manifest_sources, list) and manifest_sources:
+            for item in manifest_sources:
+                if not isinstance(item, dict):
+                    continue
+                text = _text(item.get("text"))
+                name = _text(item.get("name"))
+                if not text or not name:
+                    continue
+                used_in = item.get("used_in")
+                if not isinstance(used_in, list):
+                    used_in = []
+                sources.append(_source(
+                    tenant_id=tenant_id,
+                    name=f"Runtime: {name}",
+                    location=_text(item.get("source_location")) or "Nr2 runtime prompt manifest",
+                    priority=_text(item.get("priority")) or "soft_preferences",
+                    text=text,
+                    used_in=tuple(str(value) for value in used_in if str(value).strip()) or ("runtime",),
+                    active=True,
+                    status=_text(item.get("status")) or "indexed",
+                ))
+        else:
+            sources.append(_source(
+                tenant_id=tenant_id,
+                name="Runtime prompt manifest",
+                location="Nr2 /runtime-prompt-manifest",
+                priority="platform_safety",
+                text="Not indexed yet. Tenant runtime did not return a runtime prompt manifest.",
+                active=False,
+                status="not_indexed_yet",
+                used_in=("whatsapp", "email", "dashboard_suggest_reply", "escalation_summary"),
+            ))
 
-    sources.append(_source(
-        tenant_id=tenant_id,
-        name="Live Marina base prompt builder",
-        location="wtyj/agents/marina/marina_agent.py",
-        priority="platform_safety",
-        text="Not indexed yet. Runtime prompt builder is listed as a required extraction source.",
-        active=False,
-        status="not_indexed_yet",
-        used_in=("whatsapp", "email"),
-    ))
-    sources.append(_source(
-        tenant_id=tenant_id,
-        name="DM channel prompt builder",
-        location="wtyj/agents/social/dm_agent.py",
-        priority="channel_formatting",
-        text="Not indexed yet. Runtime DM prompt builder is listed as a required extraction source.",
-        active=False,
-        status="not_indexed_yet",
-        used_in=("instagram", "facebook"),
-    ))
+    if nr2_knowledge is None:
+        sources.append(_source(
+            tenant_id=tenant_id,
+            name="Runtime prompt manifest",
+            location="Nr2 /runtime-prompt-manifest",
+            priority="platform_safety",
+            text="Not indexed yet. Nr2 knowledge/runtime sync was not provided.",
+            active=False,
+            status="not_indexed_yet",
+            used_in=("whatsapp", "email", "dashboard_suggest_reply", "escalation_summary"),
+        ))
     return sources
 
 
@@ -249,7 +275,11 @@ def _language_directives(text: str) -> set[str]:
 
 def _agent_identity_names(text: str) -> set[str]:
     names: set[str] = set()
-    for match in re.finditer(r"(?:you are|name is|called)\s+([A-Z][A-Za-zÀ-ÿ]{2,40})", text):
+    for match in re.finditer(
+        r"(?:you are|name is|called)\s+([A-Z][A-Za-zÀ-ÿ]{2,40})",
+        text,
+        flags=re.IGNORECASE,
+    ):
         names.add(match.group(1))
     return names
 

@@ -66,6 +66,48 @@ def test_prompt_conflict_report_detects_real_contradictions():
     assert report["effective_prompt_preview"]["active_rules"]
 
 
+def test_prompt_conflict_report_indexes_runtime_manifest_sources():
+    nr2 = Nr2KnowledgeSync(
+        status="ok",
+        runtime_prompt_manifest={
+            "schema_version": 1,
+            "sources": [
+                {
+                    "id": "runtime.marina.whatsapp.system",
+                    "name": "Live Marina WhatsApp system prompt",
+                    "source_location": "wtyj/agents/marina/marina_agent.py::_build_system_prompt",
+                    "used_in": ["whatsapp"],
+                    "prompt_kind": "system",
+                    "priority": "platform_safety",
+                    "status": "indexed",
+                    "text": "You are Marina. Never tell jokes. Always reply in Spanish.",
+                },
+                {
+                    "id": "runtime.dashboard.suggest_reply.system",
+                    "name": "Dashboard suggest-reply system prompt",
+                    "source_location": "wtyj/dashboard/api.py::suggest_reply",
+                    "used_in": ["dashboard_suggest_reply"],
+                    "prompt_kind": "system",
+                    "priority": "tone_style",
+                    "status": "indexed",
+                    "text": "You are Sofia, the booking agent for Test Co.",
+                },
+            ],
+        },
+    )
+
+    report = build_prompt_conflict_report("unboks", nr2_knowledge=nr2)
+    source_names = {source["name"] for source in report["sources"]}
+
+    assert "Runtime: Live Marina WhatsApp system prompt" in source_names
+    assert "Runtime: Dashboard suggest-reply system prompt" in source_names
+    assert not report["not_indexed_sources"]
+    assert any(
+        conflict["title"] == "Agent identity conflict"
+        for conflict in report["active_conflicts"]
+    )
+
+
 def test_prompt_conflicts_render_in_workspace_and_can_be_marked_reviewed():
     icp_overrides.set_agent_name_override("unboks", "Sofia")
     client = TestClient(app)

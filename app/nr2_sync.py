@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 import tempfile
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
@@ -30,6 +31,7 @@ class Nr2KnowledgeSync:
     info_updates: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     knowledge_files: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     knowledge_media: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    runtime_prompt_manifest: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -133,6 +135,11 @@ def _sync_from_cache(raw: Any) -> Nr2KnowledgeSync | None:
             info_updates=tuple(raw.get("info_updates") or ()),
             knowledge_files=tuple(raw.get("knowledge_files") or ()),
             knowledge_media=tuple(raw.get("knowledge_media") or ()),
+            runtime_prompt_manifest=(
+                raw.get("runtime_prompt_manifest")
+                if isinstance(raw.get("runtime_prompt_manifest"), dict)
+                else {}
+            ),
         )
     except (TypeError, ValueError):
         return None
@@ -165,6 +172,29 @@ def _clean_text(value: Any, max_len: int = 1200) -> str:
     if len(text) > max_len:
         return text[: max_len - 1] + "…"
     return text
+
+
+_SECRET_LINE_RE = re.compile(
+    r"\b(password|access[_-]?key|api[_-]?key|token|secret|webhook[_-]?secret|client[_-]?secret)\b",
+    re.IGNORECASE,
+)
+
+
+def _redact_secret_lines(text: str) -> str:
+    safe_lines: list[str] = []
+    for line in text.splitlines():
+        if _SECRET_LINE_RE.search(line):
+            if ":" in line:
+                prefix = line.split(":", 1)[0].strip()
+                safe_lines.append(f"{prefix}: [REDACTED]")
+            elif "=" in line:
+                prefix = line.split("=", 1)[0].strip()
+                safe_lines.append(f"{prefix}=[REDACTED]")
+            else:
+                safe_lines.append("[REDACTED]")
+        else:
+            safe_lines.append(line)
+    return "\n".join(safe_lines)
 
 
 def _tenant_password(tenant_id: str) -> str:
@@ -274,6 +304,50 @@ def _safe_media(raw: Any) -> tuple[dict[str, Any], ...]:
     return tuple(out)
 
 
+def _safe_runtime_prompt_manifest(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    sources = raw.get("sources")
+    if not isinstance(sources, list):
+        return {}
+    safe_sources: list[dict[str, Any]] = []
+    for item in sources[:30]:
+        if not isinstance(item, dict):
+            continue
+        text = _redact_secret_lines(_clean_text(item.get("text"), 20000))
+        name = _clean_text(item.get("name"), 180)
+        source_id = _clean_text(item.get("id"), 160)
+        if not (name and source_id):
+            continue
+        safe_sources.append({
+            "id": source_id,
+            "name": name,
+            "source_location": _clean_text(item.get("source_location"), 300),
+            "used_in": [
+                _clean_text(value, 80)
+                for value in (item.get("used_in") if isinstance(item.get("used_in"), list) else [])
+                if _clean_text(value, 80)
+            ][:20],
+            "prompt_kind": _clean_text(item.get("prompt_kind"), 80),
+            "priority": _clean_text(item.get("priority"), 80) or "soft_preferences",
+            "status": _clean_text(item.get("status"), 80) or "indexed",
+            "partial_reason": _clean_text(item.get("partial_reason"), 300),
+            "text": text,
+        })
+    return {
+        "schema_version": raw.get("schema_version") or 1,
+        "generated_at": _clean_text(raw.get("generated_at"), 80),
+        "tenant": raw.get("tenant") if isinstance(raw.get("tenant"), dict) else {},
+        "sources": safe_sources,
+        "partial": bool(raw.get("partial")),
+        "limitations": [
+            _clean_text(value, 300)
+            for value in (raw.get("limitations") if isinstance(raw.get("limitations"), list) else [])
+            if _clean_text(value, 300)
+        ][:20],
+    }
+
+
 def _get_json(client: httpx.Client, base: str, path: str, token: str) -> Any:
     response = client.get(
         f"{base}{path}",
@@ -329,6 +403,7 @@ def fetch_nr2_knowledge(
         updates = optional("/settings/info-updates")
         files = optional("/knowledge/files")
         media = optional("/knowledge/media")
+        runtime_prompt_manifest = optional("/runtime-prompt-manifest")
 
         status = "ok" if not errors else "partial"
         sync = Nr2KnowledgeSync(
@@ -340,6 +415,7 @@ def fetch_nr2_knowledge(
             info_updates=_safe_info_updates(updates),
             knowledge_files=_safe_files(files),
             knowledge_media=_safe_media(media),
+            runtime_prompt_manifest=_safe_runtime_prompt_manifest(runtime_prompt_manifest),
         )
         if client is None and sync.status in {"ok", "partial"}:
             _write_tenant_cache(tenant_id, sync)

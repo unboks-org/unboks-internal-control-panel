@@ -405,7 +405,7 @@
         <div>
           <h3>Prompt Conflicts</h3>
           <p class="muted compact-note">
-            Real indexed sources from Nr3, Nr2 knowledge, and tenant config. Runtime prompt builders are listed when they still need indexing.
+            Real indexed sources from Nr3, Nr2 knowledge, tenant config, and the tenant runtime prompt manifest.
           </p>
         </div>
         <span class="status-chip status-{{ 'down' if prompt_conflict_report.active_conflicts else 'ok' }}">
@@ -482,7 +482,7 @@
         <div class="agent-block agent-block-wide">
           <h4>Effective prompt preview</h4>
           <p class="muted compact-note">
-            Shows the currently indexed active rules in winning order. This is intentionally conservative and labels runtime code sources that still need a manifest.
+            Shows the currently indexed active rules in winning order, including runtime prompt paths when the tenant container exposes them.
           </p>
           <ul class="nr2-list">
             {% for source in prompt_conflict_report.effective_prompt_preview.active_rules[:8] %}

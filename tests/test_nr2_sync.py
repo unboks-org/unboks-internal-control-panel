@@ -85,6 +85,25 @@ def test_nr2_sync_fetches_safe_company_knowledge(monkeypatch):
                     ]
                 },
             )
+        if request.url.path.endswith("/runtime-prompt-manifest"):
+            return httpx.Response(
+                200,
+                json={
+                    "schema_version": 1,
+                    "sources": [
+                        {
+                            "id": "runtime.marina.whatsapp.system",
+                            "name": "Live Marina WhatsApp system prompt",
+                            "source_location": "wtyj/agents/marina/marina_agent.py",
+                            "used_in": ["whatsapp"],
+                            "prompt_kind": "system",
+                            "priority": "platform_safety",
+                            "status": "indexed",
+                            "text": "Never tell jokes. Password: should-not-leak",
+                        }
+                    ],
+                },
+            )
         return httpx.Response(404)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -98,6 +117,9 @@ def test_nr2_sync_fetches_safe_company_knowledge(monkeypatch):
     assert sync.info_updates[0]["text"] == "Ask discovery questions before offering viewings."
     assert sync.knowledge_files[0]["filename"] == "property-list.pdf"
     assert sync.knowledge_media[0]["caption"] == "Oceanview balcony"
+    assert sync.runtime_prompt_manifest["sources"][0]["id"] == "runtime.marina.whatsapp.system"
+    assert "should-not-leak" not in sync.runtime_prompt_manifest["sources"][0]["text"]
+    assert "[REDACTED]" in sync.runtime_prompt_manifest["sources"][0]["text"]
 
 
 def test_nr2_sync_handles_optional_missing_endpoint_as_partial(monkeypatch):
