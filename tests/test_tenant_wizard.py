@@ -450,7 +450,7 @@ def test_docker_compose_names_container_and_port(client):
     assert "image: wtyj-agent" in compose
     assert "env_file:\n      - ./config/platform.env" in compose
     assert "./logs:/app/logs" in compose
-    assert re.search(r'"\d{4}:8001"', compose),         f"no host_port mapping in compose: {compose!r}"
+    assert re.search(r'"127\.0\.0\.1:\d{4}:8001"', compose),         f"no localhost host_port mapping in compose: {compose!r}"
 
 
 def test_nginx_snippet_routes_slug_to_proxy_pass(client):
@@ -479,8 +479,8 @@ def test_host_port_is_stable_and_collision_safe(client):
         data={"name": "Stable B", "slug": "stable-b"},
         follow_redirects=False)
     assert r1.status_code == 200 and r2.status_code == 200
-    port_a = re.search(r'(\d{4}):8001', _extract_block(r1.text, "ct-docker-compose"))
-    port_b = re.search(r'(\d{4}):8001', _extract_block(r2.text, "ct-docker-compose"))
+    port_a = re.search(r'127\.0\.0\.1:(\d{4}):8001', _extract_block(r1.text, "ct-docker-compose"))
+    port_b = re.search(r'127\.0\.0\.1:(\d{4}):8001', _extract_block(r2.text, "ct-docker-compose"))
     assert port_a and port_b
     assert port_a.group(1) != port_b.group(1)
     assert 8100 <= int(port_a.group(1)) <= 8999

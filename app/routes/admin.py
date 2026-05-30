@@ -1256,7 +1256,7 @@ async def admin_tenant_create_submit(
         f"    container_name: wtyj-{safe_slug}\n"
         f"    restart: unless-stopped\n"
         f"    ports:\n"
-        f'      - "{host_port}:8001"\n'
+        f'      - "127.0.0.1:{host_port}:8001"\n'
         f"    env_file:\n"
         f"      - ./config/platform.env\n"
         f"    environment:\n"

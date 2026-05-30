@@ -62,7 +62,7 @@ def _docker_compose_text(slug: str, host_port: int) -> str:
         f"    container_name: wtyj-{slug}\n"
         "    restart: unless-stopped\n"
         "    ports:\n"
-        f'      - "{host_port}:8001"\n'
+        f'      - "127.0.0.1:{host_port}:8001"\n'
         "    env_file:\n"
         "      - ./config/platform.env\n"
         "    environment:\n"
