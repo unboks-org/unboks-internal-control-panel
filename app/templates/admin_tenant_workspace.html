@@ -56,8 +56,11 @@
         Source: {{ 'ICP override' if display_source == 'icp_override' else 'Backend' }}
       </span>
       {% if active_whatsapp_status and active_whatsapp_status.visible %}
-        <span class="tenant-whatsapp-badge tenant-whatsapp-header {{ active_whatsapp_status.badge_class }}">
-          WhatsApp: {{ active_whatsapp_status.label }}{% if active_whatsapp_status.status == 'connected' %} &#10003;{% endif %}
+        <span
+          class="tenant-whatsapp-badge tenant-whatsapp-header {{ active_whatsapp_status.badge_class }}"
+          {% if active_whatsapp_status.allowlist %}title="{{ active_whatsapp_status.allowlist.summary }}{% if active_whatsapp_status.allowlist.accounts %} Accounts: {{ active_whatsapp_status.allowlist.accounts | join(', ') }}{% endif %}"{% endif %}
+        >
+          WhatsApp: {{ active_whatsapp_status.label }}{% if active_whatsapp_status.status == 'connected' %} &#10003; &middot; Strict{% endif %}
         </span>
       {% endif %}
       <span class="status-chip status-{{ 'ok' if tenant.status == 'active' else 'unknown' }}">{{ tenant.status }}</span>

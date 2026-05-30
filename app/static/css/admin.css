@@ -2553,6 +2553,11 @@ button.button-disabled,
   color: var(--color-red);
 }
 
+.tenant-wa-critical {
+  background: var(--color-red-soft);
+  color: var(--color-red);
+}
+
 .tenant-wa-muted {
   background: #eef0f2;
   color: var(--color-muted);
