@@ -113,6 +113,7 @@ def test_workspace_renders_backup_restore_section(monkeypatch, tmp_path):
     response = client.get("/admin/tenants/unboks")
 
     assert response.status_code == 200
-    assert "Tenant Backup & Restore" in response.text
+    assert "Configuration Backup & Restore" in response.text
+    assert "not a full disaster-recovery export yet" in response.text
     assert "/admin/tenants/unboks/backup/export" in response.text
     assert "/admin/tenants/unboks/backup/import" in response.text
