@@ -131,6 +131,7 @@ def _build_signup_verification_email(
     full_name: str,
     business_name: str,
     verify_url: str,
+    expires_hours: int,
 ) -> tuple[str, str]:
     first_name = full_name.strip().split(" ", 1)[0] or "there"
     subject = "Confirm your Unboks signup"
@@ -141,6 +142,8 @@ We received a request to create an Unboks workspace for {business_name}.
 Please confirm your email address here:
 
 {verify_url}
+
+This link expires in {expires_hours} hours.
 
 After confirmation, Unboks will review and activate your workspace.
 
@@ -225,6 +228,7 @@ async def public_signup_submit(
             full_name=signup_request.full_name,
             business_name=signup_request.business_name,
             verify_url=verify_url,
+            expires_hours=settings.public_signup_verification_ttl_hours,
         )
         try:
             send_email(signup_request.email, subject, body, settings)

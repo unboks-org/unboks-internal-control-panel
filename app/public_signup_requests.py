@@ -24,6 +24,7 @@ class SignupRequest:
     status: str
     created_at: str
     updated_at: str
+    token_expires_at: str
     token: str
 
 
@@ -67,7 +68,11 @@ def create_signup_request(
     _enforce_rate_limits(data, clean_email, ip_address, settings)
 
     token = secrets.token_urlsafe(32)
-    now = utc_now().isoformat()
+    now_dt = utc_now()
+    now = now_dt.isoformat()
+    token_expires_at = (
+        now_dt + timedelta(hours=settings.public_signup_verification_ttl_hours)
+    ).isoformat()
     request_id = secrets.token_urlsafe(16)
     slug_hint = derive_slug_from_name(clean_business) or "client"
     record = {
@@ -80,6 +85,7 @@ def create_signup_request(
         "status": "verification_pending",
         "created_at": now,
         "updated_at": now,
+        "token_expires_at": token_expires_at,
         "verified_at": None,
         "provisioned_at": None,
         "token_hash": _hash_token(token),
@@ -102,6 +108,7 @@ def create_signup_request(
         status="verification_pending",
         created_at=now,
         updated_at=now,
+        token_expires_at=token_expires_at,
         token=token,
     )
 
@@ -119,6 +126,12 @@ def mark_verified(token: str, settings: Settings) -> dict[str, Any]:
             now = utc_now().isoformat()
             if record.get("status") == "provisioned":
                 return dict(record)
+            if _verification_expired(record, settings):
+                record["status"] = "verification_expired"
+                record["updated_at"] = now
+                requests[request_id] = record
+                _write_store(data, settings)
+                raise TenantCreateError("Invalid or expired verification link.")
             record["status"] = "verified_pending_review"
             record["verified_at"] = record.get("verified_at") or now
             record["updated_at"] = now
@@ -182,6 +195,18 @@ def _parse_time(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _verification_expired(record: dict[str, Any], settings: Settings) -> bool:
+    expires_at = _parse_time(str(record.get("token_expires_at") or ""))
+    if expires_at is None:
+        created = _parse_time(str(record.get("created_at") or ""))
+        if created is None:
+            return True
+        expires_at = created + timedelta(
+            hours=settings.public_signup_verification_ttl_hours
+        )
+    return expires_at < utc_now()
 
 
 def _hash_token(token: str) -> str:

@@ -30,6 +30,7 @@ class Settings:
     public_signup_requests_path: str = "data/public_signup_requests.json"
     public_signup_rate_limit_per_ip_per_hour: int = 5
     public_signup_rate_limit_per_email_per_day: int = 3
+    public_signup_verification_ttl_hours: int = 48
 
 
 def get_settings() -> Settings:
@@ -88,6 +89,10 @@ def get_settings() -> Settings:
             "NR3_PUBLIC_SIGNUP_RATE_LIMIT_PER_EMAIL_PER_DAY",
             "3",
         )),
+        public_signup_verification_ttl_hours=max(1, int(os.getenv(
+            "NR3_PUBLIC_SIGNUP_VERIFICATION_TTL_HOURS",
+            "48",
+        ))),
         zernio_api_base_url=os.getenv(
             "ZERNIO_API_BASE_URL",
             "https://zernio.com/api/v1",

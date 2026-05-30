@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -53,6 +54,7 @@ def test_public_signup_stores_request_without_creating_tenant(monkeypatch, tmp_p
     assert record["business_name"] == "Lovelace Law"
     assert record["status"] == "verification_pending"
     assert record["token_hash"]
+    assert record["token_expires_at"]
     assert "token" not in record
 
 
@@ -111,6 +113,59 @@ def test_public_signup_email_verification_without_auto_provision(monkeypatch, tm
     assert "Email confirmed" in verify.text
     assert not (tmp_path / "clients" / "lovelace-law").exists()
     assert _stored_request(tmp_path)["status"] == "verified_pending_review"
+
+
+def test_public_signup_email_mentions_verification_expiry(monkeypatch, tmp_path):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings):
+        sent.append({"to": to_email, "subject": subject, "body": body})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_PUBLIC_SIGNUP_VERIFICATION_TTL_HOURS", "24")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+
+    response = _signup(client)
+
+    assert response.status_code == 202
+    assert "This link expires in 24 hours." in sent[0]["body"]
+
+
+def test_public_signup_expired_verification_link_rejected(monkeypatch, tmp_path):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings):
+        sent.append({"to": to_email, "subject": subject, "body": body})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+    monkeypatch.setenv("NR3_PUBLIC_SIGNUP_VERIFICATION_TTL_HOURS", "1")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+
+    response = _signup(client)
+    assert response.status_code == 202
+
+    store_path = tmp_path / "signup_requests.json"
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    request_id = next(iter(data["requests"]))
+    data["requests"][request_id]["token_expires_at"] = (
+        datetime.now(timezone.utc).replace(microsecond=0) - timedelta(minutes=1)
+    ).isoformat()
+    store_path.write_text(json.dumps(data), encoding="utf-8")
+
+    verify_path = sent[0]["body"].split("https://icp.unboks.org", 1)[1].split()[0]
+    verify = client.get(verify_path, follow_redirects=False)
+
+    assert verify.status_code == 400
+    assert "Invalid or expired verification link" in verify.text
+    assert _stored_request(tmp_path)["status"] == "verification_expired"
+    assert not (tmp_path / "clients" / "lovelace-law").exists()
 
 
 def test_public_signup_verified_auto_provision_requires_explicit_flag(
