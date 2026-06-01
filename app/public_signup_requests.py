@@ -188,7 +188,11 @@ def update_signup_request(
     return _safe_record(record)
 
 
-def list_signup_requests(settings: Settings) -> list[dict[str, Any]]:
+def list_signup_requests(
+    settings: Settings,
+    *,
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
     """Return public signup requests without exposing verification token hashes."""
     data = _read_store(settings)
     requests = data.get("requests")
@@ -197,6 +201,8 @@ def list_signup_requests(settings: Settings) -> list[dict[str, Any]]:
     safe_records: list[dict[str, Any]] = []
     for record in requests.values():
         if not isinstance(record, dict):
+            continue
+        if not include_archived and record.get("archived_at"):
             continue
         safe_records.append(_safe_record(record))
     return sorted(

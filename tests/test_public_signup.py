@@ -176,8 +176,27 @@ def test_admin_public_signup_review_and_onboarding_actions(monkeypatch, tmp_path
     assert "Current state" in detail.text
     assert "Review details" in detail.text
     assert "Approve signup" in detail.text
-    assert "Send onboarding link by email" in detail.text
+    assert "Send info request email" in detail.text
+    assert "Generate onboarding link" not in detail.text
+    assert "Send onboarding link by email" not in detail.text
     assert "token_hash" not in detail.text
+
+    blocked_generate = client.post(
+        f"/admin/signups/{signup_id}/generate-link",
+        follow_redirects=True,
+    )
+    assert blocked_generate.status_code == 200
+    assert "Approve this signup before generating an onboarding link." in blocked_generate.text
+    assert _stored_request(tmp_path)["status"] == "verified_pending_review"
+
+    info_sent = client.post(
+        f"/admin/signups/{signup_id}/request-info",
+        follow_redirects=True,
+    )
+    assert info_sent.status_code == 200
+    assert "Information request sent" in info_sent.text
+    assert "Generate onboarding link" not in info_sent.text
+    assert _stored_request(tmp_path)["status"] == "info_requested"
 
     approved = client.post(
         f"/admin/signups/{signup_id}/approve",
@@ -209,6 +228,49 @@ def test_admin_public_signup_review_and_onboarding_actions(monkeypatch, tmp_path
     assert sent[-1]["to"] == "ada@example.com"
     assert "Welcome to Unboks" in sent[-1]["subject"]
     assert _stored_request(tmp_path)["status"] == "onboarding_link_sent"
+
+
+def test_admin_public_signup_reject_archives_and_hides_request(monkeypatch, tmp_path):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings):
+        sent.append({"to": to_email, "subject": subject, "body": body})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+
+    response = _signup(client, email="trying@example.com")
+    assert response.status_code == 202
+    verify_path = sent[0]["body"].split("https://icp.unboks.org", 1)[1].split()[0]
+    assert client.get(verify_path, follow_redirects=False).status_code == 200
+    record = _stored_request(tmp_path)
+
+    client.post("/login", data={"password": "test-password"})
+    rejected = client.post(
+        f"/admin/signups/{record['id']}/reject",
+        data={"reject_reason": "Not a real company"},
+        follow_redirects=True,
+    )
+
+    assert rejected.status_code == 200
+    assert "Signup rejected and archived." in rejected.text
+    stored = _stored_request(tmp_path)
+    assert stored["status"] == "archived"
+    assert stored["review_status"] == "rejected"
+    assert stored["archived_at"]
+
+    list_page = client.get("/admin/signups")
+    assert list_page.status_code == 200
+    assert "trying@example.com" not in list_page.text
+
+    archive_page = client.get("/admin/signups?archived=1")
+    assert archive_page.status_code == 200
+    assert "trying@example.com" in archive_page.text
+    assert "Archived" in archive_page.text
 
 
 def test_admin_public_signup_reject_requires_reason(monkeypatch, tmp_path):

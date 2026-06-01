@@ -4,7 +4,7 @@
 {% block section_eyebrow %}Public signup{% endblock %}
 {% block page_title %}Review free trial signup{% endblock %}
 {% block page_subtitle %}
-  <p class="muted">Review the prospect, approve or reject, send onboarding, and create the workspace when ready.</p>
+  <p class="muted">Review the prospect, request more business details, then approve or deny before onboarding starts.</p>
 {% endblock %}
 
 {% block page_actions %}
@@ -21,6 +21,7 @@
 
   {% if signup %}
     {% set current_status = signup.status or "verification_pending" %}
+    {% set pre_approval = current_status in ["verification_pending", "verified_pending_review", "info_requested", "info_request_failed"] %}
     {% set next_step = "approve" %}
     {% if current_status == "approved" %}
       {% set next_step = "generate" %}
@@ -30,8 +31,8 @@
       {% set next_step = "workspace" %}
     {% elif signup.provisioned_slug or current_status == "provisioned" %}
       {% set next_step = "open" %}
-    {% elif current_status == "rejected" %}
-      {% set next_step = "rejected" %}
+    {% elif current_status == "archived" %}
+      {% set next_step = "archived" %}
     {% endif %}
 
     <section class="signup-detail-hero">
@@ -45,8 +46,12 @@
           <span class="signup-status-badge badge-awaiting">Awaiting review</span>
         {% elif current_status == "approved" %}
           <span class="signup-status-badge badge-good">Approved</span>
-        {% elif current_status == "rejected" %}
-          <span class="signup-status-badge badge-danger">Rejected</span>
+        {% elif current_status == "info_requested" %}
+          <span class="signup-status-badge badge-awaiting">Info requested</span>
+        {% elif current_status == "info_request_failed" %}
+          <span class="signup-status-badge badge-danger">Info request failed</span>
+        {% elif current_status == "archived" %}
+          <span class="signup-status-badge badge-neutral">Archived</span>
         {% elif current_status == "onboarding_link_generated" %}
           <span class="signup-status-badge badge-awaiting">Onboarding link generated</span>
         {% elif current_status == "onboarding_link_sent" %}
@@ -60,10 +65,7 @@
         {% endif %}
 
         {% if next_step == "approve" %}
-          <form method="post" action="/admin/signups/{{ signup.id }}/approve">
-            <input type="hidden" name="review_note" value="{{ signup.review_note or '' }}">
-            <button type="submit">Approve signup</button>
-          </form>
+          <span class="signup-detail-kicker">Awaiting decision</span>
         {% elif next_step == "generate" %}
           <form method="post" action="/admin/signups/{{ signup.id }}/generate-link">
             <button type="submit">Generate onboarding link</button>
@@ -102,21 +104,49 @@
 
       <article class="signup-step-card {% if next_step == 'approve' %}is-current{% endif %}">
         <span class="signup-step-number">2</span>
-        <h3>Approve or reject</h3>
-        <div class="split-actions compact">
-          <form method="post" action="/admin/signups/{{ signup.id }}/approve" class="stacked-action-form">
-            <label for="review-note">Internal note</label>
-            <textarea id="review-note" name="review_note" rows="3" placeholder="Optional approval note">{{ signup.review_note or "" }}</textarea>
-            <button type="submit">Approve signup</button>
-          </form>
-          <form method="post" action="/admin/signups/{{ signup.id }}/reject" class="stacked-action-form">
-            <label for="reject-reason">Reject reason</label>
-            <textarea id="reject-reason" name="reject_reason" rows="3" required placeholder="Reason is required">{{ signup.reject_reason or "" }}</textarea>
-            <button class="button-danger" type="submit">Reject signup</button>
-          </form>
-        </div>
+        <h3>{% if pre_approval %}Review decision{% else %}Decision{% endif %}</h3>
+        {% if pre_approval %}
+          <div class="split-actions compact">
+            <form method="post" action="/admin/signups/{{ signup.id }}/request-info" class="stacked-action-form">
+              <label>Ask for more business details</label>
+              {% if signup.info_request_error %}
+                <div class="alert alert-error" role="alert">{{ signup.info_request_error }}</div>
+              {% endif %}
+              {% if signup.info_request_sent_at %}
+                <p class="muted compact-note">Information request sent at {{ signup.info_request_sent_at }}.</p>
+              {% else %}
+                <p class="muted compact-note">Sends the prospect an email asking them to complete the business intake before activation.</p>
+              {% endif %}
+              <button type="submit">Send info request email</button>
+            </form>
+            <form method="post" action="/admin/signups/{{ signup.id }}/approve" class="stacked-action-form">
+              <label for="review-note">Approval note</label>
+              <textarea id="review-note" name="review_note" rows="3" placeholder="Optional approval note">{{ signup.review_note or "" }}</textarea>
+              <button type="submit">Approve signup</button>
+            </form>
+            <form method="post" action="/admin/signups/{{ signup.id }}/reject" class="stacked-action-form">
+              <label for="reject-reason">Deny reason</label>
+              <textarea id="reject-reason" name="reject_reason" rows="3" required placeholder="Reason is required">{{ signup.reject_reason or "" }}</textarea>
+              <button class="button-danger" type="submit">Deny and archive</button>
+            </form>
+          </div>
+        {% else %}
+          <p class="muted compact-note">
+            {% if current_status == "archived" %}
+              This signup was denied and archived. It is hidden from the normal signup queue.
+            {% elif current_status == "approved" %}
+              This signup is approved. The onboarding process can continue.
+            {% else %}
+              Decision completed.
+            {% endif %}
+          </p>
+          {% if signup.reject_reason %}
+            <p class="muted compact-note"><strong>Deny reason:</strong> {{ signup.reject_reason }}</p>
+          {% endif %}
+        {% endif %}
       </article>
 
+      {% if not pre_approval and current_status != "archived" %}
       <article class="signup-step-card {% if next_step == 'generate' %}is-current{% endif %}">
         <span class="signup-step-number">3</span>
         <h3>Generate onboarding link</h3>
@@ -168,6 +198,7 @@
           <p class="muted compact-note"><strong>Workspace error:</strong> {{ signup.workspace_error }}</p>
         {% endif %}
       </article>
+      {% endif %}
     </section>
   {% endif %}
 {% endblock %}

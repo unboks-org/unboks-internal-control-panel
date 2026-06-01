@@ -1873,9 +1873,10 @@ def admin_public_signup_reject(
         update_signup_request(
             signup_id,
             settings,
-            status="rejected",
+            status="archived",
             review_status="rejected",
             reviewed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            archived_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             reject_reason=clean_reason,
         )
         audit_log.record_event(
@@ -1886,7 +1887,62 @@ def admin_public_signup_reject(
         )
     except TenantCreateError as exc:
         return _signup_detail_redirect(signup_id, error=str(exc))
-    return _signup_detail_redirect(signup_id, notice="Signup rejected.")
+    return _signup_detail_redirect(signup_id, notice="Signup rejected and archived.")
+
+
+@router.post("/admin/signups/{signup_id}/request-info", response_class=HTMLResponse)
+def admin_public_signup_request_info(request: Request, signup_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        signup = get_signup_request(signup_id, settings)
+        if signup.get("archived_at") or signup.get("status") in {
+            "approved",
+            "onboarding_link_generated",
+            "onboarding_link_sent",
+            "provisioned",
+        }:
+            return _signup_detail_redirect(
+                signup_id,
+                error="Information requests are only available before approval.",
+            )
+        lead = _ensure_onboarding_lead_for_signup(signup, settings)
+        result = prepare_or_send_onboarding_email(lead.id)
+        update_signup_request(
+            signup_id,
+            settings,
+            onboarding_lead_id=lead.id,
+            info_request_sent_at=(
+                datetime.now(timezone.utc).isoformat(timespec="seconds")
+                if result.sent
+                else None
+            ),
+            info_request_error=result.error or "",
+            status="info_requested" if result.sent else "info_request_failed",
+        )
+        audit_log.record_event(
+            action="public_signup.info_requested",
+            result="ok" if result.sent else "failed",
+            safe_summary=(
+                "Public signup information request sent."
+                if result.sent
+                else "Public signup information request failed."
+            ),
+            metadata={"signup_id": signup_id, "lead_id": lead.id},
+        )
+    except (TenantCreateError, LeadValidationError, LeadNotFoundError) as exc:
+        return _signup_detail_redirect(signup_id, error=str(exc))
+    if not result.sent:
+        return _signup_detail_redirect(
+            signup_id,
+            error=result.error or "Information request email could not be sent.",
+        )
+    return _signup_detail_redirect(
+        signup_id,
+        notice=f"Information request sent to {signup.get('email')}.",
+    )
 
 
 @router.post("/admin/signups/{signup_id}/generate-link", response_class=HTMLResponse)
@@ -1897,6 +1953,16 @@ def admin_public_signup_generate_link(request: Request, signup_id: str) -> Respo
         return redirect
     try:
         signup = get_signup_request(signup_id, settings)
+        if signup.get("status") not in {
+            "approved",
+            "onboarding_link_generated",
+            "onboarding_link_sent",
+            "failed",
+        }:
+            return _signup_detail_redirect(
+                signup_id,
+                error="Approve this signup before generating an onboarding link.",
+            )
         lead = _ensure_onboarding_lead_for_signup(signup, settings)
         lead, raw_token = create_or_refresh_token(lead.id)
         link = build_onboarding_link(raw_token, settings)
@@ -1932,6 +1998,16 @@ def admin_public_signup_send_onboarding(request: Request, signup_id: str) -> Res
         return redirect
     try:
         signup = get_signup_request(signup_id, settings)
+        if signup.get("status") not in {
+            "approved",
+            "onboarding_link_generated",
+            "onboarding_link_sent",
+            "failed",
+        }:
+            return _signup_detail_redirect(
+                signup_id,
+                error="Approve this signup before sending an onboarding link.",
+            )
         lead = _ensure_onboarding_lead_for_signup(signup, settings)
         result = prepare_or_send_onboarding_email(lead.id)
         update_signup_request(
@@ -2396,11 +2472,23 @@ def render_reviews(request: Request) -> HTMLResponse:
 
 
 def render_public_signups(request: Request, settings) -> HTMLResponse:
-    signups = list_signup_requests(settings)
+    show_archived = request.query_params.get("archived") == "1"
+    signups = list_signup_requests(settings, include_archived=show_archived)
+    archived_count = len(
+        [
+            signup
+            for signup in list_signup_requests(settings, include_archived=True)
+            if signup.get("archived_at")
+        ]
+    )
     pending_review = [
         signup
         for signup in signups
-        if signup.get("status") == "verified_pending_review"
+        if signup.get("status") in {
+            "verified_pending_review",
+            "info_requested",
+            "info_request_failed",
+        }
     ]
     pending_verification = [
         signup
@@ -2415,6 +2503,8 @@ def render_public_signups(request: Request, settings) -> HTMLResponse:
             "signups": signups,
             "pending_review": pending_review,
             "pending_verification": pending_verification,
+            "show_archived": show_archived,
+            "archived_count": archived_count,
         },
     )
 

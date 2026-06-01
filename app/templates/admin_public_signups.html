@@ -4,7 +4,7 @@
 {% block section_eyebrow %}Public signup{% endblock %}
 {% block page_title %}Free trial signups{% endblock %}
 {% block page_subtitle %}
-  <p class="muted">Review new trial requests, approve prospects, and send onboarding links.</p>
+  <p class="muted">Review new trial requests, request more business details, then approve or deny prospects.</p>
 {% endblock %}
 
 {% block content %}
@@ -32,6 +32,10 @@
       <span class="signup-stat-label">Total</span>
       <strong>{{ signups|length }}</strong>
     </div>
+    <div class="signup-stat">
+      <span class="signup-stat-label">Archived</span>
+      <strong>{{ archived_count }}</strong>
+    </div>
   </section>
 
   <section class="panel signups-panel">
@@ -51,11 +55,19 @@
         <option value="all">All</option>
         <option value="verification_pending">New</option>
         <option value="verified_pending_review">Awaiting review</option>
+        <option value="info_requested">Info requested</option>
         <option value="approved">Approved</option>
         <option value="onboarding_link_sent">Onboarding sent</option>
-        <option value="rejected">Rejected</option>
+        {% if show_archived %}
+          <option value="archived">Archived</option>
+        {% endif %}
         <option value="failed">Failed</option>
       </select>
+      {% if show_archived %}
+        <a class="signup-secondary-link" href="/admin/signups">Hide archived</a>
+      {% elif archived_count %}
+        <a class="signup-secondary-link" href="/admin/signups?archived=1">View archived</a>
+      {% endif %}
     </div>
 
     {% if signups %}
@@ -79,8 +91,12 @@
                 <span class="signup-status-badge badge-awaiting">Awaiting review</span>
               {% elif signup.status == "approved" %}
                 <span class="signup-status-badge badge-good">Approved</span>
-              {% elif signup.status == "rejected" %}
-                <span class="signup-status-badge badge-danger">Rejected</span>
+              {% elif signup.status == "info_requested" %}
+                <span class="signup-status-badge badge-awaiting">Info requested</span>
+              {% elif signup.status == "info_request_failed" %}
+                <span class="signup-status-badge badge-danger">Info request failed</span>
+              {% elif signup.status == "archived" %}
+                <span class="signup-status-badge badge-neutral">Archived</span>
               {% elif signup.status == "onboarding_link_generated" %}
                 <span class="signup-status-badge badge-awaiting">Link generated</span>
               {% elif signup.status == "onboarding_link_sent" %}
