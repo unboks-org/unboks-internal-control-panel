@@ -97,13 +97,35 @@ AGENT_FEATURE_ACTIONS: dict[str, str] = {
 
 def _shell_context(active: str, active_tenant: Optional[Tenant] = None) -> dict:
     """Context every admin template needs so the sidebar renders."""
-    tenants = list_tenants()
+    tenants = _sidebar_tenants()
     return {
         "active": active,
         "tenants": tenants,
         "active_tenant": active_tenant,
         "tenant_whatsapp_statuses": _tenant_whatsapp_statuses(tenants),
     }
+
+
+def _sidebar_tenants() -> tuple[Tenant, ...]:
+    """Hide denied public-trial workspaces from the everyday tenant selector.
+
+    A rejected signup may already have a provisional workspace. We preserve
+    the tenant files for audit/rollback, but the operator queue should not
+    keep showing denied prospects as normal tenants.
+    """
+    tenants = list_tenants()
+    try:
+        settings = get_settings()
+        archived_slugs = {
+            str(signup.get("provisioned_slug") or "").strip()
+            for signup in list_signup_requests(settings, include_archived=True)
+            if is_archived_signup(signup) and signup.get("provisioned_slug")
+        }
+    except Exception:  # pragma: no cover -- sidebar rendering must never fail.
+        archived_slugs = set()
+    if not archived_slugs:
+        return tenants
+    return tuple(tenant for tenant in tenants if tenant.id not in archived_slugs)
 
 
 def _tenant_whatsapp_statuses(tenants: tuple[Tenant, ...]) -> dict[str, dict]:

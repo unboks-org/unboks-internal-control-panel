@@ -296,6 +296,47 @@ def test_admin_public_signups_hides_legacy_rejected_requests(monkeypatch, tmp_pa
     assert "Archived" in archive_page.text
 
 
+def test_archived_signup_workspace_is_hidden_from_sidebar(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    registry = {
+        "tenants": {
+            "trying": {"slug": "trying", "name": "Trying", "status": "active"},
+            "test": {"slug": "test", "name": "Test", "status": "active"},
+        }
+    }
+    (tmp_path / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    signup_store = {
+        "requests": {
+            "denied": {
+                "id": "denied",
+                "full_name": "Calvin Adamus",
+                "business_name": "Trying",
+                "email": "trying@example.com",
+                "phone": "",
+                "slug_hint": "trying",
+                "status": "rejected",
+                "created_at": "2026-06-01T00:00:00+00:00",
+                "updated_at": "2026-06-01T00:00:00+00:00",
+                "token_expires_at": "2026-06-02T00:00:00+00:00",
+                "provisioned_slug": "trying",
+                "review_status": "rejected",
+            }
+        }
+    }
+    (tmp_path / "signup_requests.json").write_text(
+        json.dumps(signup_store),
+        encoding="utf-8",
+    )
+
+    client.post("/login", data={"password": "test-password"})
+    page = client.get("/admin/signups")
+
+    assert page.status_code == 200
+    assert 'class="tenant-selector-name">Trying<' not in page.text
+    assert 'class="tenant-selector-slug muted">trying<' not in page.text
+    assert 'class="tenant-selector-name">Test<' in page.text
+
+
 def test_admin_public_signup_reject_requires_reason(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     response = _signup(client)
