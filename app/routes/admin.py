@@ -1813,10 +1813,21 @@ def admin_import_tenant_backup(
         return _workspace_redirect(tenant_id, "backup-section", message=msg)
 
     target = result["target_tenant"]
+    restart = queue_tenant_host_action(
+        slug=target,
+        action="restart_tenant",
+        dashboard_url=f"https://dashboard.unboks.org/{target}",
+    )
+    restart_note = (
+        " Runtime container was recreated."
+        if restart.status == "succeeded"
+        else f" Runtime restart status: {restart.status} ({restart.message})."
+    )
     msg = (
         f"Full backup imported to {target}; previous tenant data was replaced. "
         f"Rollback package: {result['rollback_package']}. "
         "Target slug/container identity was preserved."
+        f"{restart_note}"
     )
     return _workspace_redirect(target, "backup-section", message=msg)
 

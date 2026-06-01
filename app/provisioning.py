@@ -220,6 +220,7 @@ def queue_tenant_host_action(
         "unpause_tenant",
         "delete_tenant",
         "reset_dashboard_password",
+        "restart_tenant",
     }:
         return AutoProvisionResult(
             status="failed",

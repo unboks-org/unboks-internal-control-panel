@@ -152,6 +152,29 @@ def test_host_action_queue_writes_password_reset_job(monkeypatch, tmp_path):
     assert payload["new_password"] == "Better-Password-123"
 
 
+def test_host_action_queue_writes_restart_job(monkeypatch, tmp_path):
+    jobs = tmp_path / "jobs"
+    results = tmp_path / "results"
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
+    monkeypatch.setenv("NR3_PROVISION_QUEUE_DIR", str(jobs))
+    monkeypatch.setenv("NR3_PROVISION_RESULT_DIR", str(results))
+    monkeypatch.setenv("NR3_PROVISION_TIMEOUT_SECONDS", "0")
+
+    result = queue_tenant_host_action(
+        slug="acme",
+        action="restart_tenant",
+        dashboard_url="https://dashboard.unboks.org/acme",
+    )
+
+    assert result.status == "queued"
+    job_files = list(jobs.glob("*.json"))
+    assert len(job_files) == 1
+    payload = json.loads(job_files[0].read_text())
+    assert payload["job_type"] == "tenant_action"
+    assert payload["action"] == "restart_tenant"
+    assert payload["slug"] == "acme"
+
+
 def test_host_action_queue_writes_delete_job(monkeypatch, tmp_path):
     jobs = tmp_path / "jobs"
     results = tmp_path / "results"
@@ -219,6 +242,7 @@ def test_host_worker_keeps_nginx_backups_outside_sites_enabled():
     assert "job_type" in worker_source
     assert "suspend_tenant" in worker_source
     assert "unpause_tenant" in worker_source
+    assert "restart_tenant" in worker_source
     assert "delete_tenant" in worker_source
     assert "tenant folder was already missing" in worker_source
     assert "client-missing.txt" in worker_source

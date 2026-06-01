@@ -401,7 +401,7 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
     if action == "delete_tenant":
         process_delete_tenant(job_id, job, slug)
         return
-    if action not in {"suspend_tenant", "unpause_tenant", "reset_dashboard_password"}:
+    if action not in {"suspend_tenant", "unpause_tenant", "reset_dashboard_password", "restart_tenant"}:
         raise RuntimeError(f"Unsupported tenant action: {action!r}")
 
     tenant_dir = CLIENTS_ROOT / slug
@@ -424,6 +424,10 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
         else:
             details.append(f"container wtyj-{slug} was not running; files updated only")
         message = f"Dashboard password reset for tenant {slug}."
+    elif action == "restart_tenant":
+        run(["docker", "compose", "up", "-d", "--force-recreate"], cwd=tenant_dir)
+        details.append(f"docker compose up -d --force-recreate completed for {slug}")
+        message = f"Tenant {slug} container was recreated on the VPS."
     elif action == "suspend_tenant":
         update_client_status(tenant_dir, "inactive")
         details.append("client.json status set to inactive")
