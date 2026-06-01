@@ -42,18 +42,30 @@ def _now() -> str:
 def _exports_dir() -> Path:
     root = Path(os.getenv("NR3_TENANT_EXPORTS_DIR", "data/tenant_exports"))
     root.mkdir(parents=True, exist_ok=True)
+    try:
+        root.chmod(0o700)
+    except OSError:
+        pass
     return root
 
 
 def _rollback_dir() -> Path:
     root = Path(os.getenv("NR3_TENANT_IMPORT_ROLLBACK_DIR", "data/tenant_import_rollbacks"))
     root.mkdir(parents=True, exist_ok=True)
+    try:
+        root.chmod(0o700)
+    except OSError:
+        pass
     return root
 
 
 def _import_payload_dir() -> Path:
     root = Path(os.getenv("NR3_TENANT_IMPORT_PAYLOAD_DIR", "data/tenant_import_payloads"))
     root.mkdir(parents=True, exist_ok=True)
+    try:
+        root.chmod(0o700)
+    except OSError:
+        pass
     return root
 
 
@@ -251,6 +263,10 @@ def build_export_package(
         zf.writestr("README_RESTORE.txt", readme)
         checksums["README_RESTORE.txt"] = _checksum(readme)
         _write_zip_json(zf, "checksums.json", checksums, checksums)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
 
     audit_log.record_event(
         action="tenant_export_completed",
