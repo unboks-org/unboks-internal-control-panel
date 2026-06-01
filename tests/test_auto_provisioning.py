@@ -220,6 +220,8 @@ def test_host_worker_keeps_nginx_backups_outside_sites_enabled():
     assert "suspend_tenant" in worker_source
     assert "unpause_tenant" in worker_source
     assert "delete_tenant" in worker_source
+    assert "tenant folder was already missing" in worker_source
+    assert "client-missing.txt" in worker_source
     assert "DELETED_TENANTS_ROOT" in worker_source
     assert "remove_nginx_block" in worker_source
     assert "rollback_failed_provision" in worker_source

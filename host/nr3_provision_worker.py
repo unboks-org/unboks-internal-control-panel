@@ -324,7 +324,15 @@ def backup_tenant_before_delete(slug: str, tenant_dir: Path) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     backup_dir = DELETED_TENANTS_ROOT / f"{slug}-{stamp}"
     backup_dir.mkdir(parents=True, exist_ok=False)
-    shutil.copytree(tenant_dir, backup_dir / "client")
+    if tenant_dir.is_dir():
+        shutil.copytree(tenant_dir, backup_dir / "client")
+        tenant_folder_present = True
+    else:
+        (backup_dir / "client-missing.txt").write_text(
+            f"Tenant folder was already missing at delete time: {tenant_dir}\n",
+            encoding="utf-8",
+        )
+        tenant_folder_present = False
     if ICP_DATA_DIR.exists():
         shutil.copytree(
             ICP_DATA_DIR,
@@ -335,6 +343,7 @@ def backup_tenant_before_delete(slug: str, tenant_dir: Path) -> Path:
         "slug": slug,
         "deleted_at": utc_now(),
         "tenant_dir": str(tenant_dir),
+        "tenant_folder_present": tenant_folder_present,
         "backup_dir": str(backup_dir),
     }
     (backup_dir / "DELETE_MANIFEST.json").write_text(
@@ -351,12 +360,11 @@ def process_delete_tenant(job_id: str, job: dict[str, Any], slug: str) -> None:
         raise RuntimeError("Final delete confirmation text is invalid.")
 
     tenant_dir = CLIENTS_ROOT / slug
-    if not tenant_dir.is_dir():
-        raise RuntimeError(f"Tenant directory not found: {tenant_dir}")
-
     details: list[str] = []
     backup_dir = backup_tenant_before_delete(slug, tenant_dir)
     details.append(f"backup created at {backup_dir}")
+    if not tenant_dir.is_dir():
+        details.append(f"tenant folder was already missing: {tenant_dir}")
 
     if (tenant_dir / "docker-compose.yml").exists():
         down = run(
@@ -369,8 +377,9 @@ def process_delete_tenant(job_id: str, job: dict[str, Any], slug: str) -> None:
     if rm.returncode == 0:
         details.append(f"removed container wtyj-{slug}")
 
-    shutil.rmtree(tenant_dir)
-    details.append(f"deleted tenant folder {tenant_dir}")
+    if tenant_dir.is_dir():
+        shutil.rmtree(tenant_dir)
+        details.append(f"deleted tenant folder {tenant_dir}")
     details.append(remove_nginx_block(slug))
 
     write_result(job_id, {
