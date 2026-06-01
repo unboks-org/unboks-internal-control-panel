@@ -112,7 +112,7 @@ def build_export_package(
     safe_slug = validate_slug(tenant_id)
     timestamp = _now()
     package_id = f"{safe_slug}-{timestamp.replace(':', '').replace('+', 'Z')}-{secrets.token_hex(4)}"
-    path = _exports_dir() / f"{package_id}.zip"
+    path = _exports_dir() / f"{package_id}.unboksbackup"
     checksums: dict[str, str] = {}
 
     client_data = get_tenant_client_data(safe_slug)
@@ -211,7 +211,7 @@ def build_export_package(
             "Included: tenant/account settings, prompt/SOT data, channel metadata, notes, optional audit logs, and checksums.\n"
             "Excluded or metadata-only: raw secrets, provider tokens, live authorization links, full uploaded file contents, and full conversation history.\n"
             "After restore, external channels may need reconnecting.\n"
-            "Use Nr3 Import with Validate only first, then Restore existing or Restore as new tenant.\n"
+            "Use Nr3 Import to restore this one backup file into the selected tenant.\n"
         ).encode("utf-8")
         zf.writestr("README_RESTORE.txt", readme)
         checksums["README_RESTORE.txt"] = _checksum(readme)
@@ -237,7 +237,7 @@ def _read_zip_json(zf: zipfile.ZipFile, name: str) -> Any:
 
 def validate_import_package(package_path: Path) -> dict[str, Any]:
     if not zipfile.is_zipfile(package_path):
-        raise ValueError("upload is not a ZIP backup package")
+        raise ValueError("upload is not an Unboks backup file")
     with zipfile.ZipFile(package_path) as zf:
         manifest = _read_zip_json(zf, "manifest.json")
         tenant = _read_zip_json(zf, "tenant.json")
@@ -271,7 +271,7 @@ def validate_import_package(package_path: Path) -> dict[str, Any]:
     }
 
 
-def _save_upload(upload_file, suffix: str = ".zip") -> Path:
+def _save_upload(upload_file, suffix: str = ".unboksbackup") -> Path:
     tmp_dir = Path(tempfile.mkdtemp(prefix="tenant-import-"))
     path = tmp_dir / f"upload{suffix}"
     with path.open("wb") as f:
@@ -314,6 +314,7 @@ def import_uploaded_package(
         rollback = build_export_package(target_tenant)
         icp_overrides.forget_tenant(target)
         channel_state.forget_tenant(target)
+        channel_connections.forget_tenant(target)
         tenant_notes.forget_tenant(target)
     else:
         rollback_root = _rollback_dir()

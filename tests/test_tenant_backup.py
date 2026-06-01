@@ -67,6 +67,7 @@ def test_export_package_contains_manifest_and_excludes_secrets(monkeypatch, tmp_
     summary = validate_import_package(package)
     assert summary["tenant_slug"] == slug
     assert summary["partial"] is True
+    assert package.name.endswith(".unboksbackup")
 
 
 def test_import_validate_only_changes_nothing(monkeypatch, tmp_path):
@@ -103,6 +104,33 @@ def test_import_clone_restores_nr3_state_to_new_slug(monkeypatch, tmp_path):
     assert tenant_notes.list_notes("acme-clone")[0].body == "Important internal note"
 
 
+def test_import_restore_replaces_existing_nr3_state(monkeypatch, tmp_path):
+    source = _seed(monkeypatch, tmp_path, slug="source")
+    _seed(monkeypatch, tmp_path, slug="target")
+    package = build_export_package(source)
+
+    icp_overrides.add_sot_entry("target", title="Old", content="Delete me", category="general")
+    tenant_notes.add_note("target", "Old note")
+    channel_state.set_channel("target", "email", True)
+
+    result = import_uploaded_package(
+        package.open("rb"),
+        target_tenant="target",
+        mode="restore",
+        confirmation="target",
+    )
+
+    assert result["status"] == "imported"
+    assert result["target_tenant"] == "target"
+    sot_titles = [entry["title"] for entry in icp_overrides.sot_entries_for_tenant("target")]
+    assert "Hours" in sot_titles
+    assert "Old" not in sot_titles
+    assert channel_state.read_channels("target")["whatsapp"] is True
+    assert channel_state.read_channels("target")["email"] is False
+    notes = [note.body for note in tenant_notes.list_notes("target")]
+    assert notes == ["Important internal note"]
+
+
 def test_workspace_renders_backup_restore_section(monkeypatch, tmp_path):
     _seed(monkeypatch, tmp_path, slug="unboks")
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
@@ -113,7 +141,9 @@ def test_workspace_renders_backup_restore_section(monkeypatch, tmp_path):
     response = client.get("/admin/tenants/unboks")
 
     assert response.status_code == 200
-    assert "Configuration Backup & Restore" in response.text
-    assert "not a full disaster-recovery export yet" in response.text
+    assert "Tenant Backup & Restore" in response.text
+    assert "Export one backup file" in response.text
+    assert "Import backup file" in response.text
+    assert "Validate / import configuration" not in response.text
     assert "/admin/tenants/unboks/backup/export" in response.text
     assert "/admin/tenants/unboks/backup/import" in response.text

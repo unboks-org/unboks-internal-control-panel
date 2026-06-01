@@ -1768,7 +1768,12 @@ def admin_export_tenant_backup(
         )
     except ValueError as exc:
         return _workspace_redirect(tenant_id, "backup-section", message=str(exc), level="warn")
-    return FileResponse(package, media_type="application/zip", filename=package.name)
+    return FileResponse(
+        package,
+        media_type="application/octet-stream",
+        filename=package.name,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.post("/admin/tenants/{tenant_id}/backup/import")
@@ -1776,7 +1781,7 @@ def admin_import_tenant_backup(
     request: Request,
     tenant_id: str,
     backup_file: UploadFile = File(...),
-    import_mode: str = Form(default="validate"),
+    import_mode: str = Form(default="restore"),
     new_slug: str = Form(default=""),
     confirmation: str = Form(default=""),
 ) -> Response:
@@ -1791,9 +1796,9 @@ def admin_import_tenant_backup(
         result = import_uploaded_package(
             backup_file.file,
             target_tenant=tenant_id,
-            mode=import_mode,
+            mode=import_mode or "restore",
             new_slug=new_slug,
-            confirmation=confirmation,
+            confirmation=confirmation or tenant_id,
         )
     except ValueError as exc:
         return _workspace_redirect(tenant_id, "backup-section", message=str(exc), level="warn")
@@ -1809,7 +1814,7 @@ def admin_import_tenant_backup(
 
     target = result["target_tenant"]
     msg = (
-        f"Tenant backup imported to {target}. "
+        f"Backup file imported to {target}; previous tenant configuration was replaced. "
         f"Rollback package: {result['rollback_package']}. "
         "Provider channels may need reconnecting."
     )
