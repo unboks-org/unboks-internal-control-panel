@@ -95,19 +95,19 @@ def test_create_onboarding_lead_persists_and_rejects_duplicate(monkeypatch, tmp_
     assert persisted.status_code == 200
     assert "test@example.com" in persisted.text
 
-def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None:
+def test_admin_shell_renders_home_sidebar(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
     monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
     client = TestClient(app)
     client.post("/login", data={"password": "test-password"})
 
-    # /admin redirects straight to the first tenant workspace — no Home page
     landing = client.get("/admin", follow_redirects=False)
-    assert landing.status_code == 303
-    assert landing.headers["location"] == "/admin/tenants"
+    assert landing.status_code == 200
+    assert "<h1>Home</h1>" in landing.text
+    assert 'class="sidebar-brand" href="/admin" aria-label="Go to ICP home"' in landing.text
 
-    shell = client.get("/admin")  # follows redirects to first tenant workspace
+    shell = client.get("/admin")
     assert shell.status_code == 200
     assert "app-shell" in shell.text
     assert "tenant-selector" in shell.text
@@ -133,12 +133,12 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     assert "Unboks" in shell.text
     assert "Consulta Despertares" not in shell.text
     assert "BlueFinn Charters" not in shell.text
-    # Sidebar must only show TENANTS and SETTINGS — Home was removed; no Onboarding/Reviews
+    # Sidebar brand goes to the neutral Home page; secondary nav stays focused.
     assert "sidebar-nav" in shell.text
     assert ">Settings<" in shell.text
     sidebar = shell.text.split('class="sidebar-nav"', 1)[1].split("</nav>", 1)[0]
     assert "Home" not in sidebar
-    assert ">Home<" not in shell.text
+    assert ">Home<" in shell.text
     assert "Free trial signups" in sidebar
     assert "Onboarding" not in sidebar
     assert "Reviews" not in sidebar

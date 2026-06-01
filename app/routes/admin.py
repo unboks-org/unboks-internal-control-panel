@@ -345,7 +345,17 @@ def admin_root(request: Request) -> Response:
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
-    return RedirectResponse(url="/admin/tenants", status_code=303)
+    tenants = _sidebar_tenants()
+    return templates.TemplateResponse(
+        request,
+        "admin_home.html",
+        {
+            **_shell_context("home"),
+            "tenant_count": len(tenants),
+            "active_tenant_count": len([tenant for tenant in tenants if tenant.status == "active"]),
+            "inactive_tenant_count": len([tenant for tenant in tenants if tenant.status != "active"]),
+        },
+    )
 
 
 @router.get("/admin/tenants", response_class=HTMLResponse)

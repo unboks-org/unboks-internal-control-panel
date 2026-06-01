@@ -1,0 +1,40 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Home | Unboks Internal{% endblock %}
+{% block section_eyebrow %}ICP home{% endblock %}
+{% block page_title %}Home{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Start here, then choose the tenant or workflow you need.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="signup-overview" aria-label="ICP summary">
+    <div class="signup-stat">
+      <span class="signup-stat-label">Visible tenants</span>
+      <strong>{{ tenant_count }}</strong>
+    </div>
+    <div class="signup-stat">
+      <span class="signup-stat-label">Active</span>
+      <strong>{{ active_tenant_count }}</strong>
+    </div>
+    <div class="signup-stat">
+      <span class="signup-stat-label">Inactive</span>
+      <strong>{{ inactive_tenant_count }}</strong>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <h2>Control panel</h2>
+        <p class="muted compact-note">Use the sidebar to open a tenant workspace, review trial signups, manage todos, or adjust ICP settings.</p>
+      </div>
+    </div>
+    <div class="button-row">
+      <a class="signup-review-button" href="/admin/signups">Free trial signups</a>
+      <a class="signup-secondary-link" href="/admin/tenants/new">Add new tenant</a>
+      <a class="signup-secondary-link" href="/admin/todos">Todo</a>
+      <a class="signup-secondary-link" href="/admin/settings">Settings</a>
+    </div>
+  </section>
+{% endblock %}
