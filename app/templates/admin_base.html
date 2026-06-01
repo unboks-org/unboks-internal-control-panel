@@ -119,6 +119,14 @@
 
       <nav class="sidebar-nav" aria-label="Sections">
         <a
+          href="/admin/signups"
+          class="nav-item {% if active == 'signups' %}active{% endif %}"
+          {% if active == 'signups' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Free trial signups</span>
+        </a>
+        <a
           href="/admin/todos"
           class="nav-item {% if active == 'todos' %}active{% endif %}"
           {% if active == 'todos' %}aria-current="page"{% endif %}

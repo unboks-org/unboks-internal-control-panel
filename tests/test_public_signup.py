@@ -115,6 +115,38 @@ def test_public_signup_email_verification_without_auto_provision(monkeypatch, tm
     assert _stored_request(tmp_path)["status"] == "verified_pending_review"
 
 
+def test_admin_public_signups_page_lists_verified_request(monkeypatch, tmp_path):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings):
+        sent.append({"to": to_email, "subject": subject, "body": body})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+
+    response = _signup(client)
+    assert response.status_code == 202
+    verify_path = sent[0]["body"].split("https://icp.unboks.org", 1)[1].split()[0]
+    verify = client.get(verify_path, follow_redirects=False)
+    assert verify.status_code == 200
+
+    client.post("/login", data={"password": "test-password"})
+    signups = client.get("/admin/signups")
+
+    assert signups.status_code == 200
+    assert "Free trial signups" in signups.text
+    assert "Lovelace Law" in signups.text
+    assert "Ada Lovelace" in signups.text
+    assert "ada@example.com" in signups.text
+    assert "awaiting review" in signups.text
+    assert "not provisioned" in signups.text
+    assert "token_hash" not in signups.text
+
+
 def test_public_signup_email_mentions_verification_expiry(monkeypatch, tmp_path):
     sent = []
 

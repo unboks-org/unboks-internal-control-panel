@@ -157,6 +157,29 @@ def mark_provisioned(request_id: str, slug: str, settings: Settings) -> None:
     _write_store(data, settings)
 
 
+def list_signup_requests(settings: Settings) -> list[dict[str, Any]]:
+    """Return public signup requests without exposing verification token hashes."""
+    data = _read_store(settings)
+    requests = data.get("requests")
+    if not isinstance(requests, dict):
+        return []
+    safe_records: list[dict[str, Any]] = []
+    for record in requests.values():
+        if not isinstance(record, dict):
+            continue
+        safe = {
+            key: value
+            for key, value in record.items()
+            if key not in {"token_hash"}
+        }
+        safe_records.append(safe)
+    return sorted(
+        safe_records,
+        key=lambda item: str(item.get("created_at") or ""),
+        reverse=True,
+    )
+
+
 def _enforce_rate_limits(
     data: dict[str, Any],
     email: str,

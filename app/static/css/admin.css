@@ -1005,6 +1005,13 @@ code {
   margin-top: 10px;
 }
 
+.header-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .action-list {
   display: grid;
   gap: 6px;

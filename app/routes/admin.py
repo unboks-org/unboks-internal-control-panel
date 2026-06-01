@@ -19,6 +19,7 @@ from app.onboarding import (
     list_leads,
     set_review_decision,
 )
+from app.public_signup_requests import list_signup_requests
 from app import todos as todo_store
 from app.security import (
     clear_session_cookie,
@@ -1788,6 +1789,15 @@ def admin_reviews(request: Request) -> Response:
     return render_reviews(request)
 
 
+@router.get("/admin/signups", response_class=HTMLResponse)
+def admin_public_signups(request: Request) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    return render_public_signups(request, settings)
+
+
 @router.get("/admin/todos", response_class=HTMLResponse)
 def admin_todos(request: Request) -> Response:
     settings = get_settings()
@@ -2089,6 +2099,30 @@ def render_reviews(request: Request) -> HTMLResponse:
             "decided": decided,
             "intake_answer_counts": list_intake_answer_counts(),
             "intake_total": len(INTAKE_QUESTIONS),
+        },
+    )
+
+
+def render_public_signups(request: Request, settings) -> HTMLResponse:
+    signups = list_signup_requests(settings)
+    pending_review = [
+        signup
+        for signup in signups
+        if signup.get("status") == "verified_pending_review"
+    ]
+    pending_verification = [
+        signup
+        for signup in signups
+        if signup.get("status") == "verification_pending"
+    ]
+    return templates.TemplateResponse(
+        request,
+        "admin_public_signups.html",
+        {
+            **_shell_context("signups"),
+            "signups": signups,
+            "pending_review": pending_review,
+            "pending_verification": pending_verification,
         },
     )
 

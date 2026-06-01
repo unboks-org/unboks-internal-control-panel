@@ -1,0 +1,82 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Free trial signups | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Public signup{% endblock %}
+{% block page_title %}Free trial signups{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Public signup requests from unboks.org. Email verification is stored here before any workspace is provisioned.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Signup queue</h2>
+      <div class="header-chip-row">
+        <span class="status-chip status-warn">{{ pending_review|length }} awaiting review</span>
+        <span class="status-chip status-neutral">{{ pending_verification|length }} awaiting email verification</span>
+        <span class="status-chip status-unknown">{{ signups|length }} total</span>
+      </div>
+    </div>
+    <p class="muted compact-note">
+      Admin email alerts are not enabled yet. This page is the source of truth for public free-trial signup requests.
+    </p>
+
+    {% if signups %}
+      <div class="table-wrap">
+        <table class="lead-table">
+          <thead>
+            <tr>
+              <th>Business</th>
+              <th>Contact</th>
+              <th>Email</th>
+              <th>Phone</th>
+              <th>Status</th>
+              <th>Slug hint</th>
+              <th>Created</th>
+              <th>Verified</th>
+              <th>Provisioned</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for signup in signups %}
+              <tr>
+                <td data-label="Business">
+                  <span class="primary-cell">{{ signup.business_name or "—" }}</span>
+                </td>
+                <td data-label="Contact">{{ signup.full_name or "—" }}</td>
+                <td data-label="Email">{{ signup.email or "—" }}</td>
+                <td data-label="Phone">{{ signup.phone or "—" }}</td>
+                <td data-label="Status">
+                  {% if signup.status == "verified_pending_review" %}
+                    <span class="status-chip status-warn">awaiting review</span>
+                  {% elif signup.status == "verification_pending" %}
+                    <span class="status-chip status-neutral">awaiting verification</span>
+                  {% elif signup.status == "provisioned" %}
+                    <span class="status-chip status-ok">provisioned</span>
+                  {% elif signup.status == "verification_expired" %}
+                    <span class="status-chip status-unknown">expired</span>
+                  {% else %}
+                    <span class="status-chip status-unknown">{{ signup.status or "unknown" }}</span>
+                  {% endif %}
+                </td>
+                <td data-label="Slug hint">{{ signup.slug_hint or "—" }}</td>
+                <td data-label="Created">{{ signup.created_at or "—" }}</td>
+                <td data-label="Verified">{{ signup.verified_at or "—" }}</td>
+                <td data-label="Provisioned">
+                  {% if signup.provisioned_slug %}
+                    <span class="status-chip status-ok">{{ signup.provisioned_slug }}</span>
+                    <span class="cell-note">{{ signup.provisioned_at or "" }}</span>
+                  {% else %}
+                    <span class="status-chip status-neutral">not provisioned</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">No public free-trial signup requests yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

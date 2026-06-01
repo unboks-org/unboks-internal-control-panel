@@ -139,6 +139,7 @@ def test_admin_shell_renders_tenant_first_sidebar(monkeypatch, tmp_path) -> None
     sidebar = shell.text.split('class="sidebar-nav"', 1)[1].split("</nav>", 1)[0]
     assert "Home" not in sidebar
     assert ">Home<" not in shell.text
+    assert "Free trial signups" in sidebar
     assert "Onboarding" not in sidebar
     assert "Reviews" not in sidebar
     assert "Needs attention" not in sidebar
