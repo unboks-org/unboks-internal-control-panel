@@ -4,7 +4,11 @@ from starlette.templating import Jinja2Templates
 from typing import Optional
 
 from app.config import get_settings
-from app.emailer import EmailSendResult, prepare_or_send_onboarding_email
+from app.emailer import (
+    EmailSendResult,
+    build_onboarding_link,
+    prepare_or_send_onboarding_email,
+)
 from app.onboarding import (
     INTAKE_QUESTIONS,
     LeadInput,
@@ -13,13 +17,21 @@ from app.onboarding import (
     build_setup_summary,
     clean_optional,
     create_lead,
+    create_or_refresh_token,
     get_lead,
     list_intake_answers,
     list_intake_answer_counts,
     list_leads,
     set_review_decision,
 )
-from app.public_signup_requests import list_signup_requests
+from app.public_signup_requests import (
+    get_signup_request,
+    list_signup_requests,
+    mark_provisioned,
+    update_signup_request,
+)
+from app.signup_service import create_public_signup_tenant
+from app import audit_log
 from app import todos as todo_store
 from app.security import (
     clear_session_cookie,
@@ -1798,6 +1810,236 @@ def admin_public_signups(request: Request) -> Response:
     return render_public_signups(request, settings)
 
 
+@router.get("/admin/signups/{signup_id}", response_class=HTMLResponse)
+def admin_public_signup_detail(request: Request, signup_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    return render_public_signup_detail(
+        request,
+        settings,
+        signup_id,
+        generated_link=request.query_params.get("generated_link", ""),
+        notice=request.query_params.get("notice", ""),
+        error=request.query_params.get("error", ""),
+    )
+
+
+@router.post("/admin/signups/{signup_id}/approve", response_class=HTMLResponse)
+def admin_public_signup_approve(
+    request: Request,
+    signup_id: str,
+    review_note: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        update_signup_request(
+            signup_id,
+            settings,
+            status="approved",
+            review_status="approved",
+            reviewed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            review_note=review_note.strip(),
+        )
+        audit_log.record_event(
+            action="public_signup.approved",
+            result="ok",
+            safe_summary="Public signup approved.",
+            metadata={"signup_id": signup_id},
+        )
+    except TenantCreateError as exc:
+        return _signup_detail_redirect(signup_id, error=str(exc))
+    return _signup_detail_redirect(signup_id, notice="Signup approved.")
+
+
+@router.post("/admin/signups/{signup_id}/reject", response_class=HTMLResponse)
+def admin_public_signup_reject(
+    request: Request,
+    signup_id: str,
+    reject_reason: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    clean_reason = reject_reason.strip()
+    if not clean_reason:
+        return _signup_detail_redirect(signup_id, error="Reject reason is required.")
+    try:
+        update_signup_request(
+            signup_id,
+            settings,
+            status="rejected",
+            review_status="rejected",
+            reviewed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            reject_reason=clean_reason,
+        )
+        audit_log.record_event(
+            action="public_signup.rejected",
+            result="ok",
+            safe_summary="Public signup rejected.",
+            metadata={"signup_id": signup_id},
+        )
+    except TenantCreateError as exc:
+        return _signup_detail_redirect(signup_id, error=str(exc))
+    return _signup_detail_redirect(signup_id, notice="Signup rejected.")
+
+
+@router.post("/admin/signups/{signup_id}/generate-link", response_class=HTMLResponse)
+def admin_public_signup_generate_link(request: Request, signup_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        signup = get_signup_request(signup_id, settings)
+        lead = _ensure_onboarding_lead_for_signup(signup, settings)
+        lead, raw_token = create_or_refresh_token(lead.id)
+        link = build_onboarding_link(raw_token, settings)
+        update_signup_request(
+            signup_id,
+            settings,
+            onboarding_lead_id=lead.id,
+            onboarding_link_generated_at=datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            ),
+            status="onboarding_link_generated",
+        )
+        audit_log.record_event(
+            action="public_signup.onboarding_link_generated",
+            result="ok",
+            safe_summary="Public signup onboarding link generated.",
+            metadata={"signup_id": signup_id, "lead_id": lead.id},
+        )
+    except (TenantCreateError, LeadValidationError, LeadNotFoundError) as exc:
+        return _signup_detail_redirect(signup_id, error=str(exc))
+    return _signup_detail_redirect(
+        signup_id,
+        notice="Onboarding link generated.",
+        generated_link=link,
+    )
+
+
+@router.post("/admin/signups/{signup_id}/send-onboarding", response_class=HTMLResponse)
+def admin_public_signup_send_onboarding(request: Request, signup_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        signup = get_signup_request(signup_id, settings)
+        lead = _ensure_onboarding_lead_for_signup(signup, settings)
+        result = prepare_or_send_onboarding_email(lead.id)
+        update_signup_request(
+            signup_id,
+            settings,
+            onboarding_lead_id=lead.id,
+            onboarding_email_sent_at=(
+                result.draft and datetime.now(timezone.utc).isoformat(timespec="seconds")
+                if result.sent
+                else None
+            ),
+            onboarding_email_error=result.error or "",
+            status="onboarding_link_sent" if result.sent else "failed",
+        )
+        audit_log.record_event(
+            action="public_signup.onboarding_email_sent",
+            result="ok" if result.sent else "failed",
+            safe_summary=(
+                "Public signup onboarding email sent."
+                if result.sent
+                else "Public signup onboarding email failed."
+            ),
+            metadata={"signup_id": signup_id, "lead_id": lead.id},
+        )
+    except (TenantCreateError, LeadValidationError, LeadNotFoundError) as exc:
+        return _signup_detail_redirect(signup_id, error=str(exc))
+    if not result.sent:
+        return _signup_detail_redirect(
+            signup_id,
+            error=result.error or "Onboarding email could not be sent.",
+            generated_link=result.draft.onboarding_link,
+        )
+    return _signup_detail_redirect(
+        signup_id,
+        notice=f"Onboarding email sent to {result.draft and signup.get('email')}.",
+    )
+
+
+@router.post("/admin/signups/{signup_id}/create-workspace", response_class=HTMLResponse)
+def admin_public_signup_create_workspace(request: Request, signup_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        signup = get_signup_request(signup_id, settings)
+        if signup.get("status") not in {
+            "approved",
+            "onboarding_link_generated",
+            "onboarding_link_sent",
+            "failed",
+        }:
+            return _signup_detail_redirect(
+                signup_id,
+                error="Approve this signup before creating a workspace.",
+            )
+        result = create_public_signup_tenant(
+            full_name=str(signup.get("full_name") or ""),
+            business_name=str(signup.get("business_name") or ""),
+            email=str(signup.get("email") or ""),
+            phone=str(signup.get("phone") or ""),
+            settings=settings,
+        )
+        mark_provisioned(signup_id, result.slug, settings)
+        audit_log.record_event(
+            action="public_signup.workspace_created",
+            tenant_id=result.slug,
+            result="ok",
+            safe_summary="Workspace created from public signup.",
+            metadata={"signup_id": signup_id, "slug": result.slug},
+        )
+    except TenantCreateError as exc:
+        update_signup_request(
+            signup_id,
+            settings,
+            status="failed",
+            workspace_error=str(exc),
+        )
+        audit_log.record_event(
+            action="public_signup.workspace_create_failed",
+            result="failed",
+            safe_summary="Workspace creation from public signup failed.",
+            metadata={"signup_id": signup_id, "error": str(exc)},
+        )
+        return _signup_detail_redirect(signup_id, error=str(exc))
+    except Exception as exc:
+        update_signup_request(
+            signup_id,
+            settings,
+            status="failed",
+            workspace_error="Workspace creation failed.",
+        )
+        audit_log.record_event(
+            action="public_signup.workspace_create_failed",
+            result="failed",
+            safe_summary="Workspace creation from public signup failed.",
+            metadata={"signup_id": signup_id, "error": type(exc).__name__},
+        )
+        return _signup_detail_redirect(
+            signup_id,
+            error="Workspace creation failed. Check logs before retrying.",
+        )
+    return _signup_detail_redirect(
+        signup_id,
+        notice=f"Workspace created: {result.slug}.",
+    )
+
+
 @router.get("/admin/todos", response_class=HTMLResponse)
 def admin_todos(request: Request) -> Response:
     settings = get_settings()
@@ -2061,6 +2303,56 @@ def _pipeline_totals(leads) -> dict[str, int]:
     }
 
 
+def _signup_detail_redirect(
+    signup_id: str,
+    *,
+    notice: str = "",
+    error: str = "",
+    generated_link: str = "",
+) -> RedirectResponse:
+    params = []
+    if notice:
+        params.append(f"notice={quote_plus(notice)}")
+    if error:
+        params.append(f"error={quote_plus(error)}")
+    if generated_link:
+        params.append(f"generated_link={quote_plus(generated_link)}")
+    suffix = "?" + "&".join(params) if params else ""
+    return RedirectResponse(url=f"/admin/signups/{signup_id}{suffix}", status_code=303)
+
+
+def _ensure_onboarding_lead_for_signup(signup: dict, settings) -> object:
+    lead_id = signup.get("onboarding_lead_id")
+    if lead_id:
+        try:
+            return get_lead(int(lead_id))
+        except (TypeError, ValueError, LeadNotFoundError):
+            pass
+    email = str(signup.get("email") or "").strip().lower()
+    for lead in list_leads():
+        if lead.email.strip().lower() == email:
+            update_signup_request(
+                str(signup.get("id") or ""),
+                settings,
+                onboarding_lead_id=lead.id,
+            )
+            return lead
+    note_parts = ["Created from public free-trial signup."]
+    if signup.get("id"):
+        note_parts.append(f"Signup ID: {signup.get('id')}")
+    if signup.get("phone"):
+        note_parts.append(f"Phone: {signup.get('phone')}")
+    return create_lead(
+        LeadInput(
+            email=str(signup.get("email") or ""),
+            business_name=clean_optional(str(signup.get("business_name") or "")),
+            contact_name=clean_optional(str(signup.get("full_name") or "")),
+            language=None,
+            notes="\n".join(note_parts),
+        )
+    )
+
+
 def render_onboarding(
     request: Request,
     error: Optional[str] = None,
@@ -2123,6 +2415,52 @@ def render_public_signups(request: Request, settings) -> HTMLResponse:
             "signups": signups,
             "pending_review": pending_review,
             "pending_verification": pending_verification,
+        },
+    )
+
+
+def render_public_signup_detail(
+    request: Request,
+    settings,
+    signup_id: str,
+    *,
+    generated_link: str = "",
+    notice: str = "",
+    error: str = "",
+) -> HTMLResponse:
+    try:
+        signup = get_signup_request(signup_id, settings)
+    except TenantCreateError:
+        return templates.TemplateResponse(
+            request,
+            "admin_public_signup_detail.html",
+            {
+                **_shell_context("signups"),
+                "signup": None,
+                "generated_link": "",
+                "notice": "",
+                "error": "Signup request not found.",
+                "linked_lead": None,
+            },
+            status_code=404,
+        )
+    linked_lead = None
+    lead_id = signup.get("onboarding_lead_id")
+    if lead_id:
+        try:
+            linked_lead = get_lead(int(lead_id))
+        except (TypeError, ValueError, LeadNotFoundError):
+            linked_lead = None
+    return templates.TemplateResponse(
+        request,
+        "admin_public_signup_detail.html",
+        {
+            **_shell_context("signups"),
+            "signup": signup,
+            "generated_link": generated_link,
+            "notice": notice,
+            "error": error,
+            "linked_lead": linked_lead,
         },
     )
 

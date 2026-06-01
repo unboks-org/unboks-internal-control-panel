@@ -1012,6 +1012,67 @@ code {
   justify-content: flex-end;
 }
 
+.list-tools {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.list-search-input {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  font: inherit;
+  min-height: 42px;
+  padding: 0 12px;
+  width: min(100%, 420px);
+}
+
+.split-actions {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.stacked-action-form,
+.button-row,
+.copy-row {
+  display: flex;
+  gap: 10px;
+}
+
+.stacked-action-form {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.button-row {
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.copy-row {
+  align-items: center;
+  margin-top: 8px;
+}
+
+.copy-row input {
+  flex: 1;
+  min-width: 220px;
+}
+
+.button-danger,
+button.button-danger {
+  background: #c5221f;
+  border-color: #c5221f;
+  color: #fff;
+}
+
+.danger-soft {
+  border-color: #f3c2c0;
+}
+
 .action-list {
   display: grid;
   gap: 6px;

@@ -157,6 +157,37 @@ def mark_provisioned(request_id: str, slug: str, settings: Settings) -> None:
     _write_store(data, settings)
 
 
+def get_signup_request(request_id: str, settings: Settings) -> dict[str, Any]:
+    data = _read_store(settings)
+    requests = data.get("requests")
+    if not isinstance(requests, dict):
+        raise TenantCreateError("Signup request not found.")
+    record = requests.get(request_id)
+    if not isinstance(record, dict):
+        raise TenantCreateError("Signup request not found.")
+    return _safe_record(record)
+
+
+def update_signup_request(
+    request_id: str,
+    settings: Settings,
+    **updates: Any,
+) -> dict[str, Any]:
+    data = _read_store(settings)
+    requests = data.get("requests")
+    if not isinstance(requests, dict):
+        raise TenantCreateError("Signup request not found.")
+    record = requests.get(request_id)
+    if not isinstance(record, dict):
+        raise TenantCreateError("Signup request not found.")
+    now = utc_now().isoformat()
+    record.update(updates)
+    record["updated_at"] = now
+    requests[request_id] = record
+    _write_store(data, settings)
+    return _safe_record(record)
+
+
 def list_signup_requests(settings: Settings) -> list[dict[str, Any]]:
     """Return public signup requests without exposing verification token hashes."""
     data = _read_store(settings)
@@ -167,17 +198,20 @@ def list_signup_requests(settings: Settings) -> list[dict[str, Any]]:
     for record in requests.values():
         if not isinstance(record, dict):
             continue
-        safe = {
-            key: value
-            for key, value in record.items()
-            if key not in {"token_hash"}
-        }
-        safe_records.append(safe)
+        safe_records.append(_safe_record(record))
     return sorted(
         safe_records,
         key=lambda item: str(item.get("created_at") or ""),
         reverse=True,
     )
+
+
+def _safe_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in record.items()
+        if key not in {"token_hash"}
+    }
 
 
 def _enforce_rate_limits(

@@ -20,10 +20,28 @@
     <p class="muted compact-note">
       Admin email alerts are not enabled yet. This page is the source of truth for public free-trial signup requests.
     </p>
+    <div class="list-tools" role="search">
+      <input
+        class="list-search-input"
+        type="search"
+        placeholder="Search name, email, or company"
+        aria-label="Search free trial signups"
+        data-simple-table-search="public-signups-table"
+      >
+      <div class="tenant-filter-chips" role="group" aria-label="Filter signup status">
+        <button type="button" class="tenant-filter-chip is-active" data-simple-table-filter="all">All</button>
+        <button type="button" class="tenant-filter-chip" data-simple-table-filter="verification_pending">New</button>
+        <button type="button" class="tenant-filter-chip" data-simple-table-filter="verified_pending_review">Awaiting review</button>
+        <button type="button" class="tenant-filter-chip" data-simple-table-filter="approved">Approved</button>
+        <button type="button" class="tenant-filter-chip" data-simple-table-filter="rejected">Rejected</button>
+        <button type="button" class="tenant-filter-chip" data-simple-table-filter="onboarding_link_sent">Onboarding sent</button>
+        <button type="button" class="tenant-filter-chip" data-simple-table-filter="failed">Failed</button>
+      </div>
+    </div>
 
     {% if signups %}
       <div class="table-wrap">
-        <table class="lead-table">
+        <table class="lead-table" id="public-signups-table">
           <thead>
             <tr>
               <th>Business</th>
@@ -35,11 +53,12 @@
               <th>Created</th>
               <th>Verified</th>
               <th>Provisioned</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
             {% for signup in signups %}
-              <tr>
+              <tr data-simple-table-row data-simple-status="{{ signup.status or 'unknown' }}">
                 <td data-label="Business">
                   <span class="primary-cell">{{ signup.business_name or "—" }}</span>
                 </td>
@@ -49,6 +68,14 @@
                 <td data-label="Status">
                   {% if signup.status == "verified_pending_review" %}
                     <span class="status-chip status-warn">awaiting review</span>
+                  {% elif signup.status == "approved" %}
+                    <span class="status-chip status-ok">approved</span>
+                  {% elif signup.status == "rejected" %}
+                    <span class="status-chip status-unknown">rejected</span>
+                  {% elif signup.status == "onboarding_link_generated" %}
+                    <span class="status-chip status-warn">link generated</span>
+                  {% elif signup.status == "onboarding_link_sent" %}
+                    <span class="status-chip status-ok">onboarding sent</span>
                   {% elif signup.status == "verification_pending" %}
                     <span class="status-chip status-neutral">awaiting verification</span>
                   {% elif signup.status == "provisioned" %}
@@ -68,6 +95,12 @@
                     <span class="cell-note">{{ signup.provisioned_at or "" }}</span>
                   {% else %}
                     <span class="status-chip status-neutral">not provisioned</span>
+                  {% endif %}
+                </td>
+                <td data-label="Action">
+                  <a class="button-link" href="/admin/signups/{{ signup.id }}">Open / Review</a>
+                  {% if signup.provisioned_slug %}
+                    <a class="button-link" href="/admin/tenants/{{ signup.provisioned_slug }}">Open workspace</a>
                   {% endif %}
                 </td>
               </tr>
