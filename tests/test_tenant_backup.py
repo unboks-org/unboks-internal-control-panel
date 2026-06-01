@@ -173,6 +173,26 @@ def test_import_restore_replaces_existing_nr3_state(monkeypatch, tmp_path):
     assert result["client_tree_restored"] is True
 
 
+def test_import_restore_can_defer_runtime_restore_to_host_worker(monkeypatch, tmp_path):
+    source = _seed(monkeypatch, tmp_path, slug="source")
+    _seed(monkeypatch, tmp_path, slug="target")
+    monkeypatch.setenv("NR3_TENANT_RUNTIME_RESTORE_MODE", "host")
+    package = build_export_package(source)
+
+    result = import_uploaded_package(
+        package.open("rb"),
+        target_tenant="target",
+        mode="restore",
+        confirmation="target",
+    )
+
+    assert result["status"] == "imported"
+    assert result["client_tree_restored"] is False
+    assert result["runtime_restore_package"].endswith(".unboksbackup")
+    assert Path(result["runtime_restore_package"]).exists()
+    assert icp_overrides.ai_agent_settings_for_tenant("target")["agent_name"]["name"] == "Sofia"
+
+
 def test_import_restore_carries_channel_connection_metadata(monkeypatch, tmp_path):
     source = _seed(monkeypatch, tmp_path, slug="source")
     _seed(monkeypatch, tmp_path, slug="target")

@@ -16,9 +16,11 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -78,6 +80,7 @@ ICP_DATA_DIR = env_path(
     "NR3_ICP_DATA_DIR",
     "/root/unboks-internal-control-panel/data",
 )
+IMPORT_PAYLOAD_DIR = ICP_DATA_DIR / "tenant_import_payloads"
 POLL_SECONDS = float(os.getenv("NR3_PROVISION_POLL_SECONDS", "2"))
 
 
@@ -393,6 +396,120 @@ def process_delete_tenant(job_id: str, job: dict[str, Any], slug: str) -> None:
     })
 
 
+def read_json_file(path: Path) -> dict[str, Any]:
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def extract_client_tree_from_backup(package_path: Path) -> Path:
+    allowed_root = IMPORT_PAYLOAD_DIR.resolve()
+    resolved = package_path.resolve()
+    if allowed_root not in (resolved, *resolved.parents):
+        raise RuntimeError("Backup package path is outside the approved import payload directory.")
+    if not zipfile.is_zipfile(resolved):
+        raise RuntimeError("Backup package is not a valid Unboks backup file.")
+    root = Path(tempfile.mkdtemp(prefix="nr3-client-tree-"))
+    extracted = 0
+    with zipfile.ZipFile(resolved) as zf:
+        for info in zf.infolist():
+            if info.is_dir() or not info.filename.startswith("client_tree/"):
+                continue
+            rel = Path(info.filename[len("client_tree/"):])
+            if rel.is_absolute() or ".." in rel.parts:
+                raise RuntimeError(f"Unsafe client tree path in backup: {info.filename}")
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, target.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted += 1
+    if extracted == 0:
+        raise RuntimeError("Backup package does not include a client_tree runtime folder.")
+    return root
+
+
+def rewrite_restored_runtime_identity(target: str, source_root: Path, target_dir: Path, previous_dir: Path) -> None:
+    previous_compose = ""
+    previous_client = read_json_file(previous_dir / "config" / "client.json")
+    if (previous_dir / "docker-compose.yml").exists():
+        previous_compose = (previous_dir / "docker-compose.yml").read_text(encoding="utf-8")
+    source_client = read_json_file(source_root / "config" / "client.json")
+    source_slug = validate_slug(source_client.get("slug") or target)
+
+    client_path = target_dir / "config" / "client.json"
+    client = read_json_file(client_path)
+    client["slug"] = target
+    for key in ("host_port", "port"):
+        if previous_client.get(key) is not None:
+            client[key] = previous_client[key]
+    business = client.get("business")
+    if isinstance(business, dict):
+        business["slug"] = target
+    client_path.parent.mkdir(parents=True, exist_ok=True)
+    client_path.write_text(json.dumps(client, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    env_path = target_dir / "config" / "platform.env"
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        seen_id = False
+        seen_slug = False
+        out: list[str] = []
+        for line in lines:
+            if line.startswith("TENANT_ID="):
+                out.append(f"TENANT_ID={target}")
+                seen_id = True
+            elif line.startswith("TENANT_SLUG="):
+                out.append(f"TENANT_SLUG={target}")
+                seen_slug = True
+            elif line.startswith("# platform.env for tenant "):
+                out.append(f"# platform.env for tenant {target}")
+            else:
+                out.append(line)
+        if not seen_id:
+            out.append(f"TENANT_ID={target}")
+        if not seen_slug:
+            out.append(f"TENANT_SLUG={target}")
+        env_path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+
+    compose_path = target_dir / "docker-compose.yml"
+    if previous_compose:
+        compose_path.write_text(previous_compose, encoding="utf-8")
+    elif compose_path.exists():
+        text = compose_path.read_text(encoding="utf-8")
+        text = text.replace(f"container_name: wtyj-{source_slug}", f"container_name: wtyj-{target}")
+        text = text.replace(f"/api/{source_slug}/", f"/api/{target}/")
+        text = text.replace(f"tenant {source_slug}", f"tenant {target}")
+        compose_path.write_text(text, encoding="utf-8")
+
+
+def process_restore_tenant_runtime(job_id: str, job: dict[str, Any], slug: str) -> None:
+    package_path = Path(str(job.get("backup_package_path") or ""))
+    source_root = extract_client_tree_from_backup(package_path)
+    tenant_dir = CLIENTS_ROOT / slug
+    previous_dir = Path(tempfile.mkdtemp(prefix=f"nr3-prev-{slug}-"))
+    if tenant_dir.exists():
+        shutil.copytree(tenant_dir, previous_dir, dirs_exist_ok=True)
+        shutil.rmtree(tenant_dir)
+    tenant_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_root, tenant_dir)
+    rewrite_restored_runtime_identity(slug, source_root, tenant_dir, previous_dir)
+    run(["docker", "compose", "up", "-d", "--force-recreate"], cwd=tenant_dir)
+    write_result(job_id, {
+        "status": "succeeded",
+        "job_type": "tenant_action",
+        "action": "restore_tenant_runtime",
+        "slug": slug,
+        "message": f"Tenant {slug} runtime was restored from backup and recreated.",
+        "details": [
+            f"runtime restored to {tenant_dir}",
+            f"docker compose up -d --force-recreate completed for {slug}",
+        ],
+        "dashboard_url": str(job.get("dashboard_url") or f"https://dashboard.unboks.org/{slug}"),
+    })
+
+
 def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
     action = str(job.get("action") or "")
     slug = validate_slug(job.get("slug"))
@@ -400,6 +517,9 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
         raise RuntimeError(f"Tenant {slug!r} is reserved and cannot be changed by host action.")
     if action == "delete_tenant":
         process_delete_tenant(job_id, job, slug)
+        return
+    if action == "restore_tenant_runtime":
+        process_restore_tenant_runtime(job_id, job, slug)
         return
     if action not in {"suspend_tenant", "unpause_tenant", "reset_dashboard_password", "restart_tenant"}:
         raise RuntimeError(f"Unsupported tenant action: {action!r}")

@@ -1813,13 +1813,15 @@ def admin_import_tenant_backup(
         return _workspace_redirect(tenant_id, "backup-section", message=msg)
 
     target = result["target_tenant"]
+    runtime_package = str(result.get("runtime_restore_package") or "")
     restart = queue_tenant_host_action(
         slug=target,
-        action="restart_tenant",
+        action="restore_tenant_runtime" if runtime_package else "restart_tenant",
         dashboard_url=f"https://dashboard.unboks.org/{target}",
+        backup_package_path=runtime_package,
     )
     restart_note = (
-        " Runtime container was recreated."
+        " Runtime was restored and container was recreated."
         if restart.status == "succeeded"
         else f" Runtime restart status: {restart.status} ({restart.message})."
     )

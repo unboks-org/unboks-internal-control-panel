@@ -51,6 +51,12 @@ def _rollback_dir() -> Path:
     return root
 
 
+def _import_payload_dir() -> Path:
+    root = Path(os.getenv("NR3_TENANT_IMPORT_PAYLOAD_DIR", "data/tenant_import_payloads"))
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _safe_json(value: Any) -> Any:
     if is_dataclass(value):
         return _safe_json(asdict(value))
@@ -310,6 +316,29 @@ def _save_upload(upload_file, suffix: str = ".unboksbackup") -> Path:
     return path
 
 
+def _persist_import_payload(package_path: Path, target: str) -> Path:
+    payload_dir = _import_payload_dir()
+    name = f"{validate_slug(target)}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(4)}.unboksbackup"
+    target_path = payload_dir / name
+    shutil.copy2(package_path, target_path)
+    try:
+        target_path.chmod(0o600)
+    except OSError:
+        pass
+    return target_path
+
+
+def _can_restore_runtime_in_process(target: str) -> bool:
+    mode = os.getenv("NR3_TENANT_RUNTIME_RESTORE_MODE", "").strip().lower()
+    if mode == "host":
+        return False
+    if mode == "direct":
+        return True
+    root = _tenant_root(target)
+    probe = root if root.exists() else root.parent
+    return os.access(probe, os.W_OK)
+
+
 def validate_uploaded_package(upload_file) -> dict[str, Any]:
     path = _save_upload(upload_file)
     return validate_import_package(path)
@@ -515,7 +544,11 @@ def import_uploaded_package(
         prompts = _read_zip_json(zf, "prompts.json")
         channels = _read_zip_json(zf, "channels.json")
         learning = _read_zip_json(zf, "learning.json")
-        client_tree = _extract_client_tree(zf)
+        client_tree = _extract_client_tree(zf) if _can_restore_runtime_in_process(target) else None
+
+    runtime_restore_package = ""
+    if client_tree is None:
+        runtime_restore_package = str(_persist_import_payload(package_path, target))
 
     if client_tree is not None:
         _restore_client_tree(target, client_tree, _tenant_root(target))
@@ -591,5 +624,6 @@ def import_uploaded_package(
         "source_tenant": source_slug,
         "rollback_package": str(rollback),
         "client_tree_restored": client_tree is not None,
+        "runtime_restore_package": runtime_restore_package,
         "channels_require_reconnect": False,
     }
