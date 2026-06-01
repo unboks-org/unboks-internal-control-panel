@@ -95,7 +95,7 @@
                 <span class="signup-status-badge badge-awaiting">Info requested</span>
               {% elif signup.status == "info_request_failed" %}
                 <span class="signup-status-badge badge-danger">Info request failed</span>
-              {% elif signup.status == "archived" %}
+              {% elif signup.status in ["archived", "rejected"] %}
                 <span class="signup-status-badge badge-neutral">Archived</span>
               {% elif signup.status == "onboarding_link_generated" %}
                 <span class="signup-status-badge badge-awaiting">Link generated</span>

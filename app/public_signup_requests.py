@@ -202,7 +202,7 @@ def list_signup_requests(
     for record in requests.values():
         if not isinstance(record, dict):
             continue
-        if not include_archived and record.get("archived_at"):
+        if not include_archived and is_archived_signup(record):
             continue
         safe_records.append(_safe_record(record))
     return sorted(
@@ -217,6 +217,13 @@ def _safe_record(record: dict[str, Any]) -> dict[str, Any]:
         key: value
         for key, value in record.items()
         if key not in {"token_hash"}
+    }
+
+
+def is_archived_signup(record: dict[str, Any]) -> bool:
+    return bool(record.get("archived_at")) or record.get("status") in {
+        "archived",
+        "rejected",
     }
 
 

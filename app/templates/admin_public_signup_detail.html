@@ -31,7 +31,7 @@
       {% set next_step = "workspace" %}
     {% elif signup.provisioned_slug or current_status == "provisioned" %}
       {% set next_step = "open" %}
-    {% elif current_status == "archived" %}
+    {% elif current_status in ["archived", "rejected"] %}
       {% set next_step = "archived" %}
     {% endif %}
 
@@ -50,7 +50,7 @@
           <span class="signup-status-badge badge-awaiting">Info requested</span>
         {% elif current_status == "info_request_failed" %}
           <span class="signup-status-badge badge-danger">Info request failed</span>
-        {% elif current_status == "archived" %}
+        {% elif current_status in ["archived", "rejected"] %}
           <span class="signup-status-badge badge-neutral">Archived</span>
         {% elif current_status == "onboarding_link_generated" %}
           <span class="signup-status-badge badge-awaiting">Onboarding link generated</span>
@@ -132,7 +132,7 @@
           </div>
         {% else %}
           <p class="muted compact-note">
-            {% if current_status == "archived" %}
+            {% if current_status in ["archived", "rejected"] %}
               This signup was denied and archived. It is hidden from the normal signup queue.
             {% elif current_status == "approved" %}
               This signup is approved. The onboarding process can continue.
@@ -146,7 +146,7 @@
         {% endif %}
       </article>
 
-      {% if not pre_approval and current_status != "archived" %}
+      {% if not pre_approval and current_status not in ["archived", "rejected"] %}
       <article class="signup-step-card {% if next_step == 'generate' %}is-current{% endif %}">
         <span class="signup-step-number">3</span>
         <h3>Generate onboarding link</h3>

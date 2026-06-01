@@ -273,6 +273,29 @@ def test_admin_public_signup_reject_archives_and_hides_request(monkeypatch, tmp_
     assert "Archived" in archive_page.text
 
 
+def test_admin_public_signups_hides_legacy_rejected_requests(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    response = _signup(client, email="legacy-denied@example.com")
+    assert response.status_code == 202
+    store_path = tmp_path / "signup_requests.json"
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    request_id, record = next(iter(data["requests"].items()))
+    record["status"] = "rejected"
+    record["review_status"] = "rejected"
+    data["requests"][request_id] = record
+    store_path.write_text(json.dumps(data), encoding="utf-8")
+
+    client.post("/login", data={"password": "test-password"})
+    list_page = client.get("/admin/signups")
+    assert list_page.status_code == 200
+    assert "legacy-denied@example.com" not in list_page.text
+
+    archive_page = client.get("/admin/signups?archived=1")
+    assert archive_page.status_code == 200
+    assert "legacy-denied@example.com" in archive_page.text
+    assert "Archived" in archive_page.text
+
+
 def test_admin_public_signup_reject_requires_reason(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     response = _signup(client)

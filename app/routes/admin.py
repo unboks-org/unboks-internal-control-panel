@@ -26,6 +26,7 @@ from app.onboarding import (
 )
 from app.public_signup_requests import (
     get_signup_request,
+    is_archived_signup,
     list_signup_requests,
     mark_provisioned,
     update_signup_request,
@@ -2478,7 +2479,7 @@ def render_public_signups(request: Request, settings) -> HTMLResponse:
         [
             signup
             for signup in list_signup_requests(settings, include_archived=True)
-            if signup.get("archived_at")
+            if is_archived_signup(signup)
         ]
     )
     pending_review = [
