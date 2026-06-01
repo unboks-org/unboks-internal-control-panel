@@ -556,16 +556,17 @@ def import_uploaded_package(
     account = tenant_payload.get("account") if isinstance(tenant_payload, dict) else {}
     if not isinstance(account, dict):
         account = {}
-    update_tenant_account_details(
-        target,
-        name=str(account.get("name") or summary["tenant_name"] or target),
-        contact_person=str(account.get("contact_person") or ""),
-        email=str(account.get("email") or ""),
-        phone=str(account.get("phone") or ""),
-        website=str(account.get("website") or ""),
-        address=str(account.get("address") or ""),
-        logo_url=str(account.get("logo_url") or ""),
-    )
+    if not runtime_restore_package:
+        update_tenant_account_details(
+            target,
+            name=str(account.get("name") or summary["tenant_name"] or target),
+            contact_person=str(account.get("contact_person") or ""),
+            email=str(account.get("email") or ""),
+            phone=str(account.get("phone") or ""),
+            website=str(account.get("website") or ""),
+            address=str(account.get("address") or ""),
+            logo_url=str(account.get("logo_url") or ""),
+        )
     register_tenant({"slug": target, "name": account.get("name") or summary["tenant_name"] or target, "status": "active"})
 
     ai = prompts.get("ai_agent_settings") if isinstance(prompts, dict) else {}
