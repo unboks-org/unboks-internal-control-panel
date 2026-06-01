@@ -1,9 +1,9 @@
-"""Tenant configuration backup/export/import helpers for Nr3.
+"""Tenant backup/export/import helpers for Nr3.
 
-Exports are authenticated ZIP packages. Secrets are never exported in plain
-text; runtime credentials are replaced with explicit "excluded" markers.
-Import restores Nr3-controlled state and safe account metadata only. External
-provider channels are marked as requiring reconnect.
+Exports are authenticated single-file packages. They include the selected
+tenant runtime folder plus Nr3-owned state so an import can replace the target
+tenant with a working clone while preserving target-only runtime identity such
+as slug, compose service name, and host port.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from app.tenants import (
 )
 
 
-EXPORT_VERSION = "1.0"
+EXPORT_VERSION = "2.0"
 SECRET_HINTS = ("password", "secret", "token", "access_key", "api_key", "private_key")
 
 
@@ -83,10 +83,35 @@ def _write_zip_json(zf: zipfile.ZipFile, name: str, value: Any, checksums: dict[
     checksums[name] = _checksum(data)
 
 
+def _tenant_root(slug: str) -> Path:
+    client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", "/root/clients").strip()
+    return Path(client_dir) / validate_slug(slug)
+
+
+def _write_zip_file(zf: zipfile.ZipFile, name: str, path: Path, checksums: dict[str, str]) -> None:
+    data = path.read_bytes()
+    zf.writestr(name, data)
+    checksums[name] = _checksum(data)
+
+
+def _write_client_tree(zf: zipfile.ZipFile, slug: str, checksums: dict[str, str]) -> bool:
+    root = _tenant_root(slug)
+    if not root.is_dir():
+        return False
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if rel.endswith(".lock"):
+            continue
+        _write_zip_file(zf, f"client_tree/{rel}", path, checksums)
+    return True
+
+
 def _connection_snapshot(tenant_id: str) -> dict[str, Any]:
     connection = channel_connections.get_tenant_channel_connection(tenant_id)
     latest = channel_connections.get_latest_connection_request_for_tenant(tenant_id)
-    connection_data = _safe_json(connection) if connection else None
+    connection_data = asdict(connection) if connection else None
     latest_data = _safe_json(latest) if latest else None
     if isinstance(latest_data, dict):
         latest_data.pop("auth_url", None)
@@ -94,7 +119,7 @@ def _connection_snapshot(tenant_id: str) -> dict[str, Any]:
     return {
         "whatsapp": connection_data,
         "latest_request": latest_data,
-        "secrets": "provider tokens and live authorization links are excluded; reconnect may be required after restore",
+        "secrets": "tenant runtime files are included; live authorization links are excluded",
     }
 
 
@@ -122,6 +147,7 @@ def build_export_package(
     notes = [asdict(note) for note in tenant_notes.list_notes(safe_slug)]
     channels = channel_state.read_channels(safe_slug)
     connections = _connection_snapshot(safe_slug)
+    has_client_tree = _tenant_root(safe_slug).is_dir()
 
     manifest = {
         "export_version": EXPORT_VERSION,
@@ -131,10 +157,12 @@ def build_export_package(
         "source_environment": os.getenv("NR3_ENV", "unknown"),
         "included_sections": [
             "tenant",
+            "tenant_runtime_folder",
             "prompts",
             "channels",
             "learning",
             "settings",
+            "runtime_credentials",
         ],
         "optional_sections": {
             "history": bool(include_history),
@@ -143,14 +171,13 @@ def build_export_package(
             "inactive_archived": bool(include_inactive),
         },
         "excluded_sections": [
-            "raw passwords",
-            "provider tokens",
             "live authorization links",
-            "payment secrets",
+            "payment secrets not stored in the tenant runtime folder",
         ],
-        "secrets_handling": "raw secrets are replaced with excluded markers; channels may require reconnect after restore",
-        "partial": True,
-        "partial_reason": "Nr3 exports safe tenant configuration and metadata. External provider secrets are intentionally excluded.",
+        "secrets_handling": "tenant runtime credentials from the tenant folder are included; protect this file like production secrets",
+        "partial": False,
+        "complete_clone": True,
+        "client_tree_included": has_client_tree,
     }
 
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -162,6 +189,7 @@ def build_export_package(
                 "tenant": asdict(tenant),
                 "account": account,
                 "client_json_sanitized": _safe_json(client_data),
+                "client_json_raw": client_data,
             },
             checksums,
         )
@@ -181,7 +209,7 @@ def build_export_package(
             {
                 "visibility": channels,
                 "connections": connections,
-                "requires_reconnect_after_import": True,
+                "requires_reconnect_after_import": False,
             },
             checksums,
         )
@@ -202,15 +230,16 @@ def build_export_package(
         if include_files:
             zf.writestr(
                 "uploads/README.txt",
-                "Uploaded runtime files are not copied in this safe v1 export unless a future storage manifest indexes them.\n",
+                "Runtime uploads are included under client_tree/ when they live in the tenant folder.\n",
             )
+        if has_client_tree:
+            _write_client_tree(zf, safe_slug, checksums)
         readme = (
-            "Tenant Configuration Backup & Restore\n\n"
+            "Tenant Full Backup & Restore\n\n"
             "This ZIP was generated by Nr3.\n"
-            "This is a safe v1 configuration backup, not a full disaster-recovery export.\n"
-            "Included: tenant/account settings, prompt/SOT data, channel metadata, notes, optional audit logs, and checksums.\n"
-            "Excluded or metadata-only: raw secrets, provider tokens, live authorization links, full uploaded file contents, and full conversation history.\n"
-            "After restore, external channels may need reconnecting.\n"
+            "It is delivered as one .unboksbackup file.\n"
+            "Included: tenant runtime folder, account settings, prompt/SOT data, channel metadata, notes, optional audit logs, uploaded files stored in the tenant folder, runtime databases, and checksums.\n"
+            "Import replaces the selected tenant data and rewrites only target-specific identity fields such as slug, container name, and host port.\n"
             "Use Nr3 Import to restore this one backup file into the selected tenant.\n"
         ).encode("utf-8")
         zf.writestr("README_RESTORE.txt", readme)
@@ -221,7 +250,7 @@ def build_export_package(
         action="tenant_export_completed",
         tenant_id=safe_slug,
         safe_summary=f"Tenant export package created: {path.name}",
-        metadata={"package": path.name, "partial": True},
+        metadata={"package": path.name, "partial": False, "client_tree": has_client_tree},
     )
     return path
 
@@ -264,9 +293,11 @@ def validate_import_package(package_path: Path) -> dict[str, Any]:
         "excluded_sections": manifest.get("excluded_sections") or [],
         "secrets_handling": manifest.get("secrets_handling"),
         "partial": bool(manifest.get("partial")),
+        "complete_clone": bool(manifest.get("complete_clone")),
+        "client_tree_included": bool(manifest.get("client_tree_included")),
         "warnings": [
-            "Provider tokens and raw passwords are excluded.",
-            "External channels are marked as requiring reconnect.",
+            "This backup may contain production credentials. Store it securely.",
+            "Import rewrites target slug/container identity to avoid runtime collisions.",
         ],
     }
 
@@ -282,6 +313,156 @@ def _save_upload(upload_file, suffix: str = ".unboksbackup") -> Path:
 def validate_uploaded_package(upload_file) -> dict[str, Any]:
     path = _save_upload(upload_file)
     return validate_import_package(path)
+
+
+def _extract_client_tree(zf: zipfile.ZipFile) -> Path | None:
+    members = [
+        info
+        for info in zf.infolist()
+        if info.filename.startswith("client_tree/") and not info.is_dir()
+    ]
+    if not members:
+        return None
+    root = Path(tempfile.mkdtemp(prefix="tenant-client-tree-"))
+    for info in members:
+        rel = Path(info.filename[len("client_tree/"):])
+        if rel.is_absolute() or ".." in rel.parts:
+            raise ValueError(f"unsafe client tree path: {info.filename}")
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info) as src, target.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+    return root
+
+
+def _read_text_if_exists(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _restore_client_tree(target: str, source_root: Path, previous_root: Path) -> None:
+    target_root = _tenant_root(target)
+    previous_compose = _read_text_if_exists(previous_root / "docker-compose.yml")
+    source_config = source_root / "config" / "client.json"
+    source_client = {}
+    if source_config.exists():
+        try:
+            loaded = json.loads(source_config.read_text(encoding="utf-8"))
+            source_client = loaded if isinstance(loaded, dict) else {}
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            source_client = {}
+    source_slug = validate_slug(str(source_client.get("slug") or target))
+    previous_config = previous_root / "config" / "client.json"
+    previous_client = {}
+    if previous_config.exists():
+        try:
+            loaded = json.loads(previous_config.read_text(encoding="utf-8"))
+            previous_client = loaded if isinstance(loaded, dict) else {}
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            previous_client = {}
+
+    if target_root.exists():
+        shutil.rmtree(target_root)
+    target_root.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_root, target_root)
+
+    client_path = target_root / "config" / "client.json"
+    if client_path.exists():
+        try:
+            data = json.loads(client_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        data["slug"] = target
+        # Preserve target-only runtime fields when present. Business content
+        # still comes from the donor backup.
+        for key in ("host_port", "port"):
+            if previous_client.get(key) is not None:
+                data[key] = previous_client[key]
+        business = data.get("business")
+        if isinstance(business, dict):
+            business["slug"] = target
+        client_path.parent.mkdir(parents=True, exist_ok=True)
+        client_path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+    env_path = target_root / "config" / "platform.env"
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        seen_tenant_id = False
+        seen_tenant_slug = False
+        out: list[str] = []
+        for line in lines:
+            if line.startswith("TENANT_ID="):
+                out.append(f"TENANT_ID={target}")
+                seen_tenant_id = True
+            elif line.startswith("TENANT_SLUG="):
+                out.append(f"TENANT_SLUG={target}")
+                seen_tenant_slug = True
+            elif line.startswith("# platform.env for tenant "):
+                out.append(f"# platform.env for tenant {target}")
+            else:
+                out.append(line)
+        if not seen_tenant_id:
+            out.append(f"TENANT_ID={target}")
+        if not seen_tenant_slug:
+            out.append(f"TENANT_SLUG={target}")
+        env_path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+
+    if previous_compose:
+        (target_root / "docker-compose.yml").write_text(previous_compose, encoding="utf-8")
+    else:
+        compose_path = target_root / "docker-compose.yml"
+        if compose_path.exists():
+            text = compose_path.read_text(encoding="utf-8")
+            text = text.replace(f"container_name: wtyj-{source_slug}", f"container_name: wtyj-{target}")
+            text = text.replace(f"/api/{source_slug}/", f"/api/{target}/")
+            text = text.replace(f"tenant {source_slug}", f"tenant {target}")
+            compose_path.write_text(text, encoding="utf-8")
+
+
+def _restore_channel_connection(target: str, connections: dict[str, Any]) -> None:
+    connection = connections.get("whatsapp") if isinstance(connections, dict) else None
+    if not isinstance(connection, dict):
+        return
+    zernio_profile_id = connection.get("zernio_profile_id")
+    if zernio_profile_id:
+        channel_connections.set_tenant_zernio_profile_id(
+            tenant_id=target,
+            name=target,
+            zernio_profile_id=str(zernio_profile_id),
+        )
+    metadata = connection.get("metadata_json")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {"raw": metadata}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    status = str(connection.get("status") or "not_connected")
+    if status not in channel_connections.TENANT_CONNECTION_STATUSES:
+        status = "not_connected"
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id=target,
+        channel=str(connection.get("channel") or "whatsapp"),
+        provider=str(connection.get("provider") or "zernio"),
+        status=status,
+        zernio_profile_id=connection.get("zernio_profile_id"),
+        zernio_account_id=connection.get("zernio_account_id"),
+        phone_number_id=connection.get("phone_number_id"),
+        display_phone_number=connection.get("display_phone_number"),
+        waba_id=connection.get("waba_id"),
+        metadata=metadata,
+        last_request_id=connection.get("last_request_id"),
+        last_error=connection.get("last_error"),
+        connected_at=connection.get("connected_at"),
+    )
 
 
 def import_uploaded_package(
@@ -334,6 +515,10 @@ def import_uploaded_package(
         prompts = _read_zip_json(zf, "prompts.json")
         channels = _read_zip_json(zf, "channels.json")
         learning = _read_zip_json(zf, "learning.json")
+        client_tree = _extract_client_tree(zf)
+
+    if client_tree is not None:
+        _restore_client_tree(target, client_tree, _tenant_root(target))
 
     account = tenant_payload.get("account") if isinstance(tenant_payload, dict) else {}
     if not isinstance(account, dict):
@@ -379,6 +564,9 @@ def import_uploaded_package(
     if isinstance(visibility, dict):
         for key, value in visibility.items():
             channel_state.set_channel(target, str(key), bool(value))
+    connections = channels.get("connections") if isinstance(channels, dict) else {}
+    if isinstance(connections, dict):
+        _restore_channel_connection(target, connections)
     for note in (learning.get("tenant_notes") if isinstance(learning, dict) else []) or []:
         if isinstance(note, dict) and note.get("body"):
             added = tenant_notes.add_note(
@@ -402,5 +590,6 @@ def import_uploaded_package(
         "target_tenant": target,
         "source_tenant": source_slug,
         "rollback_package": str(rollback),
-        "channels_require_reconnect": True,
+        "client_tree_restored": client_tree is not None,
+        "channels_require_reconnect": False,
     }

@@ -941,22 +941,22 @@
   <span id="backup-section"></span>
   <details class="ws-section ws-tone-cyan">
     <summary class="ws-summary">
-      <span class="ws-title">Tenant Backup & Restore</span>
-      <span class="ws-desc muted">Export one backup file or import one backup file into this tenant.</span>
+      <span class="ws-title">Full Tenant Backup & Restore</span>
+      <span class="ws-desc muted">Export one full backup file or import one backup file into this tenant.</span>
       <span class="ws-chevron" aria-hidden="true">&#9662;</span>
     </summary>
 
-  <section class="agent-panel" aria-label="Tenant Backup & Restore">
+  <section class="agent-panel" aria-label="Full Tenant Backup & Restore">
     <header class="agent-panel-header">
       <div>
-        <h3>Tenant Backup & Restore</h3>
-        <p class="muted compact-note">Export creates one Unboks backup file. Import that same file to replace this tenant's current Nr3-controlled configuration data. Raw secrets and provider tokens are never imported in plain text, so connected channels may need reconnecting.</p>
+        <h3>Full Tenant Backup & Restore</h3>
+        <p class="muted compact-note">Export creates one Unboks backup file containing the tenant runtime folder, dashboard credentials, knowledge files, runtime databases, prompt/SOT data, channel metadata, notes, and Nr3 state. Import replaces this tenant with the backup contents while preserving the selected tenant's slug, container name, and route.</p>
       </div>
     </header>
     <div class="agent-grid">
       <div class="agent-block">
-        <h4>Export tenant backup</h4>
-        <p class="muted compact-note">Downloads one <code>.unboksbackup</code> file for this tenant. Keep that file; do not import the extracted folder contents.</p>
+        <h4>Export full tenant backup</h4>
+        <p class="muted compact-note">Downloads one <code>.unboksbackup</code> file. Keep that file; do not import extracted folder contents.</p>
         <form method="get" action="/admin/tenants/{{ tenant.id }}/backup/export" class="agent-inline-form">
           <label class="agent-checkbox"><input type="checkbox" name="include_history" value="1"> Include indexed conversation/escalation metadata where available</label>
           <label class="agent-checkbox"><input type="checkbox" name="include_files" value="1"> Include uploaded files manifest only</label>
@@ -969,8 +969,8 @@
       </div>
 
       <div class="agent-block">
-        <h4>Import tenant backup</h4>
-        <p class="muted compact-note">Choose the one exported backup file and import it. Nr3 creates a rollback first, deletes this tenant's old Nr3-controlled configuration data, then restores the backup into this tenant.</p>
+        <h4>Import full tenant backup</h4>
+        <p class="muted compact-note">Choose the one exported backup file and import it. Nr3 creates a rollback first, removes this tenant's old data, restores the backup, and rewrites only the target-specific slug/container identity needed to keep this tenant working.</p>
         <form method="post" action="/admin/tenants/{{ tenant.id }}/backup/import" enctype="multipart/form-data" class="agent-inline-form">
           <label class="agent-form-field">
             <span>Unboks backup file</span>

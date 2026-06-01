@@ -50,7 +50,7 @@ def test_workspace_has_expected_sections(client):
         "Nr2 company knowledge",
         "Escalations",
         "Tenant notes",
-        "Tenant Backup & Restore",
+        "Full Tenant Backup & Restore",
         "Danger zone",
     ], f"section drift: {aria_labels}"
 

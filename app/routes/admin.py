@@ -1814,9 +1814,9 @@ def admin_import_tenant_backup(
 
     target = result["target_tenant"]
     msg = (
-        f"Backup file imported to {target}; previous tenant configuration was replaced. "
+        f"Full backup imported to {target}; previous tenant data was replaced. "
         f"Rollback package: {result['rollback_package']}. "
-        "Provider channels may need reconnecting."
+        "Target slug/container identity was preserved."
     )
     return _workspace_redirect(target, "backup-section", message=msg)
 
