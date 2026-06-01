@@ -4,112 +4,127 @@
 {% block section_eyebrow %}Public signup{% endblock %}
 {% block page_title %}Free trial signups{% endblock %}
 {% block page_subtitle %}
-  <p class="muted">Public signup requests from unboks.org. Email verification is stored here before any workspace is provisioned.</p>
+  <p class="muted">Review new trial requests, approve prospects, and send onboarding links.</p>
 {% endblock %}
 
 {% block content %}
-  <section class="panel">
-    <div class="panel-header">
-      <h2>Signup queue</h2>
-      <div class="header-chip-row">
-        <span class="status-chip status-warn">{{ pending_review|length }} awaiting review</span>
-        <span class="status-chip status-neutral">{{ pending_verification|length }} awaiting email verification</span>
-        <span class="status-chip status-unknown">{{ signups|length }} total</span>
-      </div>
+  {% set approved_count = signups | selectattr("status", "equalto", "approved") | list | length %}
+  {% set onboarding_sent_count = signups | selectattr("status", "equalto", "onboarding_link_sent") | list | length %}
+
+  <section class="signup-overview" aria-label="Free trial signup summary">
+    <div class="signup-stat">
+      <span class="signup-stat-label">Awaiting review</span>
+      <strong>{{ pending_review|length }}</strong>
     </div>
-    <p class="muted compact-note">
-      Admin email alerts are not enabled yet. This page is the source of truth for public free-trial signup requests.
-    </p>
-    <div class="list-tools" role="search">
+    <div class="signup-stat">
+      <span class="signup-stat-label">Awaiting email verification</span>
+      <strong>{{ pending_verification|length }}</strong>
+    </div>
+    <div class="signup-stat">
+      <span class="signup-stat-label">Approved</span>
+      <strong>{{ approved_count }}</strong>
+    </div>
+    <div class="signup-stat">
+      <span class="signup-stat-label">Onboarding sent</span>
+      <strong>{{ onboarding_sent_count }}</strong>
+    </div>
+    <div class="signup-stat">
+      <span class="signup-stat-label">Total</span>
+      <strong>{{ signups|length }}</strong>
+    </div>
+  </section>
+
+  <section class="panel signups-panel">
+    <div class="signup-info-banner" role="status">
+      Admin email alerts are not enabled yet. This page is currently the source of truth for public trial requests.
+    </div>
+
+    <div class="signup-toolbar" role="search">
       <input
-        class="list-search-input"
+        class="signup-search-input"
         type="search"
-        placeholder="Search name, email, or company"
+        placeholder="Search name, email, business..."
         aria-label="Search free trial signups"
         data-simple-table-search="public-signups-table"
       >
-      <div class="tenant-filter-chips" role="group" aria-label="Filter signup status">
-        <button type="button" class="tenant-filter-chip is-active" data-simple-table-filter="all">All</button>
-        <button type="button" class="tenant-filter-chip" data-simple-table-filter="verification_pending">New</button>
-        <button type="button" class="tenant-filter-chip" data-simple-table-filter="verified_pending_review">Awaiting review</button>
-        <button type="button" class="tenant-filter-chip" data-simple-table-filter="approved">Approved</button>
-        <button type="button" class="tenant-filter-chip" data-simple-table-filter="rejected">Rejected</button>
-        <button type="button" class="tenant-filter-chip" data-simple-table-filter="onboarding_link_sent">Onboarding sent</button>
-        <button type="button" class="tenant-filter-chip" data-simple-table-filter="failed">Failed</button>
-      </div>
+      <select class="signup-filter-select" aria-label="Filter signup status" data-simple-table-filter-select>
+        <option value="all">All</option>
+        <option value="verification_pending">New</option>
+        <option value="verified_pending_review">Awaiting review</option>
+        <option value="approved">Approved</option>
+        <option value="onboarding_link_sent">Onboarding sent</option>
+        <option value="rejected">Rejected</option>
+        <option value="failed">Failed</option>
+      </select>
     </div>
 
     {% if signups %}
-      <div class="table-wrap">
-        <table class="lead-table" id="public-signups-table">
-          <thead>
-            <tr>
-              <th>Business</th>
-              <th>Contact</th>
-              <th>Email</th>
-              <th>Phone</th>
-              <th>Status</th>
-              <th>Slug hint</th>
-              <th>Created</th>
-              <th>Verified</th>
-              <th>Provisioned</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for signup in signups %}
-              <tr data-simple-table-row data-simple-status="{{ signup.status or 'unknown' }}">
-                <td data-label="Business">
-                  <span class="primary-cell">{{ signup.business_name or "—" }}</span>
-                </td>
-                <td data-label="Contact">{{ signup.full_name or "—" }}</td>
-                <td data-label="Email">{{ signup.email or "—" }}</td>
-                <td data-label="Phone">{{ signup.phone or "—" }}</td>
-                <td data-label="Status">
-                  {% if signup.status == "verified_pending_review" %}
-                    <span class="status-chip status-warn">awaiting review</span>
-                  {% elif signup.status == "approved" %}
-                    <span class="status-chip status-ok">approved</span>
-                  {% elif signup.status == "rejected" %}
-                    <span class="status-chip status-unknown">rejected</span>
-                  {% elif signup.status == "onboarding_link_generated" %}
-                    <span class="status-chip status-warn">link generated</span>
-                  {% elif signup.status == "onboarding_link_sent" %}
-                    <span class="status-chip status-ok">onboarding sent</span>
-                  {% elif signup.status == "verification_pending" %}
-                    <span class="status-chip status-neutral">awaiting verification</span>
-                  {% elif signup.status == "provisioned" %}
-                    <span class="status-chip status-ok">provisioned</span>
-                  {% elif signup.status == "verification_expired" %}
-                    <span class="status-chip status-unknown">expired</span>
-                  {% else %}
-                    <span class="status-chip status-unknown">{{ signup.status or "unknown" }}</span>
-                  {% endif %}
-                </td>
-                <td data-label="Slug hint">{{ signup.slug_hint or "—" }}</td>
-                <td data-label="Created">{{ signup.created_at or "—" }}</td>
-                <td data-label="Verified">{{ signup.verified_at or "—" }}</td>
-                <td data-label="Provisioned">
-                  {% if signup.provisioned_slug %}
-                    <span class="status-chip status-ok">{{ signup.provisioned_slug }}</span>
-                    <span class="cell-note">{{ signup.provisioned_at or "" }}</span>
-                  {% else %}
-                    <span class="status-chip status-neutral">not provisioned</span>
-                  {% endif %}
-                </td>
-                <td data-label="Action">
-                  <a class="button-link" href="/admin/signups/{{ signup.id }}">Open / Review</a>
-                  {% if signup.provisioned_slug %}
-                    <a class="button-link" href="/admin/tenants/{{ signup.provisioned_slug }}">Open workspace</a>
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="signup-card-list" id="public-signups-table">
+        {% for signup in signups %}
+          <article class="signup-card" data-simple-table-row data-simple-status="{{ signup.status or 'unknown' }}">
+            <div class="signup-card-main">
+              <div>
+                <h2>{{ signup.business_name or "Unknown business" }}</h2>
+                <p>{{ signup.full_name or "Unknown contact" }}</p>
+              </div>
+              <div class="signup-contact-line">
+                <span>{{ signup.email or "No email" }}</span>
+                <span>{{ signup.phone or "No phone" }}</span>
+              </div>
+              <span class="signup-created">Created {{ signup.created_at or "—" }}</span>
+            </div>
+
+            <div class="signup-card-state">
+              {% if signup.status == "verified_pending_review" %}
+                <span class="signup-status-badge badge-awaiting">Awaiting review</span>
+              {% elif signup.status == "approved" %}
+                <span class="signup-status-badge badge-good">Approved</span>
+              {% elif signup.status == "rejected" %}
+                <span class="signup-status-badge badge-danger">Rejected</span>
+              {% elif signup.status == "onboarding_link_generated" %}
+                <span class="signup-status-badge badge-awaiting">Link generated</span>
+              {% elif signup.status == "onboarding_link_sent" %}
+                <span class="signup-status-badge badge-good">Onboarding sent</span>
+              {% elif signup.status == "verification_pending" %}
+                <span class="signup-status-badge badge-neutral">Awaiting email verification</span>
+              {% elif signup.status == "provisioned" %}
+                <span class="signup-status-badge badge-good">Workspace created</span>
+              {% elif signup.status == "failed" %}
+                <span class="signup-status-badge badge-danger">Failed</span>
+              {% elif signup.status == "verification_expired" %}
+                <span class="signup-status-badge badge-danger">Expired</span>
+              {% else %}
+                <span class="signup-status-badge badge-neutral">{{ signup.status or "New" }}</span>
+              {% endif %}
+              <dl>
+                <div>
+                  <dt>Verification</dt>
+                  <dd>{% if signup.verified_at %}Verified{% else %}Pending{% endif %}</dd>
+                </div>
+                <div>
+                  <dt>Workspace</dt>
+                  <dd>{{ signup.provisioned_slug or "Not created" }}</dd>
+                </div>
+                <div>
+                  <dt>Slug hint</dt>
+                  <dd>{{ signup.slug_hint or "—" }}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div class="signup-card-actions">
+              <a class="signup-review-button" href="/admin/signups/{{ signup.id }}">Review</a>
+              <button type="button" class="signup-copy-button" data-copy-text="{{ signup.email or '' }}">Copy email</button>
+              {% if signup.provisioned_slug %}
+                <a class="signup-secondary-link" href="/admin/tenants/{{ signup.provisioned_slug }}">Open tenant</a>
+              {% endif %}
+            </div>
+          </article>
+        {% endfor %}
       </div>
+      <p class="signup-empty-note" data-simple-table-empty hidden>No signup requests found.</p>
     {% else %}
-      <p class="muted">No public free-trial signup requests yet.</p>
+      <p class="signup-empty-note">No signup requests found.</p>
     {% endif %}
   </section>
 {% endblock %}

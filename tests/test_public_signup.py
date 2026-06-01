@@ -142,8 +142,10 @@ def test_admin_public_signups_page_lists_verified_request(monkeypatch, tmp_path)
     assert "Lovelace Law" in signups.text
     assert "Ada Lovelace" in signups.text
     assert "ada@example.com" in signups.text
-    assert "awaiting review" in signups.text
-    assert "not provisioned" in signups.text
+    assert "Awaiting review" in signups.text
+    assert "Not created" in signups.text
+    assert "Review" in signups.text
+    assert "lead-table" not in signups.text
     assert "token_hash" not in signups.text
 
 
@@ -171,6 +173,8 @@ def test_admin_public_signup_review_and_onboarding_actions(monkeypatch, tmp_path
     client.post("/login", data={"password": "test-password"})
     detail = client.get(f"/admin/signups/{signup_id}")
     assert detail.status_code == 200
+    assert "Current state" in detail.text
+    assert "Review details" in detail.text
     assert "Approve signup" in detail.text
     assert "Send onboarding link by email" in detail.text
     assert "token_hash" not in detail.text

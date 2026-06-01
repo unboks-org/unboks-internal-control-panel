@@ -20,170 +20,154 @@
   {% endif %}
 
   {% if signup %}
-    <section class="panel">
-      <div class="panel-header">
+    {% set current_status = signup.status or "verification_pending" %}
+    {% set next_step = "approve" %}
+    {% if current_status == "approved" %}
+      {% set next_step = "generate" %}
+    {% elif current_status == "onboarding_link_generated" %}
+      {% set next_step = "send" %}
+    {% elif current_status == "onboarding_link_sent" %}
+      {% set next_step = "workspace" %}
+    {% elif signup.provisioned_slug or current_status == "provisioned" %}
+      {% set next_step = "open" %}
+    {% elif current_status == "rejected" %}
+      {% set next_step = "rejected" %}
+    {% endif %}
+
+    <section class="signup-detail-hero">
+      <div>
+        <span class="signup-detail-kicker">Current state</span>
         <h2>{{ signup.business_name or "Unknown business" }}</h2>
-        {% if signup.status == "verified_pending_review" %}
-          <span class="status-chip status-warn">awaiting review</span>
-        {% elif signup.status == "approved" %}
-          <span class="status-chip status-ok">approved</span>
-        {% elif signup.status == "rejected" %}
-          <span class="status-chip status-unknown">rejected</span>
-        {% elif signup.status == "onboarding_link_generated" %}
-          <span class="status-chip status-warn">onboarding link generated</span>
-        {% elif signup.status == "onboarding_link_sent" %}
-          <span class="status-chip status-ok">onboarding sent</span>
-        {% elif signup.status == "provisioned" %}
-          <span class="status-chip status-ok">workspace created</span>
-        {% elif signup.status == "failed" %}
-          <span class="status-chip status-error">needs attention</span>
+        <p>{{ signup.full_name or "Unknown contact" }} · {{ signup.email or "No email" }}</p>
+      </div>
+      <div class="signup-detail-state">
+        {% if current_status == "verified_pending_review" %}
+          <span class="signup-status-badge badge-awaiting">Awaiting review</span>
+        {% elif current_status == "approved" %}
+          <span class="signup-status-badge badge-good">Approved</span>
+        {% elif current_status == "rejected" %}
+          <span class="signup-status-badge badge-danger">Rejected</span>
+        {% elif current_status == "onboarding_link_generated" %}
+          <span class="signup-status-badge badge-awaiting">Onboarding link generated</span>
+        {% elif current_status == "onboarding_link_sent" %}
+          <span class="signup-status-badge badge-good">Onboarding sent</span>
+        {% elif signup.provisioned_slug or current_status == "provisioned" %}
+          <span class="signup-status-badge badge-good">Workspace created</span>
+        {% elif current_status == "failed" %}
+          <span class="signup-status-badge badge-danger">Needs attention</span>
         {% else %}
-          <span class="status-chip status-neutral">{{ signup.status or "new" }}</span>
+          <span class="signup-status-badge badge-neutral">{{ current_status }}</span>
         {% endif %}
-      </div>
-      <dl class="detail-grid">
-        <div>
-          <dt>Name</dt>
-          <dd>{{ signup.full_name or "—" }}</dd>
-        </div>
-        <div>
-          <dt>Email</dt>
-          <dd>{{ signup.email or "—" }}</dd>
-        </div>
-        <div>
-          <dt>Business</dt>
-          <dd>{{ signup.business_name or "—" }}</dd>
-        </div>
-        <div>
-          <dt>Phone</dt>
-          <dd>{{ signup.phone or "—" }}</dd>
-        </div>
-        <div>
-          <dt>Website</dt>
-          <dd>{{ signup.website or "—" }}</dd>
-        </div>
-        <div>
-          <dt>Requested plan</dt>
-          <dd>{{ signup.requested_plan or "Free trial" }}</dd>
-        </div>
-        <div>
-          <dt>Signup ID</dt>
-          <dd><code>{{ signup.id }}</code></dd>
-        </div>
-        <div>
-          <dt>Slug hint</dt>
-          <dd>{{ signup.slug_hint or "—" }}</dd>
-        </div>
-        <div>
-          <dt>Created</dt>
-          <dd>{{ signup.created_at or "—" }}</dd>
-        </div>
-        <div>
-          <dt>Verified</dt>
-          <dd>{{ signup.verified_at or "—" }}</dd>
-        </div>
-        <div>
-          <dt>Provisioned</dt>
-          <dd>
-            {% if signup.provisioned_slug %}
-              <a href="/admin/tenants/{{ signup.provisioned_slug }}">{{ signup.provisioned_slug }}</a>
-            {% else %}
-              —
-            {% endif %}
-          </dd>
-        </div>
-        <div>
-          <dt>IP</dt>
-          <dd>{{ signup.ip_address or "—" }}</dd>
-        </div>
-      </dl>
-      {% if signup.review_note %}
-        <p class="muted compact-note"><strong>Review note:</strong> {{ signup.review_note }}</p>
-      {% endif %}
-      {% if signup.reject_reason %}
-        <p class="muted compact-note"><strong>Reject reason:</strong> {{ signup.reject_reason }}</p>
-      {% endif %}
-      {% if signup.workspace_error %}
-        <p class="muted compact-note"><strong>Workspace error:</strong> {{ signup.workspace_error }}</p>
-      {% endif %}
-    </section>
 
-    <section class="panel">
-      <div class="panel-header">
-        <h2>Review decision</h2>
-        <span class="status-chip status-neutral">Nr3 only</span>
-      </div>
-      <div class="split-actions">
-        <form method="post" action="/admin/signups/{{ signup.id }}/approve" class="stacked-action-form">
-          <label for="review-note">Internal note</label>
-          <textarea id="review-note" name="review_note" rows="3" placeholder="Optional note before approval">{{ signup.review_note or "" }}</textarea>
-          <button type="submit">Approve signup</button>
-        </form>
-        <form method="post" action="/admin/signups/{{ signup.id }}/reject" class="stacked-action-form">
-          <label for="reject-reason">Reject reason</label>
-          <textarea id="reject-reason" name="reject_reason" rows="3" required placeholder="Reason is required">{{ signup.reject_reason or "" }}</textarea>
-          <button class="button-danger" type="submit">Reject signup</button>
-        </form>
+        {% if next_step == "approve" %}
+          <form method="post" action="/admin/signups/{{ signup.id }}/approve">
+            <input type="hidden" name="review_note" value="{{ signup.review_note or '' }}">
+            <button type="submit">Approve signup</button>
+          </form>
+        {% elif next_step == "generate" %}
+          <form method="post" action="/admin/signups/{{ signup.id }}/generate-link">
+            <button type="submit">Generate onboarding link</button>
+          </form>
+        {% elif next_step == "send" %}
+          <form method="post" action="/admin/signups/{{ signup.id }}/send-onboarding">
+            <button type="submit">Send onboarding link</button>
+          </form>
+        {% elif next_step == "workspace" %}
+          <form method="post" action="/admin/signups/{{ signup.id }}/create-workspace">
+            <button type="submit">Create workspace</button>
+          </form>
+        {% elif next_step == "open" %}
+          <a class="signup-review-button" href="/admin/tenants/{{ signup.provisioned_slug }}">Open tenant workspace</a>
+        {% endif %}
       </div>
     </section>
 
-    <section class="panel">
-      <div class="panel-header">
-        <h2>Onboarding link</h2>
-        {% if signup.onboarding_email_sent_at %}
-          <span class="status-chip status-ok">sent</span>
-        {% elif signup.onboarding_link_generated_at %}
-          <span class="status-chip status-warn">generated</span>
-        {% else %}
-          <span class="status-chip status-neutral">not generated</span>
-        {% endif %}
-      </div>
-      <p class="muted compact-note">The onboarding link uses the existing secure onboarding token system. The token hash is never shown.</p>
-      {% if linked_lead %}
-        <p class="muted compact-note">Linked onboarding lead: #{{ linked_lead.id }} · {{ linked_lead.status }}</p>
-      {% endif %}
-      {% if generated_link %}
-        <label for="generated-onboarding-link">Generated onboarding link</label>
-        <div class="copy-row">
-          <input id="generated-onboarding-link" type="text" readonly value="{{ generated_link }}">
-          <button type="button" data-ct-copy data-ct-copy-target="generated-onboarding-link">Copy link</button>
+    <section class="signup-step-grid" aria-label="Signup workflow">
+      <article class="signup-step-card is-current">
+        <span class="signup-step-number">1</span>
+        <h3>Review details</h3>
+        <dl class="signup-detail-list">
+          <div><dt>Name</dt><dd>{{ signup.full_name or "—" }}</dd></div>
+          <div><dt>Email</dt><dd>{{ signup.email or "—" }}</dd></div>
+          <div><dt>Business</dt><dd>{{ signup.business_name or "—" }}</dd></div>
+          <div><dt>Phone</dt><dd>{{ signup.phone or "—" }}</dd></div>
+          <div><dt>Website</dt><dd>{{ signup.website or "—" }}</dd></div>
+          <div><dt>Requested plan</dt><dd>{{ signup.requested_plan or "Free trial" }}</dd></div>
+          <div><dt>Created</dt><dd>{{ signup.created_at or "—" }}</dd></div>
+          <div><dt>Verified</dt><dd>{{ signup.verified_at or "—" }}</dd></div>
+          <div><dt>Slug hint</dt><dd>{{ signup.slug_hint or "—" }}</dd></div>
+          <div><dt>Signup ID</dt><dd><code>{{ signup.id }}</code></dd></div>
+        </dl>
+      </article>
+
+      <article class="signup-step-card {% if next_step == 'approve' %}is-current{% endif %}">
+        <span class="signup-step-number">2</span>
+        <h3>Approve or reject</h3>
+        <div class="split-actions compact">
+          <form method="post" action="/admin/signups/{{ signup.id }}/approve" class="stacked-action-form">
+            <label for="review-note">Internal note</label>
+            <textarea id="review-note" name="review_note" rows="3" placeholder="Optional approval note">{{ signup.review_note or "" }}</textarea>
+            <button type="submit">Approve signup</button>
+          </form>
+          <form method="post" action="/admin/signups/{{ signup.id }}/reject" class="stacked-action-form">
+            <label for="reject-reason">Reject reason</label>
+            <textarea id="reject-reason" name="reject_reason" rows="3" required placeholder="Reason is required">{{ signup.reject_reason or "" }}</textarea>
+            <button class="button-danger" type="submit">Reject signup</button>
+          </form>
         </div>
-      {% endif %}
-      {% if signup.onboarding_email_error %}
-        <div class="alert alert-error" role="alert">{{ signup.onboarding_email_error }}</div>
-      {% endif %}
-      <div class="button-row">
+      </article>
+
+      <article class="signup-step-card {% if next_step == 'generate' %}is-current{% endif %}">
+        <span class="signup-step-number">3</span>
+        <h3>Generate onboarding link</h3>
+        <p class="muted compact-note">Uses the existing secure onboarding token system. The token hash is never shown.</p>
+        {% if linked_lead %}
+          <p class="muted compact-note">Linked onboarding lead: #{{ linked_lead.id }} · {{ linked_lead.status }}</p>
+        {% endif %}
+        {% if generated_link %}
+          <label for="generated-onboarding-link">Generated onboarding link</label>
+          <div class="copy-row">
+            <input id="generated-onboarding-link" type="text" readonly value="{{ generated_link }}">
+            <button type="button" data-ct-copy data-ct-copy-target="generated-onboarding-link">Copy link</button>
+          </div>
+        {% endif %}
         <form method="post" action="/admin/signups/{{ signup.id }}/generate-link">
           <button type="submit">Generate onboarding link</button>
         </form>
+      </article>
+
+      <article class="signup-step-card {% if next_step == 'send' %}is-current{% endif %}">
+        <span class="signup-step-number">4</span>
+        <h3>Send onboarding link</h3>
+        {% if signup.onboarding_email_error %}
+          <div class="alert alert-error" role="alert">{{ signup.onboarding_email_error }}</div>
+        {% endif %}
+        {% if signup.onboarding_email_sent_at %}
+          <p class="muted compact-note">Sent at {{ signup.onboarding_email_sent_at }}.</p>
+        {% else %}
+          <p class="muted compact-note">Email will be sent to {{ signup.email or "the prospect" }}.</p>
+        {% endif %}
         <form method="post" action="/admin/signups/{{ signup.id }}/send-onboarding">
           <button type="submit">Send onboarding link by email</button>
         </form>
-      </div>
-      {% if signup.onboarding_email_sent_at %}
-        <p class="muted compact-note">Sent at {{ signup.onboarding_email_sent_at }}.</p>
-      {% endif %}
-    </section>
+      </article>
 
-    <section class="panel danger-soft">
-      <div class="panel-header">
-        <h2>Create tenant / workspace</h2>
+      <article class="signup-step-card {% if next_step in ['workspace', 'open'] %}is-current{% endif %}">
+        <span class="signup-step-number">5</span>
+        <h3>Create or open workspace</h3>
         {% if signup.provisioned_slug %}
-          <span class="status-chip status-ok">created</span>
+          <p class="muted compact-note">Workspace is already linked.</p>
+          <a class="signup-review-button" href="/admin/tenants/{{ signup.provisioned_slug }}">Open tenant workspace</a>
         {% else %}
-          <span class="status-chip status-warn">manual action</span>
+          <p class="muted compact-note">Create the workspace only after review is approved.</p>
+          <form method="post" action="/admin/signups/{{ signup.id }}/create-workspace">
+            <button type="submit">Create workspace</button>
+          </form>
         {% endif %}
-      </div>
-      <p class="muted compact-note">
-        Create the tenant only after review is approved. If the tenant already exists, open the workspace instead.
-      </p>
-      {% if signup.provisioned_slug %}
-        <a class="button-link" href="/admin/tenants/{{ signup.provisioned_slug }}">Open tenant workspace</a>
-      {% else %}
-        <form method="post" action="/admin/signups/{{ signup.id }}/create-workspace">
-          <button type="submit">Create workspace</button>
-        </form>
-      {% endif %}
+        {% if signup.workspace_error %}
+          <p class="muted compact-note"><strong>Workspace error:</strong> {{ signup.workspace_error }}</p>
+        {% endif %}
+      </article>
     </section>
   {% endif %}
 {% endblock %}

@@ -230,18 +230,30 @@
       var rows = Array.prototype.slice.call(table.querySelectorAll("[data-simple-table-row]"));
       var activeStatus = "all";
       var chips = Array.prototype.slice.call(document.querySelectorAll("[data-simple-table-filter]"));
+      var select = document.querySelector("[data-simple-table-filter-select]");
+      var empty = document.querySelector("[data-simple-table-empty]");
 
       function apply() {
         var q = (input.value || "").toLowerCase().trim();
+        var visibleCount = 0;
         rows.forEach(function (row) {
           var status = row.getAttribute("data-simple-status") || "";
           var statusOk = activeStatus === "all" || status === activeStatus;
           var textOk = !q || (row.textContent || "").toLowerCase().indexOf(q) !== -1;
-          row.hidden = !(statusOk && textOk);
+          var visible = statusOk && textOk;
+          row.hidden = !visible;
+          if (visible) visibleCount += 1;
         });
+        if (empty) empty.hidden = visibleCount > 0;
       }
 
       input.addEventListener("input", apply);
+      if (select) {
+        select.addEventListener("change", function () {
+          activeStatus = select.value || "all";
+          apply();
+        });
+      }
       chips.forEach(function (chip) {
         chip.addEventListener("click", function () {
           activeStatus = chip.getAttribute("data-simple-table-filter") || "all";
@@ -251,6 +263,19 @@
         });
       });
       apply();
+    });
+
+    document.querySelectorAll("[data-copy-text]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var text = btn.getAttribute("data-copy-text") || "";
+        if (!text) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            btn.textContent = "Copied";
+            window.setTimeout(function () { btn.textContent = "Copy email"; }, 1500);
+          });
+        }
+      });
     });
   }
 
