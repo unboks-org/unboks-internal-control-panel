@@ -28,6 +28,37 @@ from typing import Any
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,49}$")
 RESERVED_SLUGS = {"unboks"}
+PROVIDER_JSON_KEYS_TO_CLEAR = {
+    "channel_account_allowlist",
+    "whatsapp_connect_token",
+    "zernio_account_id",
+    "zernio_profile_id",
+    "phone_number_id",
+    "selected_phone_number_id",
+    "display_phone_number",
+    "waba_id",
+    "whatsapp_phone_number_id",
+    "whatsapp_display_phone_number",
+    "whatsapp_waba_id",
+    "whatsapp_provider_account_id",
+    "meta_phone_number_id",
+    "meta_waba_id",
+}
+PROVIDER_ENV_KEYS_TO_CLEAR = {
+    "CHANNEL_ACCOUNT_ALLOWLIST",
+    "META_PHONE_NUMBER_ID",
+    "META_WABA_ID",
+    "PHONE_NUMBER_ID",
+    "WABA_ID",
+    "WHATSAPP_CONNECT_TOKEN",
+    "WHATSAPP_DISPLAY_PHONE_NUMBER",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_PROVIDER_ACCOUNT_ID",
+    "WHATSAPP_WABA_ID",
+    "ZERNIO_ACCOUNT_ID",
+    "ZERNIO_PHONE_NUMBER_ID",
+    "ZERNIO_PROFILE_ID",
+}
 
 
 def env_path(name: str, default: str) -> Path:
@@ -404,6 +435,25 @@ def read_json_file(path: Path) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def clear_provider_json_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            if str(key).lower() in PROVIDER_JSON_KEYS_TO_CLEAR:
+                if isinstance(item, list):
+                    out[str(key)] = []
+                elif isinstance(item, dict):
+                    out[str(key)] = {}
+                else:
+                    out[str(key)] = ""
+            else:
+                out[str(key)] = clear_provider_json_values(item)
+        return out
+    if isinstance(value, list):
+        return [clear_provider_json_values(item) for item in value]
+    return value
+
+
 def extract_client_tree_from_backup(package_path: Path) -> Path:
     allowed_root = IMPORT_PAYLOAD_DIR.resolve()
     resolved = package_path.resolve()
@@ -430,7 +480,14 @@ def extract_client_tree_from_backup(package_path: Path) -> Path:
     return root
 
 
-def rewrite_restored_runtime_identity(target: str, source_root: Path, target_dir: Path, previous_dir: Path) -> None:
+def rewrite_restored_runtime_identity(
+    target: str,
+    source_root: Path,
+    target_dir: Path,
+    previous_dir: Path,
+    *,
+    preserve_provider_connection: bool,
+) -> None:
     previous_compose = ""
     previous_client = read_json_file(previous_dir / "config" / "client.json")
     if (previous_dir / "docker-compose.yml").exists():
@@ -440,6 +497,8 @@ def rewrite_restored_runtime_identity(target: str, source_root: Path, target_dir
 
     client_path = target_dir / "config" / "client.json"
     client = read_json_file(client_path)
+    if not preserve_provider_connection:
+        client = clear_provider_json_values(client)
     client["slug"] = target
     for key in ("host_port", "port"):
         if previous_client.get(key) is not None:
@@ -463,6 +522,8 @@ def rewrite_restored_runtime_identity(target: str, source_root: Path, target_dir
             elif line.startswith("TENANT_SLUG="):
                 out.append(f"TENANT_SLUG={target}")
                 seen_slug = True
+            elif line.split("=", 1)[0].strip() in PROVIDER_ENV_KEYS_TO_CLEAR:
+                continue
             elif line.startswith("# platform.env for tenant "):
                 out.append(f"# platform.env for tenant {target}")
             else:
@@ -494,7 +555,14 @@ def process_restore_tenant_runtime(job_id: str, job: dict[str, Any], slug: str) 
         shutil.rmtree(tenant_dir)
     tenant_dir.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source_root, tenant_dir)
-    rewrite_restored_runtime_identity(slug, source_root, tenant_dir, previous_dir)
+    preserve_provider_connection = bool(job.get("preserve_provider_connection", True))
+    rewrite_restored_runtime_identity(
+        slug,
+        source_root,
+        tenant_dir,
+        previous_dir,
+        preserve_provider_connection=preserve_provider_connection,
+    )
     run(["docker", "compose", "up", "-d", "--force-recreate"], cwd=tenant_dir)
     write_result(job_id, {
         "status": "succeeded",
@@ -505,6 +573,7 @@ def process_restore_tenant_runtime(job_id: str, job: dict[str, Any], slug: str) 
         "details": [
             f"runtime restored to {tenant_dir}",
             f"docker compose up -d --force-recreate completed for {slug}",
+            f"provider connection preserved: {preserve_provider_connection}",
         ],
         "dashboard_url": str(job.get("dashboard_url") or f"https://dashboard.unboks.org/{slug}"),
     })

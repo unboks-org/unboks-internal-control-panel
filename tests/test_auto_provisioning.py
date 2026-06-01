@@ -188,6 +188,7 @@ def test_host_action_queue_writes_restore_runtime_job(monkeypatch, tmp_path):
         action="restore_tenant_runtime",
         dashboard_url="https://dashboard.unboks.org/acme",
         backup_package_path="/root/unboks-internal-control-panel/data/tenant_import_payloads/acme.unboksbackup",
+        preserve_provider_connection=False,
     )
 
     assert result.status == "queued"
@@ -198,6 +199,7 @@ def test_host_action_queue_writes_restore_runtime_job(monkeypatch, tmp_path):
     assert payload["action"] == "restore_tenant_runtime"
     assert payload["slug"] == "acme"
     assert payload["backup_package_path"].endswith("acme.unboksbackup")
+    assert payload["preserve_provider_connection"] is False
 
 
 def test_host_action_queue_writes_delete_job(monkeypatch, tmp_path):

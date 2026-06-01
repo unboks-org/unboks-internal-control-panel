@@ -1819,6 +1819,7 @@ def admin_import_tenant_backup(
         action="restore_tenant_runtime" if runtime_package else "restart_tenant",
         dashboard_url=f"https://dashboard.unboks.org/{target}",
         backup_package_path=runtime_package,
+        preserve_provider_connection=not bool(result.get("channels_require_reconnect")),
     )
     restart_note = (
         " Runtime was restored and container was recreated."

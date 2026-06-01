@@ -32,6 +32,10 @@ def _seed(monkeypatch, tmp_path, slug="acme"):
                 "email": "owner@example.com",
                 "password": "do-not-export",
                 "access_key": "do-not-export",
+                "whatsapp_connect_token": "donor-token",
+                "channel_account_allowlist": {"zernio_accounts": ["donor-account"]},
+                "zernio_account_id": "donor-account",
+                "phone_number_id": "donor-phone",
             }
         ),
         encoding="utf-8",
@@ -118,12 +122,16 @@ def test_import_clone_restores_nr3_state_to_new_slug(monkeypatch, tmp_path):
 
     assert result["status"] == "imported"
     assert result["target_tenant"] == "acme-clone"
-    assert channel_state.read_channels("acme-clone")["whatsapp"] is True
+    assert channel_state.read_channels("acme-clone")["whatsapp"] is False
     assert icp_overrides.ai_agent_settings_for_tenant("acme-clone")["agent_name"]["name"] == "Sofia"
     assert tenant_notes.list_notes("acme-clone")[0].body == "Important internal note"
     clone_root = tmp_path / "clients" / "acme-clone"
     clone_client = json.loads((clone_root / "config" / "client.json").read_text(encoding="utf-8"))
     assert clone_client["slug"] == "acme-clone"
+    assert clone_client["whatsapp_connect_token"] == ""
+    assert clone_client["channel_account_allowlist"] == {}
+    assert clone_client["zernio_account_id"] == ""
+    assert clone_client["phone_number_id"] == ""
     assert "TENANT_ID=acme-clone" in (clone_root / "config" / "platform.env").read_text(encoding="utf-8")
     assert "container_name: wtyj-acme-clone" in (clone_root / "docker-compose.yml").read_text(encoding="utf-8")
 
@@ -156,13 +164,15 @@ def test_import_restore_replaces_existing_nr3_state(monkeypatch, tmp_path):
     sot_titles = [entry["title"] for entry in icp_overrides.sot_entries_for_tenant("target")]
     assert "Hours" in sot_titles
     assert "Old" not in sot_titles
-    assert channel_state.read_channels("target")["whatsapp"] is True
+    assert channel_state.read_channels("target")["whatsapp"] is False
     assert channel_state.read_channels("target")["email"] is False
     notes = [note.body for note in tenant_notes.list_notes("target")]
     assert notes == ["Important internal note"]
     restored_client = json.loads((target_root / "config" / "client.json").read_text(encoding="utf-8"))
     assert restored_client["slug"] == "target"
     assert restored_client["password"] == "do-not-export"
+    assert restored_client["whatsapp_connect_token"] == ""
+    assert restored_client["channel_account_allowlist"] == {}
     assert (target_root / "data" / "knowledge" / "sot.txt").read_text(encoding="utf-8") == "runtime knowledge"
     assert not old_file.exists()
     restored_env = (target_root / "config" / "platform.env").read_text(encoding="utf-8")
@@ -171,6 +181,7 @@ def test_import_restore_replaces_existing_nr3_state(monkeypatch, tmp_path):
     assert "DASHBOARD_PASSWORD=do-not-export" in restored_env
     assert "container_name: wtyj-target" in (target_root / "docker-compose.yml").read_text(encoding="utf-8")
     assert result["client_tree_restored"] is True
+    assert result["channels_require_reconnect"] is True
 
 
 def test_import_restore_can_defer_runtime_restore_to_host_worker(monkeypatch, tmp_path):
@@ -193,11 +204,10 @@ def test_import_restore_can_defer_runtime_restore_to_host_worker(monkeypatch, tm
     assert icp_overrides.ai_agent_settings_for_tenant("target")["agent_name"]["name"] == "Sofia"
 
 
-def test_import_restore_carries_channel_connection_metadata(monkeypatch, tmp_path):
+def test_import_restore_same_tenant_carries_channel_connection_metadata(monkeypatch, tmp_path):
     source = _seed(monkeypatch, tmp_path, slug="source")
-    _seed(monkeypatch, tmp_path, slug="target")
     channel_connections.upsert_tenant_channel_connection(
-        tenant_id="source",
+        tenant_id=source,
         status="connected",
         zernio_profile_id="profile-123",
         zernio_account_id="account-123",
@@ -210,18 +220,45 @@ def test_import_restore_carries_channel_connection_metadata(monkeypatch, tmp_pat
 
     import_uploaded_package(
         package.open("rb"),
-        target_tenant="target",
+        target_tenant=source,
         mode="restore",
-        confirmation="target",
+        confirmation=source,
     )
 
-    restored = channel_connections.get_tenant_channel_connection("target")
+    restored = channel_connections.get_tenant_channel_connection(source)
     assert restored is not None
     assert restored.status == "connected"
     assert restored.zernio_profile_id == "profile-123"
     assert restored.zernio_account_id == "account-123"
     assert restored.phone_number_id == "phone-123"
     assert json.loads(restored.metadata_json)["channel_account_allowlist"] == ["account-123"]
+
+
+def test_import_restore_cross_tenant_requires_provider_reconnect(monkeypatch, tmp_path):
+    source = _seed(monkeypatch, tmp_path, slug="source")
+    _seed(monkeypatch, tmp_path, slug="target")
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id=source,
+        status="connected",
+        zernio_profile_id="profile-123",
+        zernio_account_id="account-123",
+        phone_number_id="phone-123",
+        display_phone_number="+599 123",
+        waba_id="waba-123",
+        metadata={"channel_account_allowlist": ["account-123"]},
+    )
+    package = build_export_package(source)
+
+    result = import_uploaded_package(
+        package.open("rb"),
+        target_tenant="target",
+        mode="restore",
+        confirmation="target",
+    )
+
+    assert result["channels_require_reconnect"] is True
+    assert channel_connections.get_tenant_channel_connection("target") is None
+    assert channel_state.read_channels("target")["whatsapp"] is False
 
 
 def test_workspace_renders_backup_restore_section(monkeypatch, tmp_path):

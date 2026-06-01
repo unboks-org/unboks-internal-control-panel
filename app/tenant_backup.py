@@ -33,6 +33,37 @@ from app.tenants import (
 
 EXPORT_VERSION = "2.0"
 SECRET_HINTS = ("password", "secret", "token", "access_key", "api_key", "private_key")
+PROVIDER_JSON_KEYS_TO_CLEAR = {
+    "channel_account_allowlist",
+    "whatsapp_connect_token",
+    "zernio_account_id",
+    "zernio_profile_id",
+    "phone_number_id",
+    "selected_phone_number_id",
+    "display_phone_number",
+    "waba_id",
+    "whatsapp_phone_number_id",
+    "whatsapp_display_phone_number",
+    "whatsapp_waba_id",
+    "whatsapp_provider_account_id",
+    "meta_phone_number_id",
+    "meta_waba_id",
+}
+PROVIDER_ENV_KEYS_TO_CLEAR = {
+    "CHANNEL_ACCOUNT_ALLOWLIST",
+    "META_PHONE_NUMBER_ID",
+    "META_WABA_ID",
+    "PHONE_NUMBER_ID",
+    "WABA_ID",
+    "WHATSAPP_CONNECT_TOKEN",
+    "WHATSAPP_DISPLAY_PHONE_NUMBER",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_PROVIDER_ACCOUNT_ID",
+    "WHATSAPP_WABA_ID",
+    "ZERNIO_ACCOUNT_ID",
+    "ZERNIO_PHONE_NUMBER_ID",
+    "ZERNIO_PROFILE_ID",
+}
 
 
 def _now() -> str:
@@ -84,6 +115,25 @@ def _safe_json(value: Any) -> Any:
         return out
     if isinstance(value, (list, tuple)):
         return [_safe_json(item) for item in value]
+    return value
+
+
+def _clear_provider_json_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            if str(key).lower() in PROVIDER_JSON_KEYS_TO_CLEAR:
+                if isinstance(item, list):
+                    out[str(key)] = []
+                elif isinstance(item, dict):
+                    out[str(key)] = {}
+                else:
+                    out[str(key)] = ""
+            else:
+                out[str(key)] = _clear_provider_json_values(item)
+        return out
+    if isinstance(value, list):
+        return [_clear_provider_json_values(item) for item in value]
     return value
 
 
@@ -387,7 +437,13 @@ def _read_text_if_exists(path: Path) -> str:
         return ""
 
 
-def _restore_client_tree(target: str, source_root: Path, previous_root: Path) -> None:
+def _restore_client_tree(
+    target: str,
+    source_root: Path,
+    previous_root: Path,
+    *,
+    preserve_provider_connection: bool = True,
+) -> None:
     target_root = _tenant_root(target)
     previous_compose = _read_text_if_exists(previous_root / "docker-compose.yml")
     source_config = source_root / "config" / "client.json"
@@ -421,6 +477,8 @@ def _restore_client_tree(target: str, source_root: Path, previous_root: Path) ->
             data = {}
         if not isinstance(data, dict):
             data = {}
+        if not preserve_provider_connection:
+            data = _clear_provider_json_values(data)
         data["slug"] = target
         # Preserve target-only runtime fields when present. Business content
         # still comes from the donor backup.
@@ -449,6 +507,8 @@ def _restore_client_tree(target: str, source_root: Path, previous_root: Path) ->
             elif line.startswith("TENANT_SLUG="):
                 out.append(f"TENANT_SLUG={target}")
                 seen_tenant_slug = True
+            elif line.split("=", 1)[0].strip() in PROVIDER_ENV_KEYS_TO_CLEAR:
+                continue
             elif line.startswith("# platform.env for tenant "):
                 out.append(f"# platform.env for tenant {target}")
             else:
@@ -522,6 +582,7 @@ def import_uploaded_package(
     summary = validate_import_package(package_path)
     source_slug = summary["tenant_slug"]
     target = validate_slug(new_slug or target_tenant)
+    cross_tenant_import = source_slug != target
     if mode not in {"validate", "restore", "clone"}:
         raise ValueError("unsupported import mode")
     if mode == "validate":
@@ -567,7 +628,12 @@ def import_uploaded_package(
         runtime_restore_package = str(_persist_import_payload(package_path, target))
 
     if client_tree is not None:
-        _restore_client_tree(target, client_tree, _tenant_root(target))
+        _restore_client_tree(
+            target,
+            client_tree,
+            _tenant_root(target),
+            preserve_provider_connection=not cross_tenant_import,
+        )
 
     account = tenant_payload.get("account") if isinstance(tenant_payload, dict) else {}
     if not isinstance(account, dict):
@@ -613,9 +679,12 @@ def import_uploaded_package(
     visibility = channels.get("visibility") if isinstance(channels, dict) else {}
     if isinstance(visibility, dict):
         for key, value in visibility.items():
-            channel_state.set_channel(target, str(key), bool(value))
+            if cross_tenant_import and str(key) == "whatsapp":
+                channel_state.set_channel(target, "whatsapp", False)
+            else:
+                channel_state.set_channel(target, str(key), bool(value))
     connections = channels.get("connections") if isinstance(channels, dict) else {}
-    if isinstance(connections, dict):
+    if isinstance(connections, dict) and not cross_tenant_import:
         _restore_channel_connection(target, connections)
     for note in (learning.get("tenant_notes") if isinstance(learning, dict) else []) or []:
         if isinstance(note, dict) and note.get("body"):
@@ -632,7 +701,13 @@ def import_uploaded_package(
         action="tenant_import_completed",
         tenant_id=target,
         safe_summary=f"Tenant import {mode} completed from {source_slug}; rollback {rollback.name}",
-        metadata={"source_slug": source_slug, "mode": mode, "rollback": rollback.name},
+        metadata={
+            "source_slug": source_slug,
+            "mode": mode,
+            "rollback": rollback.name,
+            "cross_tenant_import": cross_tenant_import,
+            "channels_require_reconnect": cross_tenant_import,
+        },
     )
     return {
         "status": "imported",
@@ -642,5 +717,5 @@ def import_uploaded_package(
         "rollback_package": str(rollback),
         "client_tree_restored": client_tree is not None,
         "runtime_restore_package": runtime_restore_package,
-        "channels_require_reconnect": False,
+        "channels_require_reconnect": cross_tenant_import,
     }

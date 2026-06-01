@@ -203,6 +203,7 @@ def queue_tenant_host_action(
     final_confirmation: str = "",
     new_password: str = "",
     backup_package_path: str = "",
+    preserve_provider_connection: bool = True,
 ) -> AutoProvisionResult:
     """Queue a privileged host action such as suspending a tenant.
 
@@ -266,6 +267,7 @@ def queue_tenant_host_action(
             payload["new_password"] = new_password
         if backup_package_path:
             payload["backup_package_path"] = backup_package_path
+        payload["preserve_provider_connection"] = bool(preserve_provider_connection)
         tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp_path, job_path)
 
