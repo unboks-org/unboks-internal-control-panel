@@ -96,6 +96,7 @@ def test_delete_tenant_refuses_when_worker_disabled(monkeypatch, tmp_path):
 
 
 def test_delete_tenant_queues_host_action_and_cleans_local_state(monkeypatch, tmp_path):
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
     tenants_root = tmp_path / "tenants"
     _write_tenant(tenants_root)
     client = _client(monkeypatch, tmp_path)
@@ -106,7 +107,24 @@ def test_delete_tenant_queues_host_action_and_cleans_local_state(monkeypatch, tm
         name="Lawyer",
         zernio_profile_id="profile_lawyer",
     )
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="connected",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_lawyer",
+    )
     calls = {}
+    deleted_accounts = []
+    deleted_profiles = []
+
+    class FakeZernioService:
+        def delete_account(self, account_id):
+            deleted_accounts.append(account_id)
+            return {"success": True}
+
+        def delete_profile(self, profile_id):
+            deleted_profiles.append(profile_id)
+            return {"success": True}
 
     def fake_queue(**kwargs):
         calls.update(kwargs)
@@ -118,6 +136,7 @@ def test_delete_tenant_queues_host_action_and_cleans_local_state(monkeypatch, tm
         )
 
     monkeypatch.setattr("app.routes.tenant_api.queue_tenant_host_action", fake_queue)
+    monkeypatch.setattr("app.routes.tenant_api.ZernioService", FakeZernioService)
 
     response = _delete(client)
 
@@ -131,4 +150,53 @@ def test_delete_tenant_queues_host_action_and_cleans_local_state(monkeypatch, tm
         "typed_slug": "lawyer",
         "final_confirmation": "DELETE FOREVER",
     }
+    assert deleted_accounts == ["account_lawyer"]
+    assert deleted_profiles == ["profile_lawyer"]
+    assert "zernio account disconnected: account_lawyer" in response.json()["details"]
+    assert "zernio profile deleted: profile_lawyer" in response.json()["details"]
     assert channel_connections.get_tenant_zernio_profile_id("lawyer") is None
+
+
+def test_delete_tenant_blocks_when_zernio_cleanup_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    register_tenant({"slug": "lawyer", "name": "Lawyer", "status": "active"})
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="connected",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_lawyer",
+    )
+    queued = []
+
+    class FakeZernioService:
+        def delete_account(self, account_id):
+            from app.zernio import ZernioAPIError
+
+            raise ZernioAPIError(401, "Unauthorized")
+
+        def delete_profile(self, profile_id):
+            raise AssertionError("profile cleanup should not run after account failure")
+
+    def fake_queue(**kwargs):
+        queued.append(kwargs)
+        raise AssertionError("host delete must not queue when Zernio cleanup fails")
+
+    monkeypatch.setattr("app.routes.tenant_api.ZernioService", FakeZernioService)
+    monkeypatch.setattr("app.routes.tenant_api.queue_tenant_host_action", fake_queue)
+
+    response = _delete(client)
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "Zernio cleanup failed, so tenant deletion was blocked. "
+        "Retry after fixing the provider connection."
+    )
+    assert queued == []
+    connection = channel_connections.get_tenant_channel_connection("lawyer")
+    assert connection is not None
+    assert connection.zernio_profile_id == "profile_lawyer"
+    assert connection.zernio_account_id == "account_lawyer"

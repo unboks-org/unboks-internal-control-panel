@@ -502,6 +502,55 @@ def get_tenant_channel_connection_by_account_id(
     return row_to_tenant_channel_connection(row) if row is not None else None
 
 
+def list_tenant_zernio_ids(tenant_id: str) -> dict[str, list[str]]:
+    """Return known Zernio ids for a tenant before destructive cleanup.
+
+    This intentionally reads active connections, historical connection
+    requests, and the tenant row. Tenant deletion calls this before local rows
+    are removed so external Zernio accounts are not orphaned.
+    """
+    init_db()
+    account_ids: list[str] = []
+    profile_ids: list[str] = []
+
+    def add_unique(target: list[str], value: Any) -> None:
+        if value is None:
+            return
+        text = str(value).strip()
+        if text and text not in target:
+            target.append(text)
+
+    with _connect() as conn:
+        for row in conn.execute(
+            """
+            SELECT zernio_profile_id, zernio_account_id
+            FROM tenant_channel_connections
+            WHERE tenant_id = ? AND provider = 'zernio'
+            """,
+            (tenant_id,),
+        ).fetchall():
+            add_unique(profile_ids, row["zernio_profile_id"])
+            add_unique(account_ids, row["zernio_account_id"])
+        for row in conn.execute(
+            """
+            SELECT zernio_profile_id, zernio_account_id
+            FROM connection_requests
+            WHERE tenant_id = ? AND provider = 'zernio'
+            """,
+            (tenant_id,),
+        ).fetchall():
+            add_unique(profile_ids, row["zernio_profile_id"])
+            add_unique(account_ids, row["zernio_account_id"])
+        row = conn.execute(
+            "SELECT zernio_profile_id FROM tenants WHERE slug = ?",
+            (tenant_id,),
+        ).fetchone()
+        if row is not None:
+            add_unique(profile_ids, row["zernio_profile_id"])
+
+    return {"account_ids": account_ids, "profile_ids": profile_ids}
+
+
 def set_tenant_zernio_profile_id(
     *,
     tenant_id: str,

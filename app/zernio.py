@@ -164,6 +164,24 @@ class ZernioService:
             raise ZernioAPIError(502, "Zernio returned an invalid account payload.")
         return summarize_account(account)
 
+    def delete_account(self, account_id: str) -> dict[str, Any]:
+        """Disconnect a connected provider account from Zernio.
+
+        Zernio documents this as "Disconnect account". It is intentionally
+        named delete_account to match the provider API and make tenant wipes
+        remove billable external account state, not only local Nr3 rows.
+        """
+        clean_id = (account_id or "").strip()
+        if not clean_id:
+            raise ZernioAPIError(400, "Zernio account id is required.")
+        return self._request("DELETE", f"/accounts/{clean_id}")
+
+    def delete_profile(self, profile_id: str) -> dict[str, Any]:
+        clean_id = (profile_id or "").strip()
+        if not clean_id:
+            raise ZernioAPIError(400, "Zernio profile id is required.")
+        return self._request("DELETE", f"/profiles/{clean_id}")
+
     def _request(
         self,
         method: str,

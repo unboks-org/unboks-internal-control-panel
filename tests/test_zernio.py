@@ -172,6 +172,40 @@ def test_zernio_service_summarizes_whatsapp_accounts(monkeypatch):
     assert account.is_active is True
 
 
+def test_zernio_service_deletes_account_and_profile(monkeypatch):
+    monkeypatch.setenv("ZERNIO_API_KEY", "sk_test_secret")
+    monkeypatch.setenv("ZERNIO_API_BASE_URL", "https://zernio.example/api/v1")
+    settings = get_settings()
+    seen: list[tuple[str, str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((
+            request.method,
+            str(request.url),
+            request.headers.get("authorization", ""),
+        ))
+        return httpx.Response(200, json={"success": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    service = ZernioService(settings=settings, client=client)
+
+    assert service.delete_account("account_1") == {"success": True}
+    assert service.delete_profile("profile_1") == {"success": True}
+
+    assert seen == [
+        (
+            "DELETE",
+            "https://zernio.example/api/v1/accounts/account_1",
+            "Bearer sk_test_secret",
+        ),
+        (
+            "DELETE",
+            "https://zernio.example/api/v1/profiles/profile_1",
+            "Bearer sk_test_secret",
+        ),
+    ]
+
+
 def test_zernio_service_raises_safe_api_error(monkeypatch):
     monkeypatch.setenv("ZERNIO_API_KEY", "sk_test_secret")
     settings = get_settings()
