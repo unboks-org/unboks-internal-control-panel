@@ -1032,6 +1032,23 @@
             Send password reset email
           </button>
         </form>
+        <hr class="section-divider">
+        <h4>Admin temporary password reset</h4>
+        <p>
+          Generate a temporary Nr2 dashboard password without sending email.
+          The existing password is never shown and the new temporary password is shown only once.
+        </p>
+        <p class="muted compact-note">
+          Security note: this resets the shared tenant dashboard password used by the current Nr2 runtime.
+          It does not retrieve the old password and it does not email the tenant automatically.
+        </p>
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/password-reset/temp" class="danger-form danger-form-restore">
+          <label for="temp-password-confirm-{{ tenant.id }}">Type <code>reset password {{ tenant.id }}</code></label>
+          <input id="temp-password-confirm-{{ tenant.id }}" name="confirmation" type="text" autocomplete="off" placeholder="reset password {{ tenant.id }}">
+          <button type="submit" class="button-secondary">
+            Generate temporary password
+          </button>
+        </form>
       </div>
       <div class="danger-delete" data-delete-tenant data-tenant-id="{{ tenant.id }}">
         <h4>Delete Tenant (Permanent Wipe)</h4>

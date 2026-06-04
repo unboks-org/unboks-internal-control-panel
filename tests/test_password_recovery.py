@@ -4,6 +4,7 @@ import re
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app import audit_log
 from app.provisioning import AutoProvisionResult
 
 
@@ -124,3 +125,68 @@ def test_reset_rejects_weak_password_before_queue(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert "Use at least 12 characters" in response.text
+
+
+def test_admin_can_generate_temporary_dashboard_password_once(monkeypatch, tmp_path):
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "clients"))
+    _seed_tenant(tmp_path / "clients")
+    queued = {}
+
+    def fake_queue(**kwargs):
+        queued.update(kwargs)
+        return AutoProvisionResult(
+            status="succeeded",
+            message="Password reset.",
+            job_id="job-admin-reset",
+        )
+
+    monkeypatch.setattr("app.routes.admin.queue_tenant_host_action", fake_queue)
+    monkeypatch.setattr(
+        "app.routes.admin._generate_temporary_dashboard_password",
+        lambda: "Temp-Password-123!",
+    )
+
+    client = TestClient(app)
+    assert client.post(
+        "/login",
+        data={"password": "test-password"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    page = client.get("/admin/tenants/acme")
+    assert page.status_code == 200
+    assert "Admin temporary password reset" in page.text
+    assert "Generate temporary password" in page.text
+    assert "Temp-Password-123!" not in page.text
+
+    bad = client.post(
+        "/admin/tenants/acme/password-reset/temp",
+        data={"confirmation": "reset password Acme"},
+        follow_redirects=True,
+    )
+    assert bad.status_code == 200
+    assert "Type exactly" in bad.text
+    assert "reset password acme" in bad.text
+    assert queued == {}
+
+    response = client.post(
+        "/admin/tenants/acme/password-reset/temp",
+        data={"confirmation": "reset password acme"},
+    )
+
+    assert response.status_code == 200
+    assert "Temporary password generated" in response.text
+    assert "Temp-Password-123!" in response.text
+    assert queued["slug"] == "acme"
+    assert queued["action"] == "reset_dashboard_password"
+    assert queued["new_password"] == "Temp-Password-123!"
+    events = audit_log.list_events()
+    event_blob = "\n".join(
+        f"{event.action} {event.safe_summary} {event.metadata_json}"
+        for event in events
+    )
+    assert "tenant.dashboard_password_admin_reset" in event_blob
+    assert "Temp-Password-123!" not in event_blob

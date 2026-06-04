@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import html
+import secrets
+import string
+
 from fastapi import APIRouter, Form, Request, File, UploadFile
 from starlette.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from starlette.templating import Jinja2Templates
@@ -410,6 +416,122 @@ def _workspace_redirect(
         url=f"/admin/tenants/{tenant_id}{query}{suffix}",
         status_code=303,
     )
+
+
+def _generate_temporary_dashboard_password(length: int = 18) -> str:
+    alphabet = string.ascii_letters + string.digits
+    while True:
+        candidate = "".join(secrets.choice(alphabet) for _ in range(length - 3))
+        candidate += secrets.choice("!@#$%")
+        candidate += secrets.choice(string.digits)
+        candidate += secrets.choice(string.ascii_uppercase)
+        chars = list(candidate)
+        secrets.SystemRandom().shuffle(chars)
+        password = "".join(chars)
+        if len(password) >= 12:
+            return password
+
+
+def _admin_temp_password_result_html(
+    *,
+    tenant_id: str,
+    tenant_name: str,
+    temporary_password: str,
+    job_status: str,
+    job_id: str | None,
+) -> str:
+    safe_tenant = html.escape(tenant_id)
+    safe_name = html.escape(tenant_name)
+    safe_password = html.escape(temporary_password)
+    safe_status = html.escape(job_status)
+    safe_job = html.escape(job_id or "—")
+    dashboard_url = f"https://dashboard.unboks.org/login?workspace={safe_tenant}"
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Temporary dashboard password | Unboks ICP</title>
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <style>
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #f6f8fb;
+        color: #111827;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        padding: 24px;
+      }}
+      main {{
+        width: min(100%, 640px);
+        border: 1px solid #e1e7ef;
+        border-radius: 18px;
+        background: #fff;
+        box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+        padding: 28px;
+      }}
+      h1 {{ margin: 0 0 8px; font-size: 24px; letter-spacing: -0.02em; }}
+      p {{ color: #4b5563; line-height: 1.55; }}
+      .secret {{
+        display: block;
+        width: 100%;
+        margin: 18px 0;
+        padding: 16px;
+        border: 1px solid #bfdbfe;
+        border-radius: 12px;
+        background: #eff6ff;
+        color: #0f172a;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 20px;
+        word-break: break-all;
+      }}
+      .warning {{
+        margin: 18px 0;
+        padding: 14px 16px;
+        border: 1px solid #fed7aa;
+        border-radius: 12px;
+        background: #fff7ed;
+        color: #7c2d12;
+      }}
+      .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }}
+      a {{
+        display: inline-flex;
+        align-items: center;
+        min-height: 40px;
+        border-radius: 10px;
+        padding: 0 14px;
+        text-decoration: none;
+        font-weight: 650;
+      }}
+      .primary {{ background: #2563eb; color: #fff; }}
+      .secondary {{ border: 1px solid #d1d5db; color: #111827; background: #fff; }}
+      dl {{ display: grid; grid-template-columns: 120px 1fr; gap: 8px 14px; }}
+      dt {{ color: #6b7280; }}
+      dd {{ margin: 0; }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Temporary password generated</h1>
+      <p>Tenant dashboard access was reset for <strong>{safe_name}</strong> (<code>{safe_tenant}</code>).</p>
+      <code class="secret">{safe_password}</code>
+      <div class="warning">
+        This temporary password is shown only once. It is not recoverable from Nr3 after leaving this page.
+        Share it through a secure channel and ask the tenant to change it after login.
+      </div>
+      <dl>
+        <dt>Worker status</dt><dd>{safe_status}</dd>
+        <dt>Job ID</dt><dd><code>{safe_job}</code></dd>
+      </dl>
+      <div class="actions">
+        <a class="primary" href="{dashboard_url}">Open Nr2 login</a>
+        <a class="secondary" href="/admin/tenants/{safe_tenant}#danger-section">Back to tenant workspace</a>
+      </div>
+    </main>
+  </body>
+</html>"""
 
 
 @router.post("/admin/tenants/{tenant_id}/agent/{feature}/toggle")
@@ -1081,6 +1203,76 @@ def admin_send_tenant_password_reset(
         "danger-section",
         message=f"Password reset email requested for {email}.",
         level="ok",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/password-reset/temp", response_class=HTMLResponse)
+def admin_generate_tenant_temporary_password(
+    request: Request,
+    tenant_id: str,
+    confirmation: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    if tenant_id in RESERVED_SLUGS:
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message="The Unboks master tenant cannot be reset from this control.",
+            level="warn",
+        )
+    expected = f"reset password {tenant_id}"
+    if (confirmation or "").strip() != expected:
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message=f"Type exactly '{expected}' to generate a temporary dashboard password.",
+            level="warn",
+        )
+
+    temporary_password = _generate_temporary_dashboard_password()
+    result = queue_tenant_host_action(
+        slug=tenant_id,
+        action="reset_dashboard_password",
+        dashboard_url=f"https://dashboard.unboks.org/login?workspace={tenant_id}",
+        new_password=temporary_password,
+    )
+    if result.status in {"failed", "disabled"}:
+        audit_log.record_event(
+            tenant_id=tenant_id,
+            action="tenant.dashboard_password_admin_reset_failed",
+            result="failed",
+            safe_summary=result.message,
+            metadata={"job_id": result.job_id, "status": result.status},
+        )
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message=f"Temporary password was not applied: {result.message}",
+            level="warn",
+        )
+
+    audit_log.record_event(
+        tenant_id=tenant_id,
+        action="tenant.dashboard_password_admin_reset",
+        result="ok" if result.status == "succeeded" else "queued",
+        safe_summary="Temporary dashboard password generated by internal admin.",
+        metadata={"job_id": result.job_id, "status": result.status},
+    )
+    return HTMLResponse(
+        _admin_temp_password_result_html(
+            tenant_id=tenant_id,
+            tenant_name=tenant.name,
+            temporary_password=temporary_password,
+            job_status=result.status,
+            job_id=result.job_id,
+        ),
+        status_code=200,
     )
 
 

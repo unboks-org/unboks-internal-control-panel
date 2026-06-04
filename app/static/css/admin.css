@@ -2562,6 +2562,12 @@ button.button-disabled,
   margin: 0 0 6px;
 }
 
+.section-divider {
+  border: 0;
+  border-top: 1px solid #efd7da;
+  margin: 16px 0;
+}
+
 .danger-delete-list {
   color: var(--color-text);
   font-size: 12px;
