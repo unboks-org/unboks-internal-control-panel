@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import smtplib
 from dataclasses import dataclass
 from email.message import EmailMessage
@@ -124,7 +126,14 @@ def prepare_or_send_onboarding_email(lead_id: int) -> EmailSendResult:
     )
 
 
-def send_email(to_email: str, subject: str, body: str, settings: Settings) -> None:
+def send_email(
+    to_email: str,
+    subject: str,
+    body: str,
+    settings: Settings,
+    *,
+    html_body: str | None = None,
+) -> None:
     if not smtp_is_configured(settings):
         raise RuntimeError("Email is not configured.")
 
@@ -133,6 +142,8 @@ def send_email(to_email: str, subject: str, body: str, settings: Settings) -> No
     message["To"] = to_email
     message["Subject"] = subject
     message.set_content(body)
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
 
     if settings.smtp_use_tls:
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:

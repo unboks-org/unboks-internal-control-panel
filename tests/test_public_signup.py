@@ -92,8 +92,8 @@ def test_public_signup_rate_limits_same_email(monkeypatch, tmp_path):
 def test_public_signup_email_verification_without_auto_provision(monkeypatch, tmp_path):
     sent = []
 
-    def fake_send_email(to_email, subject, body, settings):
-        sent.append({"to": to_email, "subject": subject, "body": body})
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
 
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
@@ -107,6 +107,12 @@ def test_public_signup_email_verification_without_auto_provision(monkeypatch, tm
     assert response.status_code == 202
     assert "Check your email" in response.text
     assert sent
+    html = sent[0]["html"]
+    assert html
+    assert "Confirm email address" in html
+    assert "background:#2563EB" in html
+    assert 'href="https://icp.unboks.org/signup/verify/' in html
+    assert "Please confirm your email address here:" not in sent[0]["body"]
     verify_path = sent[0]["body"].split("https://icp.unboks.org", 1)[1].split()[0]
     verify = client.get(verify_path, follow_redirects=False)
     assert verify.status_code == 200
@@ -118,8 +124,8 @@ def test_public_signup_email_verification_without_auto_provision(monkeypatch, tm
 def test_admin_public_signups_page_lists_verified_request(monkeypatch, tmp_path):
     sent = []
 
-    def fake_send_email(to_email, subject, body, settings):
-        sent.append({"to": to_email, "subject": subject, "body": body})
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
 
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
@@ -152,8 +158,8 @@ def test_admin_public_signups_page_lists_verified_request(monkeypatch, tmp_path)
 def test_admin_public_signup_review_and_onboarding_actions(monkeypatch, tmp_path):
     sent = []
 
-    def fake_send_email(to_email, subject, body, settings):
-        sent.append({"to": to_email, "subject": subject, "body": body})
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
 
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
@@ -233,8 +239,8 @@ def test_admin_public_signup_review_and_onboarding_actions(monkeypatch, tmp_path
 def test_admin_public_signup_reject_archives_and_hides_request(monkeypatch, tmp_path):
     sent = []
 
-    def fake_send_email(to_email, subject, body, settings):
-        sent.append({"to": to_email, "subject": subject, "body": body})
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
 
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
@@ -358,8 +364,8 @@ def test_admin_public_signup_reject_requires_reason(monkeypatch, tmp_path):
 def test_public_signup_email_mentions_verification_expiry(monkeypatch, tmp_path):
     sent = []
 
-    def fake_send_email(to_email, subject, body, settings):
-        sent.append({"to": to_email, "subject": subject, "body": body})
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
 
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
@@ -372,13 +378,14 @@ def test_public_signup_email_mentions_verification_expiry(monkeypatch, tmp_path)
 
     assert response.status_code == 202
     assert "This link expires in 24 hours." in sent[0]["body"]
+    assert "This link expires in <strong>24 hours</strong>." in sent[0]["html"]
 
 
 def test_public_signup_expired_verification_link_rejected(monkeypatch, tmp_path):
     sent = []
 
-    def fake_send_email(to_email, subject, body, settings):
-        sent.append({"to": to_email, "subject": subject, "body": body})
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
 
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
@@ -414,8 +421,8 @@ def test_public_signup_verified_auto_provision_requires_explicit_flag(
 ):
     sent = []
 
-    def fake_send_email(to_email, subject, body, settings):
-        sent.append({"to": to_email, "subject": subject, "body": body})
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
 
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
