@@ -106,6 +106,15 @@ def test_public_signup_email_verification_without_auto_provision(monkeypatch, tm
 
     assert response.status_code == 202
     assert "Check your email" in response.text
+    assert "ada@example.com" in response.text
+    assert "14-day Unboks trial" in response.text
+    assert "The link expires in 48 hours." in response.text
+    assert "check your spam or promotions folder" in response.text
+    assert "https://unboks.org" in response.text
+    assert "Need help? Contact us" in response.text
+    assert "What happens next?" in response.text
+    assert "Resend confirmation email" not in response.text
+    assert "/signup/verify/" not in response.text
     assert sent
     html = sent[0]["html"]
     assert html

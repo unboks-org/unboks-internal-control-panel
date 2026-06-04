@@ -117,6 +117,215 @@ def _signup_info_html(title: str, message: str) -> str:
 </html>"""
 
 
+def _signup_check_email_html(*, email: str, expires_hours: int) -> str:
+    safe_email = _escape(email.strip())
+    email_sentence = (
+        f'We sent a confirmation link to <strong>{safe_email}</strong>.'
+        if safe_email
+        else "We sent a confirmation link to your email address."
+    )
+    safe_expires_hours = _escape(str(expires_hours))
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Check your email | Unboks</title>
+    <style>
+      :root {{
+        color-scheme: light;
+        --blue: #2563eb;
+        --ink: #0f172a;
+        --muted: #5f6368;
+        --line: #e1e7ef;
+        --soft: #f7faff;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.10), transparent 34%),
+          #f6f8fb;
+        color: var(--ink);
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        padding: 24px 14px;
+      }}
+      main {{
+        width: min(100%, 560px);
+      }}
+      .brand {{
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin: 0 0 18px;
+        font-size: 30px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+      }}
+      .brand-mark {{
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
+        display: grid;
+        place-items: center;
+        background: var(--blue);
+        color: #fff;
+        font-weight: 800;
+      }}
+      .card {{
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: #fff;
+        box-shadow: 0 16px 48px rgba(15, 23, 42, 0.08);
+        padding: 34px;
+        text-align: center;
+      }}
+      .icon {{
+        width: 74px;
+        height: 74px;
+        border-radius: 22px;
+        display: grid;
+        place-items: center;
+        margin: 0 auto 20px;
+        background: linear-gradient(180deg, #eef5ff, #ffffff);
+        border: 1px solid #d9e7ff;
+        color: var(--blue);
+        font-size: 34px;
+      }}
+      h1 {{
+        margin: 0 0 12px;
+        font-size: clamp(26px, 5vw, 34px);
+        line-height: 1.12;
+        letter-spacing: -0.03em;
+      }}
+      p {{
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.58;
+        color: #1f2937;
+      }}
+      .lead {{
+        max-width: 430px;
+        margin: 0 auto;
+      }}
+      .helper {{
+        margin: 24px 0;
+        padding: 16px 18px;
+        border: 1px solid #cfe0ff;
+        border-radius: 12px;
+        background: var(--soft);
+        color: #1f2937;
+        text-align: left;
+      }}
+      .helper strong {{
+        color: var(--ink);
+      }}
+      .actions {{
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+        margin: 4px 0 28px;
+      }}
+      .actions a {{
+        color: var(--blue);
+        font-weight: 650;
+        font-size: 14px;
+        text-decoration: none;
+      }}
+      .steps {{
+        border-top: 1px solid var(--line);
+        padding-top: 24px;
+      }}
+      .steps h2 {{
+        margin: 0 0 16px;
+        font-size: 15px;
+        letter-spacing: 0.01em;
+      }}
+      .step-grid {{
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+      }}
+      .step {{
+        min-width: 0;
+      }}
+      .step-number {{
+        width: 28px;
+        height: 28px;
+        display: grid;
+        place-items: center;
+        margin: 0 auto 8px;
+        border-radius: 999px;
+        background: var(--blue);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 800;
+      }}
+      .step p {{
+        font-size: 13px;
+        line-height: 1.35;
+        color: #111827;
+      }}
+      footer {{
+        margin-top: 18px;
+        text-align: center;
+        color: #6b7280;
+        font-size: 13px;
+      }}
+      @media (max-width: 560px) {{
+        .card {{ padding: 26px 20px; }}
+        .step-grid {{ grid-template-columns: 1fr; text-align: left; }}
+        .step {{
+          display: grid;
+          grid-template-columns: 32px 1fr;
+          align-items: center;
+          gap: 10px;
+        }}
+        .step-number {{ margin: 0; }}
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand" aria-label="Unboks">
+        <span class="brand-mark">U</span>
+        <span>unboks</span>
+      </div>
+      <section class="card" aria-labelledby="check-email-title">
+        <div class="icon" aria-hidden="true">✓</div>
+        <h1 id="check-email-title">Check your email</h1>
+        <p class="lead">
+          {email_sentence}
+          <br>
+          Confirm your email address to continue setting up your <strong>14-day Unboks trial</strong>.
+        </p>
+        <div class="helper" role="note">
+          <p><strong>The link expires in {safe_expires_hours} hours.</strong><br>If you do not see it, check your spam or promotions folder.</p>
+        </div>
+        <nav class="actions" aria-label="Signup next actions">
+          <a href="https://unboks.org">Back to Unboks website</a>
+          <a href="mailto:calvin@gaimin.io?subject=Unboks%20signup%20help">Need help? Contact us</a>
+        </nav>
+        <section class="steps" aria-labelledby="what-next-title">
+          <h2 id="what-next-title">What happens next?</h2>
+          <div class="step-grid">
+            <div class="step"><span class="step-number">1</span><p>Confirm your email.</p></div>
+            <div class="step"><span class="step-number">2</span><p>We activate your workspace.</p></div>
+            <div class="step"><span class="step-number">3</span><p>You receive your login details and can start your trial.</p></div>
+          </div>
+        </section>
+      </section>
+      <footer>&copy; 2026 Unboks. All rights reserved.</footer>
+    </main>
+  </body>
+</html>"""
+
+
 def _escape(value: str) -> str:
     return (
         value.replace("&", "&amp;")
@@ -314,9 +523,9 @@ async def public_signup_submit(
                 status_code=202,
             )
         return HTMLResponse(
-            _signup_info_html(
-                "Check your email",
-                "We sent a confirmation link. Confirm your email before your workspace can be activated.",
+            _signup_check_email_html(
+                email=signup_request.email,
+                expires_hours=settings.public_signup_verification_ttl_hours,
             ),
             status_code=202,
         )
