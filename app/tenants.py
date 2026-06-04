@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -464,6 +465,76 @@ def tenant_account_details(tenant_id: str) -> dict[str, str]:
         "address": first_text("address", "location"),
         "logo_url": first_text("logo_url", "logo", "logoUrl"),
     }
+
+
+def whatsapp_billing_policy(tenant_id: str) -> dict[str, object]:
+    """Return safe WhatsApp/Zernio billing policy flags for Nr3 display.
+
+    This is policy/config visibility only. It deliberately does not calculate
+    provider invoices or claim real template billing data.
+    """
+    data = get_tenant_client_data(tenant_id)
+    raw = data.get("whatsapp_billing_policy")
+    policy = raw if isinstance(raw, dict) else {}
+    outbound_templates_enabled = bool(policy.get("outbound_templates_enabled"))
+    campaigns_enabled = bool(policy.get("campaigns_enabled"))
+    review_required = policy.get("high_volume_review_required")
+    return {
+        "outbound_templates_enabled": outbound_templates_enabled,
+        "campaigns_enabled": campaigns_enabled,
+        "high_volume_review_required": True
+        if review_required is None
+        else bool(review_required),
+        "status": (
+            "enabled"
+            if outbound_templates_enabled or campaigns_enabled
+            else "disabled"
+        ),
+        "updated_at": str(policy.get("updated_at") or ""),
+        "updated_by": str(policy.get("updated_by") or ""),
+        "notes": str(policy.get("notes") or ""),
+    }
+
+
+def update_whatsapp_billing_policy(
+    tenant_id: str,
+    *,
+    outbound_templates_enabled: bool,
+    campaigns_enabled: bool,
+    high_volume_review_required: bool = True,
+    notes: str = "",
+) -> dict[str, object]:
+    """Persist operator-controlled WhatsApp outbound policy in client.json."""
+    safe_slug = validate_slug(tenant_id)
+    client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    if not client_dir:
+        raise TenantCreateError("Tenant client directory is not configured.")
+    client_path = Path(client_dir) / safe_slug / "config" / "client.json"
+    if not client_path.exists():
+        raise TenantCreateError("Tenant client.json was not found.")
+
+    policy = {
+        "outbound_templates_enabled": bool(outbound_templates_enabled),
+        "campaigns_enabled": bool(campaigns_enabled),
+        "high_volume_review_required": bool(high_volume_review_required),
+        "notes": (notes or "").strip()[:500],
+        "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "updated_by": "nr3",
+    }
+    with exclusive_file_lock(client_path.with_suffix(client_path.suffix + ".lock")):
+        try:
+            data = json.loads(client_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        data["slug"] = safe_slug
+        data["whatsapp_billing_policy"] = policy
+        client_path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return whatsapp_billing_policy(safe_slug)
 
 
 def update_tenant_account_details(

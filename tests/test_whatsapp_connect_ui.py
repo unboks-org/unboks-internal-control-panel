@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -33,6 +35,40 @@ def test_workspace_renders_whatsapp_business_connection_card(client):
     assert "Copy Link" in response.text
     assert "Refresh status" in response.text
     assert "Client authorization link" in response.text
+    assert "Billing & outbound policy" in response.text
+    assert "Templates disabled" in response.text
+    assert "Allow outbound WhatsApp templates for this tenant" in response.text
+    assert "Allow campaign / high-volume outbound messaging" in response.text
+    assert "Zernio connected accounts, Meta WhatsApp charges" in response.text
+
+
+def test_admin_can_save_whatsapp_billing_policy(client, tmp_path):
+    config_dir = tmp_path / "tenants" / "unboks" / "config"
+    config_dir.mkdir(parents=True)
+    client_json = config_dir / "client.json"
+    client_json.write_text(
+        json.dumps({"slug": "unboks", "name": "Unboks", "status": "active"}),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/admin/tenants/unboks/channels/whatsapp/billing-policy",
+        data={
+            "outbound_templates_enabled": "on",
+            "high_volume_review_required": "on",
+            "notes": "Enable only after tenant billing sign-off.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    data = json.loads(client_json.read_text(encoding="utf-8"))
+    policy = data["whatsapp_billing_policy"]
+    assert policy["outbound_templates_enabled"] is True
+    assert policy["campaigns_enabled"] is False
+    assert policy["high_volume_review_required"] is True
+    assert policy["notes"] == "Enable only after tenant billing sign-off."
+    assert policy["updated_by"] == "nr3"
 
 
 def test_admin_js_contains_whatsapp_connection_handlers():

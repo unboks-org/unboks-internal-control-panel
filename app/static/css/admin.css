@@ -3159,6 +3159,95 @@ button.button-disabled,
   padding: 8px;
 }
 
+.whatsapp-billing-policy {
+  background: #ffffff;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.whatsapp-billing-copy {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.whatsapp-billing-copy h4 {
+  font-size: 13px;
+  margin: 0 0 2px;
+}
+
+.whatsapp-policy-meta {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 10px 0 12px;
+}
+
+.whatsapp-policy-meta div {
+  background: #fbfcfd;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.whatsapp-policy-meta dt {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.whatsapp-policy-meta dd {
+  color: var(--color-text);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.whatsapp-policy-form {
+  display: grid;
+  gap: 8px;
+}
+
+.checkbox-line {
+  align-items: flex-start;
+  color: var(--color-text);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.checkbox-line input {
+  margin-top: 2px;
+}
+
+.whatsapp-policy-notes {
+  display: grid;
+  gap: 5px;
+}
+
+.whatsapp-policy-notes span {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.whatsapp-policy-notes textarea {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  color: var(--color-text);
+  font: inherit;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
 /* ---------------------------------------------------------------- */
 /* iOS Settings-style toggle (Refero compact)                       */
 /*   ON  : iOS system green (#34C759), white knob                    */

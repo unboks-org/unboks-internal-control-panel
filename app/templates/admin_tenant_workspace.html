@@ -184,6 +184,70 @@
       </div>
       <div class="whatsapp-phone-options" data-wa-phone-options hidden></div>
       <p class="muted compact-note" data-wa-feedback></p>
+
+      <div class="whatsapp-billing-policy">
+        <div class="whatsapp-billing-copy">
+          <div>
+            <h4>Billing & outbound policy</h4>
+            <p class="muted compact-note">
+              Operator-only notice: Zernio connected accounts, Meta WhatsApp charges, and delivered outbound templates may create provider cost.
+              Claude/LLM usage is paid by Unboks unless a future pass-through policy is configured.
+            </p>
+          </div>
+          <span class="status-chip status-{{ 'warn' if whatsapp_billing_policy.status == 'enabled' else 'unknown' }}">
+            Templates {{ 'enabled' if whatsapp_billing_policy.outbound_templates_enabled else 'disabled' }}
+          </span>
+        </div>
+        <dl class="whatsapp-policy-meta">
+          <div>
+            <dt>Connection</dt>
+            <dd>{{ active_whatsapp_status.label if active_whatsapp_status else 'Not connected' }}</dd>
+          </div>
+          <div>
+            <dt>Strict allowlist</dt>
+            <dd>
+              {% if active_whatsapp_status and active_whatsapp_status.allowlist %}
+                {{ active_whatsapp_status.allowlist.label }}
+                {% if active_whatsapp_status.allowlist.accounts %}
+                  <span class="muted">({{ active_whatsapp_status.allowlist.accounts | join(', ') }})</span>
+                {% endif %}
+              {% else %}
+                Not available
+              {% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>Campaigns</dt>
+            <dd>{{ 'Enabled' if whatsapp_billing_policy.campaigns_enabled else 'Disabled' }}</dd>
+          </div>
+          <div>
+            <dt>High-volume checklist</dt>
+            <dd>{{ 'Required before enabling' if whatsapp_billing_policy.high_volume_review_required else 'Not required' }}</dd>
+          </div>
+        </dl>
+        <form method="post" action="/admin/tenants/{{ tenant.id }}/channels/whatsapp/billing-policy" class="whatsapp-policy-form">
+          <label class="checkbox-line">
+            <input type="checkbox" name="outbound_templates_enabled" {% if whatsapp_billing_policy.outbound_templates_enabled %}checked{% endif %}>
+            <span>Allow outbound WhatsApp templates for this tenant</span>
+          </label>
+          <label class="checkbox-line">
+            <input type="checkbox" name="campaigns_enabled" {% if whatsapp_billing_policy.campaigns_enabled %}checked{% endif %}>
+            <span>Allow campaign / high-volume outbound messaging</span>
+          </label>
+          <label class="checkbox-line">
+            <input type="checkbox" name="high_volume_review_required" {% if whatsapp_billing_policy.high_volume_review_required %}checked{% endif %}>
+            <span>Require checklist review before high-volume outbound messaging</span>
+          </label>
+          <label class="whatsapp-policy-notes">
+            <span>Operator notes</span>
+            <textarea name="notes" rows="2" placeholder="Example: Templates remain disabled until tenant billing policy is signed.">{{ whatsapp_billing_policy.notes }}</textarea>
+          </label>
+          <button type="submit" class="button-secondary">Save outbound policy</button>
+          {% if whatsapp_billing_policy.updated_at %}
+            <span class="muted compact-note">Last updated {{ whatsapp_billing_policy.updated_at }}</span>
+          {% endif %}
+        </form>
+      </div>
     </div>
     <p class="muted compact-note channels-foot">Toggle state publishes through the Nr3 internal bridge used by Nr2.</p>
   </section>

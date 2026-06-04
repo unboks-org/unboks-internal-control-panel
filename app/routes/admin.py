@@ -74,7 +74,9 @@ from app.tenants import (
     tenant_account_details,
     update_tenant_account_details,
     update_tenant_status,
+    update_whatsapp_billing_policy,
     validate_slug,
+    whatsapp_billing_policy,
     RESERVED_SLUGS,
 )
 
@@ -396,6 +398,55 @@ def admin_toggle_channel(
     return RedirectResponse(
         url=f"/admin/tenants/{tenant_id}#channels-section",
         status_code=303,
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/channels/whatsapp/billing-policy")
+def admin_save_whatsapp_billing_policy(
+    request: Request,
+    tenant_id: str,
+    outbound_templates_enabled: Optional[str] = Form(default=None),
+    campaigns_enabled: Optional[str] = Form(default=None),
+    high_volume_review_required: Optional[str] = Form(default=None),
+    notes: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    try:
+        policy = update_whatsapp_billing_policy(
+            tenant_id,
+            outbound_templates_enabled=outbound_templates_enabled == "on",
+            campaigns_enabled=campaigns_enabled == "on",
+            high_volume_review_required=high_volume_review_required == "on",
+            notes=notes,
+        )
+    except TenantCreateError as exc:
+        return _workspace_redirect(
+            tenant_id,
+            "channels-section",
+            message=str(exc),
+            level="warn",
+        )
+    audit_log.record_event(
+        action="tenant.whatsapp_billing_policy.updated",
+        result="ok",
+        safe_summary="WhatsApp/Zernio outbound billing policy updated.",
+        tenant_id=tenant_id,
+        metadata={
+            "outbound_templates_enabled": policy["outbound_templates_enabled"],
+            "campaigns_enabled": policy["campaigns_enabled"],
+            "high_volume_review_required": policy["high_volume_review_required"],
+        },
+    )
+    return _workspace_redirect(
+        tenant_id,
+        "channels-section",
+        message="WhatsApp/Zernio billing policy saved.",
     )
 
 
@@ -1851,6 +1902,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     )
     auto_block_sync = fetch_auto_block_settings(tenant.id)
     account_details = tenant_account_details(tenant.id)
+    whatsapp_policy = whatsapp_billing_policy(tenant.id)
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
@@ -1878,6 +1930,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "prompt_conflict_report": prompt_conflict_report,
             "auto_block_sync": auto_block_sync,
             "auto_block_settings": auto_block_sync.settings,
+            "whatsapp_billing_policy": whatsapp_policy,
         },
     )
 
