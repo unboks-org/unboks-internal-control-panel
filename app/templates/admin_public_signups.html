@@ -39,9 +39,15 @@
   </section>
 
   <section class="panel signups-panel">
-    <div class="signup-info-banner" role="status">
-      Admin email alerts are not enabled yet. This page is currently the source of truth for public trial requests.
-    </div>
+    {% if admin_alert_configured %}
+      <div class="signup-info-banner is-success" role="status">
+        Admin email alerts are enabled for {{ admin_alert_recipient }}.
+      </div>
+    {% elif admin_alert_warning %}
+      <div class="signup-info-banner" role="status">
+        {{ admin_alert_warning }}
+      </div>
+    {% endif %}
 
     <div class="signup-toolbar" role="search">
       <input
@@ -84,6 +90,20 @@
                 <span>{{ signup.phone or "No phone" }}</span>
               </div>
               <span class="signup-created">Created {{ signup.created_at or "—" }}</span>
+              {% if signup.admin_alert_status %}
+                <span class="signup-created">
+                  Admin alert:
+                  {% if signup.admin_alert_status == "sent" %}
+                    sent
+                  {% elif signup.admin_alert_status == "failed" %}
+                    failed
+                  {% elif signup.admin_alert_status == "not_configured" %}
+                    not configured
+                  {% else %}
+                    {{ signup.admin_alert_status }}
+                  {% endif %}
+                </span>
+              {% endif %}
             </div>
 
             <div class="signup-card-state">

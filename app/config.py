@@ -12,6 +12,7 @@ class Settings:
     db_path: str
     base_url: str
     email_from: str
+    admin_alert_email: Optional[str]
     smtp_host: Optional[str]
     smtp_port: int
     smtp_username: Optional[str]
@@ -51,6 +52,10 @@ def get_settings() -> Settings:
         db_path=os.getenv("NR3_DB_PATH", "data/nr3.db"),
         base_url=os.getenv("NR3_BASE_URL", "http://127.0.0.1:8010").rstrip("/"),
         email_from=os.getenv("NR3_EMAIL_FROM", "onboarding@unboks.org"),
+        admin_alert_email=(
+            _clean_env("NR3_PUBLIC_SIGNUP_ADMIN_EMAIL")
+            or _clean_env("NR3_ADMIN_ALERT_EMAIL")
+        ),
         smtp_host=_clean_env("NR3_SMTP_HOST"),
         smtp_port=int(os.getenv("NR3_SMTP_PORT", "587")),
         smtp_username=_clean_env("NR3_SMTP_USERNAME"),

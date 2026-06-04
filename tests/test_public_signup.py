@@ -130,6 +130,111 @@ def test_public_signup_email_verification_without_auto_provision(monkeypatch, tm
     assert _stored_request(tmp_path)["status"] == "verified_pending_review"
 
 
+def test_public_signup_sends_admin_alert_when_configured(monkeypatch, tmp_path):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+    monkeypatch.setenv("NR3_PUBLIC_SIGNUP_ADMIN_EMAIL", "calvin@example.com")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+
+    response = _signup(client)
+
+    assert response.status_code == 202
+    assert len(sent) == 2
+    assert sent[0]["to"] == "ada@example.com"
+    assert sent[1]["to"] == "calvin@example.com"
+    assert sent[1]["subject"] == "New Unboks free-trial signup: Lovelace Law"
+    assert "Name: Ada Lovelace" in sent[1]["body"]
+    assert "Email: ada@example.com" in sent[1]["body"]
+    assert "Business: Lovelace Law" in sent[1]["body"]
+    assert "Phone: +599 123 4567" in sent[1]["body"]
+    assert "Status: verification_pending" in sent[1]["body"]
+    assert "https://icp.unboks.org/admin/signups/" in sent[1]["body"]
+    assert "token_hash" not in sent[1]["body"]
+    record = _stored_request(tmp_path)
+    assert record["admin_alert_status"] == "sent"
+    assert record["admin_alert_sent_at"]
+    assert record["admin_alert_error"] is None
+
+    client.post("/login", data={"password": "test-password"})
+    signups = client.get("/admin/signups")
+    assert signups.status_code == 200
+    assert "Admin email alerts are enabled for calvin@example.com." in signups.text
+    assert "Admin alert:" in signups.text
+    assert "sent" in signups.text
+    assert "token_hash" not in signups.text
+
+
+def test_public_signup_admin_alert_missing_recipient_does_not_fail_signup(
+    monkeypatch,
+    tmp_path,
+):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+
+    response = _signup(client)
+
+    assert response.status_code == 202
+    assert "Check your email" in response.text
+    assert len(sent) == 1
+    assert sent[0]["to"] == "ada@example.com"
+    record = _stored_request(tmp_path)
+    assert record["admin_alert_status"] == "not_configured"
+    assert "recipient" in record["admin_alert_error"].lower()
+
+    client.post("/login", data={"password": "test-password"})
+    signups = client.get("/admin/signups")
+    assert signups.status_code == 200
+    assert "Set NR3_PUBLIC_SIGNUP_ADMIN_EMAIL to receive signup alerts." in signups.text
+    assert "Admin alert:" in signups.text
+    assert "not configured" in signups.text
+    assert "token_hash" not in signups.text
+
+
+def test_public_signup_admin_alert_failure_does_not_fail_signup(monkeypatch, tmp_path):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        if to_email == "calvin@example.com":
+            raise RuntimeError("smtp failure")
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+    monkeypatch.setenv("NR3_PUBLIC_SIGNUP_ADMIN_EMAIL", "calvin@example.com")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+
+    response = _signup(client)
+
+    assert response.status_code == 202
+    assert "Check your email" in response.text
+    assert len(sent) == 1
+    assert sent[0]["to"] == "ada@example.com"
+    record = _stored_request(tmp_path)
+    assert record["admin_alert_status"] == "failed"
+    assert record["admin_alert_sent_at"] is None
+    assert record["admin_alert_error"] == "Admin alert email failed to send."
+
+
 def test_admin_public_signups_page_lists_verified_request(monkeypatch, tmp_path):
     sent = []
 

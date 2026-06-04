@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app import audit_log
 from app.config import get_settings
 from app.emailer import send_email, smtp_is_configured
 from app.public_signup_requests import (
@@ -10,6 +11,8 @@ from app.public_signup_requests import (
     create_signup_request,
     mark_provisioned,
     mark_verified,
+    update_signup_request,
+    utc_now,
 )
 from app.signup_service import create_public_signup_tenant
 from app.tenants import TenantCreateError
@@ -431,6 +434,128 @@ The Unboks team
     return subject, body, html_body
 
 
+def _build_admin_signup_alert_email(
+    *,
+    signup_id: str,
+    full_name: str,
+    business_name: str,
+    email: str,
+    phone: str,
+    created_at: str,
+    status: str,
+    review_url: str,
+) -> tuple[str, str]:
+    subject = f"New Unboks free-trial signup: {business_name}"
+    body = f"""New Unboks free-trial signup received.
+
+Prospect:
+- Name: {full_name}
+- Email: {email}
+- Business: {business_name}
+- Phone: {phone or "Not provided"}
+- Website: Not provided
+- Timestamp: {created_at}
+- Status: {status}
+- Signup ID: {signup_id}
+
+Review in Nr3:
+{review_url}
+
+This alert does not include verification token hashes or secrets.
+"""
+    return subject, body
+
+
+def _send_admin_signup_alert(signup_request) -> None:
+    """Best-effort admin notification for public trial requests.
+
+    This must never fail the public signup flow. Missing SMTP or missing
+    admin recipient is stored visibly for Nr3 and recorded in audit logs.
+    """
+    settings = get_settings()
+    review_url = f"{settings.base_url}/admin/signups/{signup_request.id}"
+    metadata = {
+        "signup_id": signup_request.id,
+        "email": signup_request.email,
+        "business_name": signup_request.business_name,
+        "status": signup_request.status,
+    }
+
+    if not smtp_is_configured(settings):
+        update_signup_request(
+            signup_request.id,
+            settings,
+            admin_alert_status="not_configured",
+            admin_alert_sent_at=None,
+            admin_alert_error="SMTP is not configured.",
+        )
+        audit_log.record_event(
+            action="public_signup.admin_alert_skipped",
+            result="warning",
+            safe_summary="Admin signup alert skipped because SMTP is not configured.",
+            metadata=metadata,
+        )
+        return
+
+    if not settings.admin_alert_email:
+        update_signup_request(
+            signup_request.id,
+            settings,
+            admin_alert_status="not_configured",
+            admin_alert_sent_at=None,
+            admin_alert_error="Admin alert recipient is not configured.",
+        )
+        audit_log.record_event(
+            action="public_signup.admin_alert_skipped",
+            result="warning",
+            safe_summary="Admin signup alert skipped because recipient is not configured.",
+            metadata=metadata,
+        )
+        return
+
+    subject, body = _build_admin_signup_alert_email(
+        signup_id=signup_request.id,
+        full_name=signup_request.full_name,
+        business_name=signup_request.business_name,
+        email=signup_request.email,
+        phone=signup_request.phone,
+        created_at=signup_request.created_at,
+        status=signup_request.status,
+        review_url=review_url,
+    )
+    try:
+        send_email(settings.admin_alert_email, subject, body, settings)
+    except Exception as exc:
+        update_signup_request(
+            signup_request.id,
+            settings,
+            admin_alert_status="failed",
+            admin_alert_sent_at=None,
+            admin_alert_error="Admin alert email failed to send.",
+        )
+        audit_log.record_event(
+            action="public_signup.admin_alert_failed",
+            result="error",
+            safe_summary="Admin signup alert email failed to send.",
+            metadata={**metadata, "error": type(exc).__name__},
+        )
+        return
+
+    update_signup_request(
+        signup_request.id,
+        settings,
+        admin_alert_status="sent",
+        admin_alert_sent_at=utc_now().isoformat(),
+        admin_alert_error=None,
+    )
+    audit_log.record_event(
+        action="public_signup.admin_alert_sent",
+        result="ok",
+        safe_summary="Admin signup alert email sent.",
+        metadata={**metadata, "recipient": settings.admin_alert_email},
+    )
+
+
 @router.get("/signup", response_class=HTMLResponse)
 def signup_fallback_form() -> str:
     """Small no-JS fallback. The public Nr1 site owns the polished form."""
@@ -515,6 +640,7 @@ async def public_signup_submit(
                 html_body=html_body,
             )
         except Exception:
+            _send_admin_signup_alert(signup_request)
             return HTMLResponse(
                 _signup_info_html(
                     "Signup received",
@@ -522,6 +648,7 @@ async def public_signup_submit(
                 ),
                 status_code=202,
             )
+        _send_admin_signup_alert(signup_request)
         return HTMLResponse(
             _signup_check_email_html(
                 email=signup_request.email,
@@ -530,6 +657,7 @@ async def public_signup_submit(
             status_code=202,
         )
 
+    _send_admin_signup_alert(signup_request)
     return HTMLResponse(
         _signup_info_html(
             "Signup received",

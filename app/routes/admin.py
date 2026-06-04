@@ -14,6 +14,7 @@ from app.emailer import (
     EmailSendResult,
     build_onboarding_link,
     prepare_or_send_onboarding_email,
+    smtp_is_configured,
 )
 from app.onboarding import (
     INTAKE_QUESTIONS,
@@ -2739,6 +2740,19 @@ def render_public_signups(request: Request, settings) -> HTMLResponse:
         for signup in signups
         if signup.get("status") == "verification_pending"
     ]
+    smtp_ready = smtp_is_configured(settings)
+    admin_alert_configured = bool(settings.admin_alert_email) and smtp_ready
+    admin_alert_warning = ""
+    if not smtp_ready:
+        admin_alert_warning = (
+            "Admin email alerts are not enabled because SMTP is not configured. "
+            "This page is currently the source of truth for public trial requests."
+        )
+    elif not settings.admin_alert_email:
+        admin_alert_warning = (
+            "Admin email alerts are not enabled because no admin recipient is configured. "
+            "Set NR3_PUBLIC_SIGNUP_ADMIN_EMAIL to receive signup alerts."
+        )
     return templates.TemplateResponse(
         request,
         "admin_public_signups.html",
@@ -2749,6 +2763,9 @@ def render_public_signups(request: Request, settings) -> HTMLResponse:
             "pending_verification": pending_verification,
             "show_archived": show_archived,
             "archived_count": archived_count,
+            "admin_alert_configured": admin_alert_configured,
+            "admin_alert_warning": admin_alert_warning,
+            "admin_alert_recipient": settings.admin_alert_email or "",
         },
     )
 

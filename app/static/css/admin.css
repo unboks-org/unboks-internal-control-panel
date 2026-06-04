@@ -1107,6 +1107,12 @@ button.button-danger {
   padding: 10px 12px;
 }
 
+.signup-info-banner.is-success {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
 .signup-toolbar {
   align-items: center;
   display: grid;
