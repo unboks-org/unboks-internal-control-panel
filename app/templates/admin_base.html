@@ -135,6 +135,14 @@
           <span>Todo</span>
         </a>
         <a
+          href="/admin/usage"
+          class="nav-item {% if active == 'usage' %}active{% endif %}"
+          {% if active == 'usage' %}aria-current="page"{% endif %}
+        >
+          <span class="nav-dot"></span>
+          <span>Usage & costs</span>
+        </a>
+        <a
           href="/admin/settings"
           class="nav-item {% if active == 'settings' %}active{% endif %}"
           {% if active == 'settings' %}aria-current="page"{% endif %}

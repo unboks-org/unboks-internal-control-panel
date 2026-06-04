@@ -72,7 +72,9 @@ from app.tenants import (
     register_tenant,
     sorted_notes,
     tenant_account_details,
+    tenant_cost_guardrails,
     update_tenant_account_details,
+    update_tenant_cost_guardrails,
     update_tenant_status,
     update_whatsapp_billing_policy,
     validate_slug,
@@ -85,6 +87,7 @@ import logging
 import os
 import re
 import secrets
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus
 
@@ -377,6 +380,150 @@ def admin_tenants_index(request: Request) -> Response:
     if tenants:
         return RedirectResponse(url=f"/admin/tenants/{tenants[0].id}", status_code=303)
     return RedirectResponse(url="/admin/settings", status_code=303)
+
+
+def _api_usage_tracking_available(settings) -> bool:
+    try:
+        with sqlite3.connect(settings.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table' AND name = 'api_usage_events'
+                """
+            ).fetchone()
+    except sqlite3.Error:
+        return False
+    return row is not None
+
+
+def _usage_monitor_rows(settings) -> list[dict[str, object]]:
+    from app import channel_connections
+    from app import channel_state as _channel_state
+
+    tracking_available = _api_usage_tracking_available(settings)
+    tenants = list_tenants()
+    whatsapp_statuses = _tenant_whatsapp_statuses(tenants)
+    rows: list[dict[str, object]] = []
+    for tenant in tenants:
+        channels = _channel_state.read_channels(tenant.id)
+        active_channel_count = len([value for value in channels.values() if value])
+        connection = channel_connections.get_tenant_channel_connection(tenant.id)
+        guardrails = tenant_cost_guardrails(tenant.id)
+        warnings: list[str] = []
+        if not tracking_available:
+            warnings.append("Usage tracking not available; daily messages and LLM cost are unknown.")
+        if connection and connection.status == "connected":
+            allowlist = whatsapp_statuses.get(tenant.id, {}).get("allowlist")
+            if isinstance(allowlist, dict) and not allowlist.get("ok"):
+                warnings.append(f"WhatsApp connected but {allowlist.get('label')}.")
+        if not guardrails["daily_ai_reply_cap"] and not guardrails["daily_estimated_cost_cap_usd"]:
+            warnings.append("No tenant cost caps configured.")
+        rows.append({
+            "tenant": tenant,
+            "active_channel_count": active_channel_count,
+            "connected_channel_count": 1
+            if connection and connection.status == "connected"
+            else 0,
+            "whatsapp_status": (
+                whatsapp_statuses.get(tenant.id, {}).get("label")
+                or "Not connected"
+            ),
+            "provider_account": (
+                _redacted_account_ids([connection.zernio_account_id])[0]
+                if connection and connection.zernio_account_id
+                else "Not connected"
+            ),
+            "daily_messages": "Unknown" if not tracking_available else "Not tracked yet",
+            "llm_cost": "Unknown" if not tracking_available else "Not tracked yet",
+            "fallback_errors": "Unknown" if not tracking_available else "Not tracked yet",
+            "guardrails": guardrails,
+            "warnings": warnings,
+        })
+    return rows
+
+
+@router.get("/admin/usage", response_class=HTMLResponse)
+def admin_usage_monitor(request: Request) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    rows = _usage_monitor_rows(settings)
+    return templates.TemplateResponse(
+        request,
+        "admin_usage.html",
+        {
+            **_shell_context("usage"),
+            "usage_rows": rows,
+            "tenant_count": len(rows),
+            "total_connected_channels": sum(
+                int(row["connected_channel_count"]) for row in rows
+            ),
+            "tracking_available": _api_usage_tracking_available(settings),
+            "action_message": request.query_params.get("action_message", ""),
+            "action_level": request.query_params.get("action_level", "ok"),
+        },
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/cost-guardrails")
+def admin_save_tenant_cost_guardrails(
+    request: Request,
+    tenant_id: str,
+    daily_ai_reply_cap: str = Form(default=""),
+    daily_estimated_cost_cap_usd: str = Form(default=""),
+    pause_ai_on_cap: Optional[str] = Form(default=None),
+    notes: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/usage", status_code=303)
+    try:
+        reply_cap = int(daily_ai_reply_cap) if daily_ai_reply_cap.strip() else None
+        cost_cap = (
+            float(daily_estimated_cost_cap_usd)
+            if daily_estimated_cost_cap_usd.strip()
+            else None
+        )
+    except ValueError:
+        return RedirectResponse(
+            url="/admin/usage?action_message=Guardrail%20values%20must%20be%20numbers.&action_level=warn",
+            status_code=303,
+        )
+    try:
+        guardrails = update_tenant_cost_guardrails(
+            tenant_id,
+            daily_ai_reply_cap=reply_cap,
+            daily_estimated_cost_cap_usd=cost_cap,
+            pause_ai_on_cap=pause_ai_on_cap == "on",
+            notes=notes,
+        )
+    except TenantCreateError as exc:
+        return RedirectResponse(
+            url=(
+                "/admin/usage?action_message="
+                f"{quote_plus(str(exc))}&action_level=warn"
+            ),
+            status_code=303,
+        )
+    audit_log.record_event(
+        action="tenant.cost_guardrails.updated",
+        tenant_id=tenant_id,
+        result="ok",
+        safe_summary="Tenant cost guardrails updated.",
+        metadata={
+            "daily_ai_reply_cap": guardrails["daily_ai_reply_cap"],
+            "daily_estimated_cost_cap_usd": guardrails["daily_estimated_cost_cap_usd"],
+            "pause_ai_on_cap": guardrails["pause_ai_on_cap"],
+        },
+    )
+    return RedirectResponse(
+        url="/admin/usage?action_message=Cost%20guardrails%20saved.&action_level=ok",
+        status_code=303,
+    )
 
 
 

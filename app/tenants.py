@@ -537,6 +537,87 @@ def update_whatsapp_billing_policy(
     return whatsapp_billing_policy(safe_slug)
 
 
+def tenant_cost_guardrails(tenant_id: str) -> dict[str, object]:
+    data = get_tenant_client_data(tenant_id)
+    raw = data.get("tenant_cost_guardrails")
+    guardrails = raw if isinstance(raw, dict) else {}
+
+    def clean_int(name: str) -> Optional[int]:
+        value = guardrails.get(name)
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    def clean_float(name: str) -> Optional[float]:
+        value = guardrails.get(name)
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    return {
+        "daily_ai_reply_cap": clean_int("daily_ai_reply_cap"),
+        "daily_estimated_cost_cap_usd": clean_float("daily_estimated_cost_cap_usd"),
+        "pause_ai_on_cap": bool(guardrails.get("pause_ai_on_cap")),
+        "updated_at": str(guardrails.get("updated_at") or ""),
+        "updated_by": str(guardrails.get("updated_by") or ""),
+        "notes": str(guardrails.get("notes") or ""),
+    }
+
+
+def update_tenant_cost_guardrails(
+    tenant_id: str,
+    *,
+    daily_ai_reply_cap: Optional[int],
+    daily_estimated_cost_cap_usd: Optional[float],
+    pause_ai_on_cap: bool,
+    notes: str = "",
+) -> dict[str, object]:
+    safe_slug = validate_slug(tenant_id)
+    client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    if not client_dir:
+        raise TenantCreateError("Tenant client directory is not configured.")
+    client_path = Path(client_dir) / safe_slug / "config" / "client.json"
+    if not client_path.exists():
+        raise TenantCreateError("Tenant client.json was not found.")
+
+    clean_reply_cap = int(daily_ai_reply_cap) if daily_ai_reply_cap else None
+    clean_cost_cap = (
+        round(float(daily_estimated_cost_cap_usd), 4)
+        if daily_estimated_cost_cap_usd
+        else None
+    )
+    if clean_reply_cap is not None and clean_reply_cap <= 0:
+        clean_reply_cap = None
+    if clean_cost_cap is not None and clean_cost_cap <= 0:
+        clean_cost_cap = None
+    guardrails = {
+        "daily_ai_reply_cap": clean_reply_cap,
+        "daily_estimated_cost_cap_usd": clean_cost_cap,
+        "pause_ai_on_cap": bool(pause_ai_on_cap),
+        "notes": (notes or "").strip()[:500],
+        "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "updated_by": "nr3",
+    }
+    with exclusive_file_lock(client_path.with_suffix(client_path.suffix + ".lock")):
+        try:
+            data = json.loads(client_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        data["slug"] = safe_slug
+        data["tenant_cost_guardrails"] = guardrails
+        client_path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return tenant_cost_guardrails(safe_slug)
+
+
 def update_tenant_account_details(
     tenant_id: str,
     *,

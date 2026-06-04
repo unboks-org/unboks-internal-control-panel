@@ -1,0 +1,116 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Usage & Costs | Unboks Internal{% endblock %}
+{% block section_eyebrow %}Usage monitor{% endblock %}
+{% block page_title %}Usage & costs{% endblock %}
+{% block page_subtitle %}
+  <p class="muted">Tenant cost guardrails, channel exposure, and usage tracking status.</p>
+{% endblock %}
+
+{% block content %}
+  {% if action_message %}
+    <div class="form-feedback form-feedback-{{ 'warn' if action_level == 'warn' else 'success' }}" role="status">
+      {{ action_message }}
+    </div>
+  {% endif %}
+
+  <section class="signup-overview" aria-label="Usage summary">
+    <div class="signup-stat">
+      <span class="signup-stat-label">Tenants</span>
+      <strong>{{ tenant_count }}</strong>
+    </div>
+    <div class="signup-stat">
+      <span class="signup-stat-label">Connected channels</span>
+      <strong>{{ total_connected_channels }}</strong>
+    </div>
+    <div class="signup-stat">
+      <span class="signup-stat-label">Usage tracking</span>
+      <strong>{{ 'Active' if tracking_available else 'Missing' }}</strong>
+    </div>
+  </section>
+
+  {% if not tracking_available %}
+    <div class="signup-info-banner" role="status">
+      Runtime usage telemetry is not available yet. Daily message counts, LLM/API cost, fallback counts, and provider usage are shown as Unknown instead of estimated or invented. Guardrail policies are stored here; automatic pause enforcement requires runtime usage tracking.
+    </div>
+  {% endif %}
+
+  <section class="panel usage-panel">
+    <div class="panel-header">
+      <div>
+        <h2>Tenant usage guardrails</h2>
+        <p class="muted compact-note">Spartan operator table. Values marked Unknown are not currently tracked by ICP.</p>
+      </div>
+    </div>
+
+    <div class="usage-table-wrap">
+      <table class="usage-table">
+        <thead>
+          <tr>
+            <th>Tenant</th>
+            <th>Channels</th>
+            <th>WhatsApp / provider</th>
+            <th>Daily messages</th>
+            <th>LLM cost</th>
+            <th>Fallback/API errors</th>
+            <th>Guardrails</th>
+            <th>Warnings</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in usage_rows %}
+            <tr>
+              <td>
+                <a href="/admin/tenants/{{ row.tenant.id }}" class="primary-cell">{{ row.tenant.name }}</a>
+                <span class="cell-note"><code>{{ row.tenant.id }}</code> · {{ row.tenant.status }}</span>
+              </td>
+              <td>
+                <strong>{{ row.active_channel_count }}</strong> active<br>
+                <span class="cell-note">{{ row.connected_channel_count }} provider-connected</span>
+              </td>
+              <td>
+                {{ row.whatsapp_status }}<br>
+                <span class="cell-note">{{ row.provider_account }}</span>
+              </td>
+              <td>{{ row.daily_messages }}</td>
+              <td>{{ row.llm_cost }}</td>
+              <td>{{ row.fallback_errors }}</td>
+              <td>
+                <form method="post" action="/admin/tenants/{{ row.tenant.id }}/cost-guardrails" class="usage-guardrail-form">
+                  <label>
+                    <span>Replies/day</span>
+                    <input name="daily_ai_reply_cap" type="number" min="1" value="{{ row.guardrails.daily_ai_reply_cap or '' }}" placeholder="No cap">
+                  </label>
+                  <label>
+                    <span>Cost/day USD</span>
+                    <input name="daily_estimated_cost_cap_usd" type="number" min="0" step="0.01" value="{{ row.guardrails.daily_estimated_cost_cap_usd or '' }}" placeholder="Unknown">
+                  </label>
+                  <label class="checkbox-line">
+                    <input type="checkbox" name="pause_ai_on_cap" {% if row.guardrails.pause_ai_on_cap %}checked{% endif %}>
+                    <span>Request AI pause when cap is reached</span>
+                  </label>
+                  <textarea name="notes" rows="2" placeholder="Operator notes">{{ row.guardrails.notes }}</textarea>
+                  <button type="submit" class="button-secondary">Save</button>
+                  {% if row.guardrails.updated_at %}
+                    <span class="cell-note">Updated {{ row.guardrails.updated_at }}</span>
+                  {% endif %}
+                </form>
+              </td>
+              <td>
+                {% if row.warnings %}
+                  <ul class="usage-warning-list">
+                    {% for warning in row.warnings %}
+                      <li>{{ warning }}</li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <span class="status-chip status-ok">No warnings</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
