@@ -808,6 +808,226 @@
     syncState();
   }
 
+  function initSotBulkUpload() {
+    var openBtn = document.querySelector("[data-sot-bulk-open]");
+    var modal = document.querySelector("[data-sot-bulk-modal]");
+    if (!openBtn || !modal) {
+      return;
+    }
+    var tenantId = openBtn.getAttribute("data-tenant-id") || "";
+    var fileInput = modal.querySelector("[data-sot-bulk-file]");
+    var extractBtn = modal.querySelector("[data-sot-bulk-extract]");
+    var statusEl = modal.querySelector("[data-sot-bulk-status]");
+    var metaEl = modal.querySelector("[data-sot-bulk-meta]");
+    var previewEl = modal.querySelector("[data-sot-bulk-preview]");
+    var actionsEl = modal.querySelector("[data-sot-bulk-actions]");
+    var saveSelectedBtn = modal.querySelector("[data-sot-bulk-save-selected]");
+    var saveAllBtn = modal.querySelector("[data-sot-bulk-save-all]");
+    var categories = [
+      "general",
+      "products",
+      "pricing",
+      "ordering",
+      "delivery",
+      "payment",
+      "tone",
+      "escalation",
+      "policy",
+      "ingredients",
+      "availability",
+      "contact"
+    ];
+    var entries = [];
+
+    function setStatus(message, kind) {
+      if (!statusEl) return;
+      statusEl.textContent = message || "";
+      statusEl.classList.toggle("is-error", kind === "error");
+      statusEl.classList.toggle("is-ok", kind === "ok");
+    }
+
+    function open() {
+      modal.removeAttribute("hidden");
+      document.body.classList.add("has-modal-open");
+      setStatus("", "");
+      if (fileInput) {
+        fileInput.focus();
+      }
+    }
+
+    function close() {
+      modal.setAttribute("hidden", "");
+      document.body.classList.remove("has-modal-open");
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function optionHtml(selected) {
+      return categories.map(function (category) {
+        var isSelected = category === selected ? " selected" : "";
+        return "<option value=\"" + escapeHtml(category) + "\"" + isSelected + ">" + escapeHtml(category) + "</option>";
+      }).join("");
+    }
+
+    function activeCards() {
+      return Array.prototype.slice.call(modal.querySelectorAll("[data-sot-entry]"));
+    }
+
+    function collectEntries(onlySelected) {
+      return activeCards().map(function (card) {
+        return {
+          selected: onlySelected ? Boolean(card.querySelector("[data-sot-entry-selected]").checked) : true,
+          title: card.querySelector("[data-sot-entry-title]").value,
+          category: card.querySelector("[data-sot-entry-category]").value,
+          fact: card.querySelector("[data-sot-entry-fact]").value,
+          sourceExcerpt: card.querySelector("[data-sot-entry-source]").textContent || "",
+          confidence: Number(card.getAttribute("data-confidence") || "0")
+        };
+      }).filter(function (entry) {
+        return entry.title.trim() && entry.fact.trim();
+      });
+    }
+
+    function renderPreview(data) {
+      entries = Array.isArray(data.entries) ? data.entries : [];
+      if (metaEl) {
+        metaEl.hidden = false;
+        metaEl.innerHTML = "<strong>Model used:</strong> " + escapeHtml(data.modelUsed || "deterministic parser") +
+          " <span>Extracted " + entries.length + " entries.</span>";
+      }
+      if (!previewEl) return;
+      previewEl.hidden = false;
+      if (!entries.length) {
+        previewEl.innerHTML = "<p class=\"muted compact-note\">No useful Source of Truth entries were extracted. Try a more structured .txt file.</p>";
+        if (actionsEl) actionsEl.hidden = true;
+        return;
+      }
+      previewEl.innerHTML = entries.map(function (entry, index) {
+        var checked = entry.selected === false ? "" : " checked";
+        var duplicate = entry.possibleDuplicate
+          ? "<p class=\"sot-bulk-warning\">Possible duplicate of existing SOT entry: " + escapeHtml(entry.duplicateOf || "existing entry") + ".</p>"
+          : "";
+        return "<article class=\"sot-bulk-entry\" data-sot-entry data-confidence=\"" + escapeHtml(entry.confidence) + "\">" +
+          "<div class=\"sot-bulk-entry-top\">" +
+            "<label class=\"sot-bulk-check\"><input type=\"checkbox\" data-sot-entry-selected" + checked + "> Save</label>" +
+            "<span class=\"status-chip status-ok\">" + escapeHtml(entry.category || "general") + "</span>" +
+            "<span class=\"sot-confidence\">Confidence " + escapeHtml(entry.confidence) + "</span>" +
+            "<button type=\"button\" class=\"text-button danger-text\" data-sot-entry-delete>Delete</button>" +
+          "</div>" +
+          duplicate +
+          "<div class=\"sot-bulk-grid\">" +
+            "<label class=\"agent-form-field\"><span>Title</span><input type=\"text\" value=\"" + escapeHtml(entry.title) + "\" data-sot-entry-title></label>" +
+            "<label class=\"agent-form-field\"><span>Category</span><select data-sot-entry-category>" + optionHtml(entry.category || "general") + "</select></label>" +
+          "</div>" +
+          "<label class=\"agent-form-field\"><span>Fact / instruction</span><textarea rows=\"3\" data-sot-entry-fact>" + escapeHtml(entry.fact) + "</textarea></label>" +
+          "<div class=\"sot-bulk-source\"><strong>Source excerpt</strong><p data-sot-entry-source>" + escapeHtml(entry.sourceExcerpt) + "</p></div>" +
+          "</article>";
+      }).join("");
+      previewEl.querySelectorAll("[data-sot-entry-delete]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var card = btn.closest("[data-sot-entry]");
+          if (card) card.remove();
+        });
+      });
+      if (actionsEl) actionsEl.hidden = false;
+    }
+
+    function extract() {
+      var file = fileInput && fileInput.files ? fileInput.files[0] : null;
+      if (!file) {
+        setStatus("Choose a .txt file first.", "error");
+        return;
+      }
+      if (!/\.txt$/i.test(file.name)) {
+        setStatus("Only .txt files are supported in this version.", "error");
+        return;
+      }
+      var formData = new FormData();
+      formData.append("tenant_id", tenantId);
+      formData.append("file", file);
+      extractBtn.disabled = true;
+      setStatus("Analyzing file...", "");
+      fetch("/admin/source-of-truth/bulk-extract", {
+        method: "POST",
+        body: formData
+      }).then(function (res) {
+        return res.json();
+      }).then(function (data) {
+        if (!data.success) {
+          throw new Error(data.error || "Bulk extraction failed.");
+        }
+        if (Array.isArray(data.categories) && data.categories.length) {
+          categories = data.categories;
+        }
+        renderPreview(data);
+        setStatus("Review the extracted entries before saving.", "ok");
+      }).catch(function (err) {
+        setStatus(err.message || "Bulk extraction failed.", "error");
+      }).finally(function () {
+        extractBtn.disabled = false;
+      });
+    }
+
+    function save(onlySelected) {
+      var payloadEntries = collectEntries(onlySelected);
+      if (!payloadEntries.length) {
+        setStatus("No entries selected to save.", "error");
+        return;
+      }
+      var btn = onlySelected ? saveSelectedBtn : saveAllBtn;
+      if (btn) btn.disabled = true;
+      setStatus("Saving Source of Truth entries...", "");
+      fetch("/admin/source-of-truth/bulk-save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: tenantId, entries: payloadEntries })
+      }).then(function (res) {
+        return res.json();
+      }).then(function (data) {
+        if (!data.success) {
+          throw new Error(data.error || "Bulk save failed.");
+        }
+        var skipped = Array.isArray(data.skipped) && data.skipped.length
+          ? " " + data.skipped.length + " skipped."
+          : "";
+        setStatus("Saved " + data.savedCount + " entries." + skipped + " Reloading...", "ok");
+        window.setTimeout(function () {
+          window.location.hash = "agent-section";
+          window.location.reload();
+        }, 700);
+      }).catch(function (err) {
+        setStatus(err.message || "Bulk save failed.", "error");
+      }).finally(function () {
+        if (btn) btn.disabled = false;
+      });
+    }
+
+    openBtn.addEventListener("click", open);
+    modal.querySelectorAll("[data-sot-bulk-close], [data-sot-bulk-cancel]").forEach(function (btn) {
+      btn.addEventListener("click", close);
+    });
+    if (extractBtn) {
+      extractBtn.addEventListener("click", extract);
+    }
+    if (saveSelectedBtn) {
+      saveSelectedBtn.addEventListener("click", function () { save(true); });
+    }
+    if (saveAllBtn) {
+      saveAllBtn.addEventListener("click", function () { save(false); });
+    }
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) {
+        close();
+      }
+    });
+  }
+
   function init() {
     initSidebarDrawer();
     initTenantSelector();
@@ -818,6 +1038,7 @@
     initWhatsAppConnectedToast();
     initTenantPermanentDelete();
     initTodoEditor();
+    initSotBulkUpload();
   }
 
   if (document.readyState === "loading") {

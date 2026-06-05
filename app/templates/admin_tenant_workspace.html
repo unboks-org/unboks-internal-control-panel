@@ -449,8 +449,19 @@
       </div>
 
       <div class="agent-block agent-block-wide">
-        <h4>Source of Truth overrides</h4>
-        <p class="muted compact-note">Add tenant facts {{ effective_agent_name }} should treat as authoritative.</p>
+        <div class="agent-sot-heading">
+          <div>
+            <h4>Source of Truth overrides</h4>
+            <p class="muted compact-note">Add tenant facts {{ effective_agent_name }} should treat as authoritative.</p>
+          </div>
+          <button
+            type="button"
+            class="button-primary sot-bulk-open"
+            data-sot-bulk-open
+            data-tenant-id="{{ tenant.id }}">
+            BULK UPLOAD
+          </button>
+        </div>
         <form method="post" action="/admin/tenants/{{ tenant.id }}/sot" class="agent-sot-form">
           <div class="agent-sot-row">
             <label class="agent-form-field">
@@ -502,6 +513,35 @@
           <p class="muted compact-note">No ICP Source of Truth overrides yet.</p>
         {% endif %}
       </div>
+    </div>
+
+    <div class="sot-bulk-modal" data-sot-bulk-modal hidden>
+      <div class="sot-bulk-backdrop" data-sot-bulk-close></div>
+      <section class="sot-bulk-dialog" role="dialog" aria-modal="true" aria-labelledby="sot-bulk-title">
+        <div class="sot-bulk-dialog-header">
+          <div>
+            <p class="eyebrow">Source of Truth</p>
+            <h3 id="sot-bulk-title">Bulk upload</h3>
+            <p class="muted compact-note">Upload a .txt file. Review every extracted entry before saving.</p>
+          </div>
+          <button type="button" class="text-button" data-sot-bulk-close>Close</button>
+        </div>
+        <div class="sot-bulk-upload-panel">
+          <label class="agent-form-field">
+            <span>TXT file</span>
+            <input type="file" accept=".txt,text/plain" data-sot-bulk-file>
+          </label>
+          <button type="button" class="button-primary" data-sot-bulk-extract>Analyze file</button>
+        </div>
+        <div class="sot-bulk-status" data-sot-bulk-status aria-live="polite"></div>
+        <div class="sot-bulk-meta" data-sot-bulk-meta hidden></div>
+        <div class="sot-bulk-preview" data-sot-bulk-preview hidden></div>
+        <div class="sot-bulk-actions" data-sot-bulk-actions hidden>
+          <button type="button" class="button-secondary" data-sot-bulk-cancel>Cancel</button>
+          <button type="button" class="button-secondary" data-sot-bulk-save-selected>Save selected</button>
+          <button type="button" class="button-primary" data-sot-bulk-save-all>Save all non-duplicates</button>
+        </div>
+      </section>
     </div>
 
     <div class="agent-replies">

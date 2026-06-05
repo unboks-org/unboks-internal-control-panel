@@ -972,6 +972,121 @@ def admin_delete_sot_entry(
     )
 
 
+@router.post("/admin/source-of-truth/bulk-extract")
+async def admin_bulk_extract_sot(
+    request: Request,
+    tenant_id: str = Form(default=""),
+    file: UploadFile = File(...),
+) -> dict:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return {"success": False, "error": "Admin authentication required."}
+    tenant_id = tenant_id.strip()
+    if get_tenant(tenant_id) is None:
+        return {"success": False, "error": "Tenant not found."}
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".txt"):
+        return {"success": False, "error": "Upload a .txt file for this first version."}
+    raw = await file.read()
+    if len(raw) > 150_000:
+        return {"success": False, "error": "The .txt file is too large for this first version."}
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1", errors="replace")
+    from app import icp_overrides
+    from app import sot_bulk
+
+    try:
+        extracted = sot_bulk.extract_sot_entries(
+            text,
+            existing_entries=icp_overrides.sot_entries_for_tenant(tenant_id),
+        )
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    return {
+        "success": True,
+        "tenantId": tenant_id,
+        **extracted,
+    }
+
+
+@router.post("/admin/source-of-truth/bulk-save")
+async def admin_bulk_save_sot(
+    request: Request,
+) -> dict:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return {"success": False, "error": "Admin authentication required."}
+    payload = await request.json()
+    tenant_id = str(payload.get("tenantId") or "").strip()
+    if get_tenant(tenant_id) is None:
+        return {"success": False, "error": "Tenant not found."}
+    raw_entries = payload.get("entries")
+    if not isinstance(raw_entries, list):
+        return {"success": False, "error": "No Source of Truth entries were submitted."}
+
+    from app import icp_overrides
+    from app import sot_bulk
+
+    saved: list[dict] = []
+    skipped: list[dict] = []
+    existing = icp_overrides.sot_entries_for_tenant(tenant_id)
+    allowed_categories = set(sot_bulk.CATEGORIES)
+
+    for raw in raw_entries[: sot_bulk.MAX_ENTRIES]:
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("selected") is False:
+            skipped.append({"title": str(raw.get("title") or "Untitled"), "reason": "not selected"})
+            continue
+        title = str(raw.get("title") or "").strip()
+        category = str(raw.get("category") or "general").strip().lower()
+        fact = str(raw.get("fact") or raw.get("content") or "").strip()
+        if not title or not fact:
+            skipped.append({"title": title or "Untitled", "reason": "missing title or fact"})
+            continue
+        if category not in allowed_categories:
+            category = "general"
+        duplicate = sot_bulk.duplicate_title(title, fact, existing)
+        if duplicate:
+            skipped.append({"title": title, "reason": f"possible duplicate of {duplicate}"})
+            continue
+        conflicts = dangerous_candidate_conflicts(
+            tenant_id,
+            name=f"Pending bulk Source of Truth entry: {title}",
+            text=fact,
+            priority="sot_company_facts",
+            agent_name=_effective_agent_name(tenant_id),
+        )
+        if conflicts:
+            skipped.append({"title": title, "reason": f"prompt conflict: {conflicts[0].title}"})
+            continue
+        try:
+            entry = icp_overrides.add_sot_entry(
+                tenant_id,
+                title=title,
+                category=category,
+                content=fact,
+                updated_by="nr3-bulk-upload",
+            )
+        except ValueError as exc:
+            skipped.append({"title": title, "reason": str(exc)})
+            continue
+        saved.append({"id": entry["id"], "title": entry["title"], "category": entry["category"]})
+        existing = [entry, *existing]
+
+    return {
+        "success": True,
+        "tenantId": tenant_id,
+        "saved": saved,
+        "skipped": skipped,
+        "savedCount": len(saved),
+    }
+
+
 @router.post("/admin/tenants/{tenant_id}/notes")
 def admin_add_tenant_note(
     request: Request,
