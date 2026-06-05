@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app import channel_connections
 from app.main import app
+from app.provisioning import AutoProvisionResult
 from app.zernio import ZernioAccountSummary
 
 
@@ -221,6 +222,48 @@ def test_repair_whatsapp_allowlist_from_verified_connection(monkeypatch, tmp_pat
     )
     assert client_json["channel_account_allowlist"]["mode"] == "strict"
     assert client_json["channel_account_allowlist"]["zernio_accounts"] == ["account_1"]
+
+
+def test_repair_whatsapp_allowlist_queues_host_action_when_client_root_readonly(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="connected",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_1",
+        phone_number_id="phone_1",
+        display_phone_number="+599 9 694 5527",
+        waba_id="waba_1",
+        last_request_id="cr_connected",
+    )
+    seen = {}
+
+    def fake_write(*args, **kwargs):
+        return False
+
+    def fake_queue(**kwargs):
+        seen.update(kwargs)
+        _set_allowlist(tenants_root)
+        return AutoProvisionResult(status="succeeded", message="allowlist repaired")
+
+    monkeypatch.setattr("app.routes.connect.update_tenant_channel_account_allowlist", fake_write)
+    monkeypatch.setattr("app.routes.connect.queue_tenant_host_action", fake_queue)
+
+    response = client.post(
+        "/internal/api/tenants/lawyer/channels/whatsapp/repair-allowlist"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "connected_healthy"
+    assert seen["action"] == "repair_whatsapp_allowlist"
+    assert seen["slug"] == "lawyer"
+    assert seen["zernio_account_id"] == "account_1"
 
 
 def test_whatsapp_status_returns_failed(monkeypatch, tmp_path):

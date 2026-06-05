@@ -23,6 +23,7 @@ from app.emailer import (
     smtp_is_configured,
 )
 from app.security import is_authenticated
+from app.provisioning import queue_tenant_host_action
 from app.tenants import (
     get_tenant,
     get_tenant_client_data,
@@ -472,19 +473,27 @@ def repair_whatsapp_allowlist(tenant_id: str, request: Request) -> dict:
             detail="WhatsApp allowlist cannot be repaired from the current state.",
         )
 
+    allowlist_note = (
+        "Nr3 WhatsApp repair: strict Zernio account allowlist restored from "
+        f"verified connected account {connection.display_phone_number or connection.zernio_account_id}."
+    )
     written = update_tenant_channel_account_allowlist(
         tenant.id,
         zernio_account_id=connection.zernio_account_id,
-        note=(
-            "Nr3 WhatsApp repair: strict Zernio account allowlist restored from "
-            f"verified connected account {connection.display_phone_number or connection.zernio_account_id}."
-        ),
+        note=allowlist_note,
     )
     if not written:
-        raise HTTPException(
-            status_code=500,
-            detail="Could not write strict allowlist to tenant client.json.",
+        result = queue_tenant_host_action(
+            slug=tenant.id,
+            action="repair_whatsapp_allowlist",
+            zernio_account_id=connection.zernio_account_id,
+            allowlist_note=allowlist_note,
         )
+        if result.status != "succeeded":
+            raise HTTPException(
+                status_code=500,
+                detail=result.message or "Could not write strict allowlist to tenant client.json.",
+            )
 
     audit_log.record_event(
         tenant_id=tenant.id,

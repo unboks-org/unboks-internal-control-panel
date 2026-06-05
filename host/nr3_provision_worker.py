@@ -370,6 +370,39 @@ def update_dashboard_password(tenant_dir: Path, slug: str, new_password: str) ->
     env_path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
 
 
+def repair_whatsapp_allowlist(
+    tenant_dir: Path,
+    *,
+    zernio_account_id: str,
+    note: str,
+) -> None:
+    account_id = str(zernio_account_id or "").strip()
+    if not account_id:
+        raise RuntimeError("Zernio account id is required for allowlist repair.")
+    client_path = tenant_dir / "config" / "client.json"
+    data = json.loads(client_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise RuntimeError(f"client.json is not an object: {client_path}")
+    existing = data.get("channel_account_allowlist")
+    accounts: list[str] = []
+    if isinstance(existing, dict):
+        raw_accounts = existing.get("zernio_accounts")
+        if isinstance(raw_accounts, list):
+            accounts = [str(item).strip() for item in raw_accounts if str(item).strip()]
+    if account_id not in accounts:
+        accounts.append(account_id)
+    data["channel_account_allowlist"] = {
+        "mode": "strict",
+        "zernio_accounts": accounts,
+        "notes": str(note or "").strip()
+        or "Strict account allowlist maintained by Nr3 WhatsApp connection state.",
+    }
+    client_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def backup_tenant_before_delete(slug: str, tenant_dir: Path) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     backup_dir = DELETED_TENANTS_ROOT / f"{slug}-{stamp}"
@@ -606,7 +639,13 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
     if action == "restore_tenant_runtime":
         process_restore_tenant_runtime(job_id, job, slug)
         return
-    if action not in {"suspend_tenant", "unpause_tenant", "reset_dashboard_password", "restart_tenant"}:
+    if action not in {
+        "suspend_tenant",
+        "unpause_tenant",
+        "reset_dashboard_password",
+        "restart_tenant",
+        "repair_whatsapp_allowlist",
+    }:
         raise RuntimeError(f"Unsupported tenant action: {action!r}")
 
     tenant_dir = CLIENTS_ROOT / slug
@@ -629,6 +668,15 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
         else:
             details.append(f"container wtyj-{slug} was not running; files updated only")
         message = f"Dashboard password reset for tenant {slug}."
+    elif action == "repair_whatsapp_allowlist":
+        account_id = str(job.get("zernio_account_id") or "").strip()
+        repair_whatsapp_allowlist(
+            tenant_dir,
+            zernio_account_id=account_id,
+            note=str(job.get("allowlist_note") or ""),
+        )
+        details.append("client.json strict channel_account_allowlist repaired")
+        message = f"WhatsApp strict allowlist repaired for tenant {slug}."
     elif action == "restart_tenant":
         run(["docker", "compose", "up", "-d", "--force-recreate"], cwd=tenant_dir)
         details.append(f"docker compose up -d --force-recreate completed for {slug}")

@@ -714,31 +714,34 @@ def update_tenant_channel_account_allowlist(
     if not client_path.exists():
         return False
 
-    with exclusive_file_lock(client_path.with_suffix(client_path.suffix + ".lock")):
-        try:
-            data = json.loads(client_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
-            data = {}
-        if not isinstance(data, dict):
-            data = {}
-        existing = data.get("channel_account_allowlist")
-        accounts: list[str] = []
-        if isinstance(existing, dict):
-            raw_accounts = existing.get("zernio_accounts")
-            if isinstance(raw_accounts, list):
-                accounts = [str(item).strip() for item in raw_accounts if str(item).strip()]
-        if account_id not in accounts:
-            accounts.append(account_id)
-        data["channel_account_allowlist"] = {
-            "mode": "strict",
-            "zernio_accounts": accounts,
-            "notes": note.strip()
-            or "Strict account allowlist maintained by Nr3 WhatsApp connection state.",
-        }
-        client_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+    try:
+        with exclusive_file_lock(client_path.with_suffix(client_path.suffix + ".lock")):
+            try:
+                data = json.loads(client_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            existing = data.get("channel_account_allowlist")
+            accounts: list[str] = []
+            if isinstance(existing, dict):
+                raw_accounts = existing.get("zernio_accounts")
+                if isinstance(raw_accounts, list):
+                    accounts = [str(item).strip() for item in raw_accounts if str(item).strip()]
+            if account_id not in accounts:
+                accounts.append(account_id)
+            data["channel_account_allowlist"] = {
+                "mode": "strict",
+                "zernio_accounts": accounts,
+                "notes": note.strip()
+                or "Strict account allowlist maintained by Nr3 WhatsApp connection state.",
+            }
+            client_path.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+    except OSError:
+        return False
     return True
 
 
