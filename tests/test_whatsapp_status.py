@@ -16,6 +16,16 @@ def _write_tenant(root, slug="lawyer", name="Lawyer"):
     )
 
 
+def _set_allowlist(root, slug="lawyer", account_id="account_1"):
+    path = root / slug / "config" / "client.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["channel_account_allowlist"] = {
+        "mode": "strict",
+        "zernio_accounts": [account_id],
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
 def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
     monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret-32-bytes-long-abc")
@@ -67,13 +77,16 @@ def test_whatsapp_status_returns_not_connected(monkeypatch, tmp_path):
     response = _status(client)
 
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert payload == {
         "success": True,
         "tenantId": "lawyer",
         "channel": "whatsapp",
         "provider": "zernio",
         "status": "not_connected",
+        "label": "Not connected",
         "connected": False,
+        "providerConnected": False,
         "displayPhoneNumber": None,
         "phoneNumberId": None,
         "providerAccountId": None,
@@ -81,6 +94,15 @@ def test_whatsapp_status_returns_not_connected(monkeypatch, tmp_path):
         "connectedAt": None,
         "lastUpdatedAt": None,
         "lastError": None,
+        "allowlist": {
+            "ok": False,
+            "label": "Missing strict allowlist",
+            "summary": "No channel_account_allowlist found in client.json.",
+            "accounts": [],
+        },
+        "repairAvailable": False,
+        "actionLabel": "Generate new WhatsApp connection link",
+        "summary": "Generate a secure link when the client is ready to authorize WhatsApp.",
     }
 
 
@@ -101,7 +123,7 @@ def test_whatsapp_status_returns_pending(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "pending"
+    assert payload["status"] == "connection_pending"
     assert payload["connected"] is False
     assert payload["providerAccountId"] == "account_1"
     assert payload["zernioProfileId"] == "profile_lawyer"
@@ -110,6 +132,38 @@ def test_whatsapp_status_returns_pending(monkeypatch, tmp_path):
 
 
 def test_whatsapp_status_returns_connected(monkeypatch, tmp_path):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    _set_allowlist(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="connected",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_1",
+        phone_number_id="phone_1",
+        display_phone_number="+599 9 694 5527",
+        waba_id="waba_1",
+        last_request_id="cr_connected",
+    )
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "connected_healthy"
+    assert payload["connected"] is True
+    assert payload["providerConnected"] is True
+    assert payload["displayPhoneNumber"] == "+599 9 694 5527"
+    assert payload["phoneNumberId"] == "phone_1"
+    assert payload["providerAccountId"] == "account_1"
+    assert payload["zernioProfileId"] == "profile_lawyer"
+    assert payload["connectedAt"]
+    assert payload["lastUpdatedAt"]
+
+
+def test_whatsapp_status_requires_allowlist_for_healthy_connected(monkeypatch, tmp_path):
     tenants_root = tmp_path / "tenants"
     _write_tenant(tenants_root)
     client = _client(monkeypatch, tmp_path)
@@ -129,14 +183,44 @@ def test_whatsapp_status_returns_connected(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "connected"
+    assert payload["status"] == "needs_repair_missing_allowlist"
+    assert payload["connected"] is False
+    assert payload["providerConnected"] is True
+    assert payload["repairAvailable"] is True
+    assert payload["allowlist"]["ok"] is False
+
+
+def test_repair_whatsapp_allowlist_from_verified_connection(monkeypatch, tmp_path):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="connected",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_1",
+        phone_number_id="phone_1",
+        display_phone_number="+599 9 694 5527",
+        waba_id="waba_1",
+        last_request_id="cr_connected",
+    )
+
+    response = client.post(
+        "/internal/api/tenants/lawyer/channels/whatsapp/repair-allowlist"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "connected_healthy"
     assert payload["connected"] is True
-    assert payload["displayPhoneNumber"] == "+599 9 694 5527"
-    assert payload["phoneNumberId"] == "phone_1"
-    assert payload["providerAccountId"] == "account_1"
-    assert payload["zernioProfileId"] == "profile_lawyer"
-    assert payload["connectedAt"]
-    assert payload["lastUpdatedAt"]
+    client_json = json.loads(
+        (tenants_root / "lawyer" / "config" / "client.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert client_json["channel_account_allowlist"]["mode"] == "strict"
+    assert client_json["channel_account_allowlist"]["zernio_accounts"] == ["account_1"]
 
 
 def test_whatsapp_status_returns_failed(monkeypatch, tmp_path):
@@ -157,7 +241,7 @@ def test_whatsapp_status_returns_failed(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "failed"
+    assert payload["status"] == "needs_reconnect_authorization_failed"
     assert payload["connected"] is False
     assert payload["lastError"] == "Client denied authorization."
 
@@ -204,7 +288,7 @@ def test_whatsapp_status_reconciles_connected_zernio_account(monkeypatch, tmp_pa
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "connected"
+    assert payload["status"] == "connected_healthy"
     assert payload["connected"] is True
     assert payload["providerAccountId"] == "account_1"
     assert payload["displayPhoneNumber"] == "+599 9 694 5527"

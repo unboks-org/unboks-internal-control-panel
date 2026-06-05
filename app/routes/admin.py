@@ -81,6 +81,12 @@ from app.tenants import (
     whatsapp_billing_policy,
     RESERVED_SLUGS,
 )
+from app.whatsapp_health import (
+    build_whatsapp_health,
+    redacted_account_ids,
+    whatsapp_allowlist_health,
+    whatsapp_health_to_template,
+)
 
 import json
 import logging
@@ -141,163 +147,27 @@ def _sidebar_tenants() -> tuple[Tenant, ...]:
 
 
 def _tenant_whatsapp_statuses(tenants: tuple[Tenant, ...]) -> dict[str, dict]:
-    from app import channel_connections
-
-    statuses: dict[str, dict] = {}
-    pending_request_statuses = {
-        "pending",
-        "link_generated",
-        "auth_started",
-        "callback_received",
-        "pending_number",
+    return {
+        tenant.id: whatsapp_health_to_template(build_whatsapp_health(tenant.id))
+        for tenant in tenants
     }
-    for tenant in tenants:
-        connection = channel_connections.get_tenant_channel_connection(tenant.id)
-        latest = channel_connections.get_latest_connection_request_for_tenant(
-            tenant.id
-        )
-        if connection and connection.status == "connected":
-            allowlist = _whatsapp_allowlist_status(
-                tenant.id,
-                connection.zernio_account_id or "",
-            )
-            if not allowlist["ok"]:
-                statuses[tenant.id] = {
-                    "status": "connected_unprotected",
-                    "label": f"Critical: {allowlist['label']}",
-                    "badge_class": "tenant-wa-critical",
-                    "chip_class": "status-error",
-                    "visible": True,
-                    "phone": connection.display_phone_number or "",
-                    "allowlist": allowlist,
-                }
-                continue
-            statuses[tenant.id] = {
-                "status": "connected",
-                "label": "Connected",
-                "badge_class": "tenant-wa-connected",
-                "chip_class": "status-ok",
-                "visible": True,
-                "phone": connection.display_phone_number or "",
-                "allowlist": allowlist,
-            }
-        elif (
-            (connection and connection.status == "pending")
-            or (latest and latest.status in pending_request_statuses)
-        ):
-            statuses[tenant.id] = {
-                "status": "pending",
-                "label": "Awaiting activation",
-                "badge_class": "tenant-wa-pending",
-                "chip_class": "status-warn",
-                "visible": True,
-                "phone": (
-                    connection.display_phone_number
-                    if connection and connection.display_phone_number
-                    else ""
-                ),
-                "allowlist": _whatsapp_allowlist_status(tenant.id, ""),
-            }
-        elif get_tenant_client_data(tenant.id).get("whatsapp_connect_token"):
-            statuses[tenant.id] = {
-                "status": "awaiting_activation",
-                "label": "Awaiting activation",
-                "badge_class": "tenant-wa-pending",
-                "chip_class": "status-warn",
-                "visible": True,
-                "phone": "",
-                "allowlist": _whatsapp_allowlist_status(tenant.id, ""),
-            }
-        elif connection and connection.status == "failed":
-            statuses[tenant.id] = {
-                "status": "failed",
-                "label": "Failed",
-                "badge_class": "tenant-wa-failed",
-                "chip_class": "status-error",
-                "visible": True,
-                "phone": connection.display_phone_number or "",
-                "allowlist": _whatsapp_allowlist_status(tenant.id, ""),
-            }
-        else:
-            statuses[tenant.id] = {
-                "status": "not_connected",
-                "label": "Not connected",
-                "badge_class": "tenant-wa-muted",
-                "chip_class": "status-unknown",
-                "visible": False,
-                "phone": "",
-                "allowlist": _whatsapp_allowlist_status(tenant.id, ""),
-            }
-    return statuses
 
 
 def _whatsapp_allowlist_status(
     tenant_id: str,
     connected_account_id: str,
 ) -> dict[str, object]:
-    data = get_tenant_client_data(tenant_id)
-    raw = data.get("channel_account_allowlist")
-    if not isinstance(raw, dict):
-        return {
-            "ok": False,
-            "label": "Missing strict allowlist",
-            "summary": "No channel_account_allowlist found in client.json.",
-            "accounts": [],
-        }
-    mode = str(raw.get("mode") or "").strip().lower()
-    raw_accounts = raw.get("zernio_accounts")
-    accounts = (
-        [str(item).strip() for item in raw_accounts if str(item).strip()]
-        if isinstance(raw_accounts, list)
-        else []
-    )
-    wildcard = any(
-        item.lower() in {"*", "all", "any", "wildcard"} for item in accounts
-    )
-    if mode != "strict":
-        return {
-            "ok": False,
-            "label": "Allowlist is not strict",
-            "summary": "channel_account_allowlist.mode must be strict.",
-            "accounts": _redacted_account_ids(accounts),
-        }
-    if not accounts:
-        return {
-            "ok": False,
-            "label": "Allowlist is empty",
-            "summary": "Strict allowlist has no Zernio account ids.",
-            "accounts": [],
-        }
-    if wildcard:
-        return {
-            "ok": False,
-            "label": "Allowlist is permissive",
-            "summary": "Strict allowlist cannot contain wildcard account ids.",
-            "accounts": _redacted_account_ids(accounts),
-        }
-    if connected_account_id and connected_account_id not in accounts:
-        return {
-            "ok": False,
-            "label": "Connected account not allowlisted",
-            "summary": "Connected Zernio account id is not present in strict allowlist.",
-            "accounts": _redacted_account_ids(accounts),
-        }
+    allowlist = whatsapp_allowlist_health(tenant_id, connected_account_id)
     return {
-        "ok": True,
-        "label": "Strict allowlist",
-        "summary": "Strict Zernio account allowlist is active.",
-        "accounts": _redacted_account_ids(accounts),
+        "ok": allowlist.ok,
+        "label": allowlist.label,
+        "summary": allowlist.summary,
+        "accounts": allowlist.accounts,
     }
 
 
 def _redacted_account_ids(accounts: list[str]) -> list[str]:
-    redacted: list[str] = []
-    for account in accounts[:4]:
-        if len(account) <= 10:
-            redacted.append(account[:2] + "..." if account else "")
-        else:
-            redacted.append(f"{account[:6]}...{account[-4:]}")
-    return redacted
+    return redacted_account_ids(accounts)
 
 
 @router.get("/", include_in_schema=False)

@@ -18,6 +18,16 @@ def _write_tenant(root, slug="test", name="Test"):
     )
 
 
+def _set_allowlist(root, slug="test", account_id="account_test"):
+    path = root / slug / "config" / "client.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["channel_account_allowlist"] = {
+        "mode": "strict",
+        "zernio_accounts": [account_id],
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
 def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
@@ -33,6 +43,7 @@ def _signature(body: bytes, secret: str = "test-webhook-secret") -> str:
 def test_zernio_webhook_router_forwards_to_connected_tenant(monkeypatch, tmp_path):
     tenants_root = tmp_path / "tenants"
     _write_tenant(tenants_root)
+    _set_allowlist(tenants_root)
     client = _client(monkeypatch, tmp_path)
     channel_connections.upsert_tenant_channel_connection(
         tenant_id="test",
@@ -79,6 +90,44 @@ def test_zernio_webhook_router_forwards_to_connected_tenant(monkeypatch, tmp_pat
     assert seen["tenant_id"] == "test"
     assert json.loads(seen["body"]) == payload
     assert seen["signature"] == _signature(body)
+
+
+def test_zernio_webhook_router_rejects_connected_account_without_allowlist(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="test",
+        status="connected",
+        zernio_profile_id="profile_test",
+        zernio_account_id="account_test",
+        display_phone_number="+599 9 694 5527",
+    )
+
+    async def fake_forward(*, tenant_id, body, signature, content_type):
+        raise AssertionError("Webhook must not forward without strict allowlist")
+
+    monkeypatch.setattr(
+        "app.routes.connect._forward_zernio_webhook_to_tenant",
+        fake_forward,
+    )
+    body = json.dumps(
+        {"event": "message.received", "data": {"accountId": "account_test"}}
+    ).encode("utf-8")
+
+    response = client.post(
+        "/internal/api/zernio/webhook-router",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Zernio-Signature": _signature(body),
+        },
+    )
+
+    assert response.status_code == 202
 
 
 def test_zernio_webhook_router_accepts_unmapped_account(monkeypatch, tmp_path):

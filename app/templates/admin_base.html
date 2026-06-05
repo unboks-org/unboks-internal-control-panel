@@ -104,7 +104,7 @@
                         class="tenant-whatsapp-badge {{ wa_status.badge_class }}"
                         {% if wa_status.allowlist %}title="{{ wa_status.allowlist.summary }}{% if wa_status.allowlist.accounts %} Accounts: {{ wa_status.allowlist.accounts | join(', ') }}{% endif %}"{% endif %}
                       >
-                        WhatsApp: {{ wa_status.label }}{% if wa_status.status == 'connected' %} &#10003; &middot; Strict{% endif %}
+                        WhatsApp: {{ wa_status.label }}{% if wa_status.status in ['connected', 'connected_healthy'] %} &#10003; &middot; Strict{% endif %}
                       </span>
                     {% endif %}
                   </span>

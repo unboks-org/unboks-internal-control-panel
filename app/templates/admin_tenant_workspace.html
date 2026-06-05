@@ -28,7 +28,7 @@
     </div>
   {% endif %}
 
-  {% if active_whatsapp_status and active_whatsapp_status.status == 'connected' %}
+  {% if active_whatsapp_status and active_whatsapp_status.status in ['connected', 'connected_healthy'] %}
     <div
       class="whatsapp-connected-toast"
       data-wa-connected-toast
@@ -60,7 +60,7 @@
           class="tenant-whatsapp-badge tenant-whatsapp-header {{ active_whatsapp_status.badge_class }}"
           {% if active_whatsapp_status.allowlist %}title="{{ active_whatsapp_status.allowlist.summary }}{% if active_whatsapp_status.allowlist.accounts %} Accounts: {{ active_whatsapp_status.allowlist.accounts | join(', ') }}{% endif %}"{% endif %}
         >
-          WhatsApp: {{ active_whatsapp_status.label }}{% if active_whatsapp_status.status == 'connected' %} &#10003; &middot; Strict{% endif %}
+          WhatsApp: {{ active_whatsapp_status.label }}{% if active_whatsapp_status.status in ['connected', 'connected_healthy'] %} &#10003; &middot; Strict{% endif %}
         </span>
       {% endif %}
       <span class="status-chip status-{{ 'ok' if tenant.status == 'active' else 'unknown' }}">{{ tenant.status }}</span>
@@ -172,6 +172,7 @@
       <div class="whatsapp-connect-actions">
         <button type="button" class="button-secondary" data-wa-start>Generate Authorization Link</button>
         <button type="button" data-wa-send data-wa-send-ready="false">Send Link to Client</button>
+        <button type="button" class="button-secondary" data-wa-repair hidden>Repair allowlist</button>
         <button type="button" class="button-secondary" data-wa-refresh>Refresh status</button>
       </div>
       <div class="whatsapp-auth-link" data-wa-link-box hidden>
@@ -195,7 +196,7 @@
             </p>
           </div>
           <span class="status-chip status-{{ 'warn' if whatsapp_billing_policy.status == 'enabled' else 'unknown' }}">
-            Templates {{ 'enabled' if whatsapp_billing_policy.outbound_templates_enabled else 'disabled' }}
+            Templates {{ 'enabled' if whatsapp_billing_policy.outbound_templates_enabled else 'off' }}
           </span>
         </div>
         <dl class="whatsapp-policy-meta">
@@ -240,7 +241,7 @@
           </label>
           <label class="whatsapp-policy-notes">
             <span>Operator notes</span>
-            <textarea name="notes" rows="2" placeholder="Example: Templates remain disabled until tenant billing policy is signed.">{{ whatsapp_billing_policy.notes }}</textarea>
+            <textarea name="notes" rows="2" placeholder="Example: Templates remain off until tenant billing policy is signed.">{{ whatsapp_billing_policy.notes }}</textarea>
           </label>
           <button type="submit" class="button-secondary">Save outbound policy</button>
           {% if whatsapp_billing_policy.updated_at %}

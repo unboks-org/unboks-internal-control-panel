@@ -36,7 +36,7 @@ def test_workspace_renders_whatsapp_business_connection_card(client):
     assert "Refresh status" in response.text
     assert "Client authorization link" in response.text
     assert "Billing & outbound policy" in response.text
-    assert "Templates disabled" in response.text
+    assert "Templates off" in response.text
     assert "Allow outbound WhatsApp templates for this tenant" in response.text
     assert "Allow campaign / high-volume outbound messaging" in response.text
     assert "Zernio connected accounts, Meta WhatsApp charges" in response.text

@@ -30,6 +30,7 @@ from app.tenants import (
     tenant_contact_details,
     update_tenant_channel_account_allowlist,
 )
+from app.whatsapp_health import build_whatsapp_health, whatsapp_health_to_api
 from app.zernio import (
     ZernioAccountSummary,
     ZernioAPIError,
@@ -439,41 +440,63 @@ def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
     connection = channel_connections.get_tenant_channel_connection(tenant.id)
     if connection is None or connection.status in {"pending", "not_connected"}:
         connection = _sync_whatsapp_connection_from_zernio(tenant.id) or connection
-    if connection is None:
-        zernio_profile_id = channel_connections.get_tenant_zernio_profile_id(
-            tenant.id
-        )
-        return {
-            "success": True,
-            "tenantId": tenant.id,
-            "channel": "whatsapp",
-            "provider": "zernio",
-            "status": "not_connected",
-            "connected": False,
-            "displayPhoneNumber": None,
-            "phoneNumberId": None,
-            "providerAccountId": None,
-            "zernioProfileId": zernio_profile_id,
-            "connectedAt": None,
-            "lastUpdatedAt": None,
-            "lastError": None,
-        }
+    return whatsapp_health_to_api(build_whatsapp_health(tenant.id), tenant.id)
 
-    return {
-        "success": True,
-        "tenantId": tenant.id,
-        "channel": connection.channel,
-        "provider": connection.provider,
-        "status": connection.status,
-        "connected": connection.status == "connected",
-        "displayPhoneNumber": connection.display_phone_number,
-        "phoneNumberId": connection.phone_number_id,
-        "providerAccountId": connection.zernio_account_id,
-        "zernioProfileId": connection.zernio_profile_id,
-        "connectedAt": connection.connected_at,
-        "lastUpdatedAt": connection.updated_at,
-        "lastError": connection.last_error,
-    }
+
+@router.post("/tenants/{tenant_id}/channels/whatsapp/repair-allowlist")
+def repair_whatsapp_allowlist(tenant_id: str, request: Request) -> dict:
+    """Repair strict runtime allowlist from the verified Nr3 connection record."""
+    _require_operator_json(request)
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found.")
+
+    connection = channel_connections.get_tenant_channel_connection(tenant.id)
+    if connection is None or connection.status != "connected":
+        raise HTTPException(
+            status_code=409,
+            detail="No verified connected Zernio account found for this tenant.",
+        )
+    if not connection.zernio_account_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Connected WhatsApp state has no provider account id.",
+        )
+
+    health = build_whatsapp_health(tenant.id)
+    if health.connected:
+        return whatsapp_health_to_api(health, tenant.id)
+    if not health.repair_available:
+        raise HTTPException(
+            status_code=409,
+            detail="WhatsApp allowlist cannot be repaired from the current state.",
+        )
+
+    written = update_tenant_channel_account_allowlist(
+        tenant.id,
+        zernio_account_id=connection.zernio_account_id,
+        note=(
+            "Nr3 WhatsApp repair: strict Zernio account allowlist restored from "
+            f"verified connected account {connection.display_phone_number or connection.zernio_account_id}."
+        ),
+    )
+    if not written:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not write strict allowlist to tenant client.json.",
+        )
+
+    audit_log.record_event(
+        tenant_id=tenant.id,
+        action="whatsapp.allowlist_repaired",
+        result="ok",
+        safe_summary="Strict WhatsApp/Zernio allowlist repaired from verified connection.",
+        metadata={
+            "account_id": connection.zernio_account_id,
+            "phone_number_id": connection.phone_number_id,
+        },
+    )
+    return whatsapp_health_to_api(build_whatsapp_health(tenant.id), tenant.id)
 
 
 @router.post("/tenants/{tenant_id}/channels/whatsapp/connect/send-link")
@@ -884,6 +907,20 @@ def whatsapp_connection_callback(request: Request):
             last_request_id=connection_request.id,
             last_error=None,
         )
+        allowlist_written = update_tenant_channel_account_allowlist(
+            tenant_id,
+            zernio_account_id=zernio_account_id,
+            note=(
+                "Nr3 WhatsApp connection: strict Zernio account allowlist restored "
+                "from signed Zernio callback."
+            ),
+        )
+        if not allowlist_written:
+            logger.warning(
+                "whatsapp_callback_allowlist_not_written tenant=%s account=%s",
+                tenant_id,
+                zernio_account_id[:24],
+            )
     logger.info(
         "whatsapp_connect_callback_connected tenant=%s request_id=%s",
         tenant_id,
@@ -948,7 +985,23 @@ def _tenant_id_for_zernio_account(account_id: str) -> str | None:
         account_id
     )
     if connection:
-        return connection.tenant_id
+        allowlist = (
+            get_tenant_client_data(connection.tenant_id).get("channel_account_allowlist")
+            or {}
+        )
+        allowed = (
+            allowlist.get("zernio_accounts")
+            if isinstance(allowlist, dict) and allowlist.get("mode") == "strict"
+            else []
+        )
+        if account_id in {str(item).strip() for item in allowed or []}:
+            return connection.tenant_id
+        logger.warning(
+            "zernio_webhook_router_connected_account_not_allowlisted tenant=%s account=%s",
+            connection.tenant_id,
+            account_id[:24],
+        )
+        return None
     for tenant in list_tenants():
         allowlist = (
             get_tenant_client_data(tenant.id).get("channel_account_allowlist") or {}

@@ -295,6 +295,7 @@
     var accountEl = card.querySelector("[data-wa-account]");
     var startBtn = card.querySelector("[data-wa-start]");
     var sendBtn = card.querySelector("[data-wa-send]");
+    var repairBtn = card.querySelector("[data-wa-repair]");
     var refreshBtn = card.querySelector("[data-wa-refresh]");
     var linkBox = card.querySelector("[data-wa-link-box]");
     var linkInput = card.querySelector("[data-wa-auth-url]");
@@ -382,21 +383,33 @@
       var account = payload.providerAccountId || "Not connected";
       if (phoneEl) phoneEl.textContent = phone;
       if (accountEl) accountEl.textContent = account;
+      if (repairBtn) {
+        if (payload.repairAvailable) {
+          repairBtn.removeAttribute("hidden");
+          repairBtn.textContent = payload.actionLabel || "Repair allowlist";
+        } else {
+          repairBtn.setAttribute("hidden", "");
+        }
+      }
 
-      if (status === "connected") {
+      if (status === "connected" || status === "connected_healthy") {
         setStatus("Connected", "ok");
-        if (summaryEl) summaryEl.textContent = "WhatsApp is connected for this tenant.";
+        if (summaryEl) summaryEl.textContent = payload.summary || "WhatsApp is connected for this tenant.";
         if (phoneOptionsEl) phoneOptionsEl.setAttribute("hidden", "");
-      } else if (status === "pending") {
+      } else if (status === "needs_repair_missing_allowlist") {
+        setStatus("Needs repair", "error");
+        if (summaryEl) summaryEl.textContent = payload.summary || "WhatsApp is connected in Zernio but missing a strict allowlist.";
+        if (phoneOptionsEl) phoneOptionsEl.setAttribute("hidden", "");
+      } else if (status === "pending" || status === "connection_pending") {
         setStatus("Pending", "warn");
-        if (summaryEl) summaryEl.textContent = "Authorization was received. Select or confirm the phone number.";
+        if (summaryEl) summaryEl.textContent = payload.summary || "Authorization was received. Select or confirm the phone number.";
         loadPhoneOptions();
-      } else if (status === "failed") {
-        setStatus("Failed", "error");
-        if (summaryEl) summaryEl.textContent = payload.lastError || "WhatsApp connection failed.";
+      } else if (status === "failed" || status.indexOf("needs_reconnect") === 0 || status === "provider_error") {
+        setStatus("Needs reconnect", "error");
+        if (summaryEl) summaryEl.textContent = payload.summary || payload.lastError || "WhatsApp connection failed.";
       } else {
         setStatus("Not connected", "unknown");
-        if (summaryEl) summaryEl.textContent = "Generate a secure link when the client is ready to authorize WhatsApp.";
+        if (summaryEl) summaryEl.textContent = payload.summary || "Generate a secure link when the client is ready to authorize WhatsApp.";
         if (phoneOptionsEl) phoneOptionsEl.setAttribute("hidden", "");
       }
     }
@@ -456,6 +469,22 @@
         });
     }
 
+    function repairAllowlist() {
+      setFeedback("Repairing strict WhatsApp allowlist...");
+      if (repairBtn) repairBtn.disabled = true;
+      requestJson(endpoint("/channels/whatsapp/repair-allowlist"), { method: "POST" })
+        .then(function (payload) {
+          renderStatus(payload);
+          setFeedback("Strict allowlist repaired from verified Zernio account.");
+        })
+        .catch(function (error) {
+          setFeedback(error.message);
+        })
+        .finally(function () {
+          if (repairBtn) repairBtn.disabled = false;
+        });
+    }
+
     function selectPhone(phone) {
       setFeedback("Saving phone number...");
       requestJson(endpoint("/channels/whatsapp/phone-numbers/select"), {
@@ -480,6 +509,9 @@
     }
     if (sendBtn) {
       sendBtn.addEventListener("click", sendConnectionEmail);
+    }
+    if (repairBtn) {
+      repairBtn.addEventListener("click", repairAllowlist);
     }
     if (refreshBtn) {
       refreshBtn.addEventListener("click", loadStatus);

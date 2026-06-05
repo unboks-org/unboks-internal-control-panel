@@ -83,7 +83,7 @@ def test_whatsapp_authorization_flow_end_to_end_mocked(monkeypatch, tmp_path):
     status = client.get("/internal/api/tenants/lawyer/channels/whatsapp/status")
     assert status.status_code == 200
     status_payload = status.json()
-    assert status_payload["status"] == "connected"
+    assert status_payload["status"] == "connected_healthy"
     assert status_payload["connected"] is True
     assert status_payload["displayPhoneNumber"] == "+599 9 694 5527"
     assert status_payload["providerAccountId"] == "account_1"

@@ -57,7 +57,7 @@ def test_sidebar_shows_connected_whatsapp_badge(client, tmp_path):
     response = client.get("/admin/tenants/roberto")
 
     assert response.status_code == 200
-    assert "WhatsApp: Connected" in response.text
+    assert "WhatsApp: Connected / healthy" in response.text
     assert "Strict" in response.text
     assert "tenant-wa-connected" in response.text
     assert "tenant-wa-critical" not in response.text
@@ -79,7 +79,7 @@ def test_sidebar_shows_pending_when_link_generated(client):
     response = client.get("/admin/tenants/lawyer")
 
     assert response.status_code == 200
-    assert "WhatsApp: Awaiting activation" in response.text
+    assert "WhatsApp: Connection pending" in response.text
     assert "tenant-wa-pending" in response.text
     assert "data-wa-connected-toast" not in response.text
 
@@ -100,7 +100,7 @@ def test_sidebar_shows_awaiting_activation_for_tenant_connect_token(client, tmp_
     response = client.get("/admin/tenants/clinica-roberto")
 
     assert response.status_code == 200
-    assert "WhatsApp: Awaiting activation" in response.text
+    assert "WhatsApp: Connection pending" in response.text
     assert "tenant-wa-pending" in response.text
     assert "data-wa-connected-toast" not in response.text
 
@@ -128,7 +128,7 @@ def test_connected_whatsapp_without_allowlist_shows_critical(client):
     response = client.get("/admin/tenants/lawyer")
 
     assert response.status_code == 200
-    assert "WhatsApp: Critical: Missing strict allowlist" in response.text
+    assert "WhatsApp: Needs repair: Missing strict allowlist" in response.text
     assert "tenant-wa-critical" in response.text
     assert "tenant-wa-connected" not in response.text
     assert "data-wa-connected-toast" not in response.text
@@ -166,7 +166,7 @@ def test_connected_whatsapp_rejects_non_strict_allowlists(
     response = client.get("/admin/tenants/lawyer")
 
     assert response.status_code == 200
-    assert f"WhatsApp: Critical: {expected}" in response.text
+    assert f"WhatsApp: Needs repair: {expected}" in response.text
     assert "tenant-wa-critical" in response.text
     assert "tenant-wa-connected" not in response.text
     assert "data-wa-connected-toast" not in response.text
