@@ -287,11 +287,7 @@
       <div class="agent-block">
         <h4>AI Agent name</h4>
         <p class="agent-summary">
-          {% if agent_name_override %}
-            {{ agent_name_override.name }}
-          {% else %}
-            Marina
-          {% endif %}
+          {{ effective_agent_name }}
         </p>
         {% if agent_name_override %}
           <p class="muted compact-note">Admin override active. Tenant dashboard value is overridden.</p>
@@ -306,7 +302,7 @@
               name="agent_name"
               maxlength="40"
               value="{{ agent_name_override.name if agent_name_override else '' }}"
-              placeholder="Marina">
+              placeholder="{{ effective_agent_name or 'Marina' }}">
           </label>
           <div class="agent-form-actions">
             <button type="submit" class="button-secondary">Save name</button>
@@ -349,7 +345,7 @@
         {% if response_timing_override %}
           <p class="muted compact-note">Admin override active. Tenant dashboard value is overridden.</p>
         {% else %}
-          <p class="muted compact-note">Controls how long Marina waits for quick consecutive messages before replying.</p>
+          <p class="muted compact-note">Controls how long {{ effective_agent_name }} waits for quick consecutive messages before replying.</p>
         {% endif %}
         <form method="post" action="/admin/tenants/{{ tenant.id }}/agent/response-timing" class="agent-inline-form">
           <label class="agent-form-field">
@@ -417,7 +413,7 @@
             <textarea
               name="tone_notes"
               rows="3"
-              placeholder="How should Marina sound for this tenant?">{{ tone_override.notes if tone_override else '' }}</textarea>
+              placeholder="How should {{ effective_agent_name }} sound for this tenant?">{{ tone_override.notes if tone_override else '' }}</textarea>
           </label>
           <div class="agent-form-actions">
             <button type="submit" class="button-secondary">Save tone</button>
@@ -437,14 +433,14 @@
             <textarea
               name="soft_escalation_when"
               rows="3"
-              placeholder="Use soft escalation when Marina is unsure, needs a decision, or needs Calvin to choose a time.">{{ escalation_rules_override.soft_escalation.when if escalation_rules_override else '' }}</textarea>
+              placeholder="Use soft escalation when {{ effective_agent_name }} is unsure, needs a decision, or needs Calvin to choose a time.">{{ escalation_rules_override.soft_escalation.when if escalation_rules_override else '' }}</textarea>
           </label>
           <label class="agent-form-field">
             <span>Human takeover when</span>
             <textarea
               name="hard_escalation_when"
               rows="3"
-              placeholder="Use hard escalation for legal risk, angry customer, refund dispute, or when Marina must stop replying.">{{ escalation_rules_override.hard_escalation.when if escalation_rules_override else '' }}</textarea>
+              placeholder="Use hard escalation for legal risk, angry customer, refund dispute, or when {{ effective_agent_name }} must stop replying.">{{ escalation_rules_override.hard_escalation.when if escalation_rules_override else '' }}</textarea>
           </label>
           <div class="agent-form-actions">
             <button type="submit" class="button-secondary">Save rules</button>
@@ -454,7 +450,7 @@
 
       <div class="agent-block agent-block-wide">
         <h4>Source of Truth overrides</h4>
-        <p class="muted compact-note">Add tenant facts Marina should treat as authoritative.</p>
+        <p class="muted compact-note">Add tenant facts {{ effective_agent_name }} should treat as authoritative.</p>
         <form method="post" action="/admin/tenants/{{ tenant.id }}/sot" class="agent-sot-form">
           <div class="agent-sot-row">
             <label class="agent-form-field">
@@ -475,7 +471,7 @@
             <textarea
               name="content"
               rows="4"
-              placeholder="Write the exact fact, rule, answer, or tenant preference Marina should use."></textarea>
+              placeholder="Write the exact fact, rule, answer, or tenant preference {{ effective_agent_name }} should use."></textarea>
           </label>
           <div class="agent-form-actions">
             <button type="submit" class="button-secondary">Add Source of Truth</button>

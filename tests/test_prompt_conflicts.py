@@ -116,6 +116,8 @@ def test_prompt_conflicts_render_in_workspace_and_can_be_marked_reviewed():
     response = client.get("/admin/tenants/unboks")
     assert response.status_code == 200
     assert "Prompt Conflicts" in response.text
+    assert "Sofia may not tell jokes" in response.text
+    assert "Marina may not tell jokes" not in response.text
     assert "Humor/off-topic conflict" in response.text
     assert "Mark reviewed" in response.text
 
@@ -129,6 +131,24 @@ def test_prompt_conflicts_render_in_workspace_and_can_be_marked_reviewed():
 
     report = build_prompt_conflict_report("unboks")
     assert conflict_id in report["reviewed_conflict_ids"]
+
+
+def test_workspace_uses_tenant_agent_name_when_no_admin_override(tmp_path):
+    client_path = tmp_path / "tenants" / "unboks" / "config" / "client.json"
+    data = json.loads(client_path.read_text(encoding="utf-8"))
+    data["business"]["agent_name"] = "Helga"
+    client_path.write_text(json.dumps(data), encoding="utf-8")
+
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    response = client.get("/admin/tenants/unboks")
+
+    assert response.status_code == 200
+    assert "Helga may not tell jokes" in response.text
+    assert "How should Helga sound for this tenant?" in response.text
+    assert "tenant preference Helga should use" in response.text
+    assert "Marina may not tell jokes" not in response.text
 
 
 def test_dangerous_prompt_change_is_rejected_before_save():

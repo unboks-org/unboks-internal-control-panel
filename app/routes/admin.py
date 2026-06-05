@@ -113,6 +113,30 @@ AGENT_FEATURE_ACTIONS: dict[str, str] = {
 }
 
 
+def _effective_agent_name(
+    tenant_id: str,
+    ai_settings: dict | None = None,
+) -> str:
+    from app.agent_identity import DEFAULT_AGENT_NAME, clean_agent_name
+
+    settings = ai_settings or {}
+    override = settings.get("agent_name") if isinstance(settings, dict) else None
+    if isinstance(override, dict):
+        name = clean_agent_name(override.get("name"))
+        if name:
+            return name
+
+    data = get_tenant_client_data(tenant_id)
+    business = data.get("business") if isinstance(data.get("business"), dict) else data
+    if isinstance(business, dict):
+        for key in ("agent_name", "ai_agent_name"):
+            name = clean_agent_name(business.get(key))
+            if name:
+                return name
+    name = clean_agent_name(data.get("agent_name"))
+    return name or DEFAULT_AGENT_NAME
+
+
 def _shell_context(active: str, active_tenant: Optional[Tenant] = None) -> dict:
     """Context every admin template needs so the sidebar renders."""
     tenants = _sidebar_tenants()
@@ -663,6 +687,7 @@ def admin_save_agent_tone(
         name="Pending Nr3 tone override",
         text=candidate,
         priority="tone_style",
+        agent_name=_effective_agent_name(tenant_id),
     )
     if conflicts:
         return _workspace_redirect(
@@ -892,6 +917,7 @@ def admin_add_sot_entry(
         name="Pending Nr3 Source of Truth entry",
         text=content,
         priority="sot_company_facts",
+        agent_name=_effective_agent_name(tenant_id),
     )
     if conflicts:
         return _workspace_redirect(
@@ -1892,6 +1918,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     escalation_rules_override = ai_settings.get("escalation_rules")
     agent_name_override = ai_settings.get("agent_name")
     response_timing_override = _icp_overrides.response_timing_for_tenant(tenant.id)
+    effective_agent_name = _effective_agent_name(tenant.id, ai_settings)
     sot_entries = _icp_overrides.sot_entries_for_tenant(tenant.id)
     agent_feature_states = {
         "learning": override_toggles.get(
@@ -1916,6 +1943,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     prompt_conflict_report = build_prompt_conflict_report(
         tenant.id,
         nr2_knowledge=nr2_knowledge,
+        agent_name=effective_agent_name,
     )
     auto_block_sync = fetch_auto_block_settings(tenant.id)
     account_details = tenant_account_details(tenant.id)
@@ -1937,6 +1965,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "tone_override": tone_override,
             "escalation_rules_override": escalation_rules_override,
             "agent_name_override": agent_name_override,
+            "effective_agent_name": effective_agent_name,
             "response_timing_override": response_timing_override,
             "sot_entries": sot_entries,
             "is_reserved_tenant": tenant.id in RESERVED_SLUGS,
