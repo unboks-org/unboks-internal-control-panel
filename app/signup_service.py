@@ -127,6 +127,10 @@ def _write_registry_file(client_data: dict[str, Any]) -> None:
         json.dump(client_data, f, indent=2, ensure_ascii=False)
 
 
+def _provisioning_allows_welcome(result: AutoProvisionResult) -> bool:
+    return result.status in {"succeeded", "disabled"}
+
+
 def create_public_signup_tenant(
     *,
     full_name: str,
@@ -183,31 +187,10 @@ def create_public_signup_tenant(
     if clean_phone:
         client_data["whatsapp"] = clean_phone
 
-    _write_registry_file(client_data)
-    register_tenant(client_data)
-
     welcome_status = "unchecked"
     welcome_error = ""
-    if smtp_is_configured(settings):
-        draft = build_tenant_welcome_email(
-            tenant_name=clean_name,
-            dashboard_url=dashboard_url,
-            username=slug,
-            initial_token=password,
-            custom_message=(
-                "Your 14-day trial is active. When you sign in, the dashboard "
-                "will guide you through WhatsApp connection and Agent style setup."
-            ),
-        )
-        try:
-            send_email(clean_email, draft.subject, draft.body, settings)
-            welcome_status = "sent"
-        except Exception as exc:
-            welcome_status = "failed"
-            welcome_error = str(exc)
-    else:
-        welcome_status = "no_smtp"
 
+    _write_registry_file(client_data)
     provision_result = auto_provision_tenant(
         slug=slug,
         host_port=host_port,
@@ -216,6 +199,32 @@ def create_public_signup_tenant(
         managed_nginx_block_text=_managed_nginx_block_text(slug, host_port),
         dashboard_url=dashboard_url,
     )
+    if _provisioning_allows_welcome(provision_result):
+        register_tenant(client_data)
+        if smtp_is_configured(settings):
+            draft = build_tenant_welcome_email(
+                tenant_name=clean_name,
+                dashboard_url=dashboard_url,
+                username=slug,
+                initial_token=password,
+                custom_message=(
+                    "Your 14-day trial is active. When you sign in, the dashboard "
+                    "will guide you through WhatsApp connection and Agent style setup."
+                ),
+            )
+            try:
+                send_email(clean_email, draft.subject, draft.body, settings)
+                welcome_status = "sent"
+            except Exception as exc:
+                welcome_status = "failed"
+                welcome_error = str(exc)
+        else:
+            welcome_status = "no_smtp"
+    else:
+        welcome_status = "not_sent"
+        welcome_error = (
+            "Workspace provisioning did not complete; welcome email was not sent."
+        )
 
     return SignupResult(
         slug=slug,

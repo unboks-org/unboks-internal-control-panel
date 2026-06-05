@@ -368,6 +368,59 @@ def test_admin_public_signup_review_and_onboarding_actions(monkeypatch, tmp_path
     assert len(sent) == sent_before + 1
 
 
+def test_admin_public_signup_create_workspace_requires_successful_provision(
+    monkeypatch,
+    tmp_path,
+):
+    from app.provisioning import AutoProvisionResult
+    from app.signup_service import SignupResult
+
+    client = _client(monkeypatch, tmp_path)
+    response = _signup(client)
+    assert response.status_code == 202
+    record = _stored_request(tmp_path)
+    signup_id = record["id"]
+    store_path = tmp_path / "signup_requests.json"
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    data["requests"][signup_id]["status"] = "approved"
+    store_path.write_text(json.dumps(data), encoding="utf-8")
+
+    def fake_create_public_signup_tenant(**kwargs):
+        return SignupResult(
+            slug="lovelace-law",
+            name="Lovelace Law",
+            email="ada@example.com",
+            dashboard_url="https://dashboard.unboks.org/login?workspace=lovelace-law",
+            password="temporary-password",
+            access_key="access-key",
+            trial_ends_at="2026-06-19T00:00:00+00:00",
+            welcome_status="not_sent",
+            welcome_error="Workspace provisioning did not complete.",
+            provision_result=AutoProvisionResult(
+                status="failed",
+                message="worker failed",
+                job_id="job-1",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.routes.admin.create_public_signup_tenant",
+        fake_create_public_signup_tenant,
+    )
+
+    client.post("/login", data={"password": "test-password"})
+    created = client.post(
+        f"/admin/signups/{signup_id}/create-workspace",
+        follow_redirects=True,
+    )
+
+    assert created.status_code == 200
+    assert "Workspace provisioning did not complete: worker failed" in created.text
+    stored = _stored_request(tmp_path)
+    assert stored["status"] == "failed"
+    assert stored.get("provisioned_slug") is None
+
+
 def test_admin_public_signup_reject_archives_and_hides_request(monkeypatch, tmp_path):
     sent = []
 

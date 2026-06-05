@@ -2584,6 +2584,29 @@ def admin_public_signup_create_workspace(request: Request, signup_id: str) -> Re
             phone=str(signup.get("phone") or ""),
             settings=settings,
         )
+        if result.provision_result.status not in {"succeeded", "disabled"}:
+            message = (
+                f"Workspace provisioning did not complete: "
+                f"{result.provision_result.message}"
+            )
+            update_signup_request(
+                signup_id,
+                settings,
+                status="failed",
+                workspace_error=message,
+            )
+            audit_log.record_event(
+                action="public_signup.workspace_create_failed",
+                result="failed",
+                safe_summary="Workspace creation from public signup did not complete.",
+                metadata={
+                    "signup_id": signup_id,
+                    "slug": result.slug,
+                    "provision_status": result.provision_result.status,
+                    "job_id": result.provision_result.job_id,
+                },
+            )
+            return _signup_detail_redirect(signup_id, error=message)
         mark_provisioned(signup_id, result.slug, settings)
         audit_log.record_event(
             action="public_signup.workspace_created",

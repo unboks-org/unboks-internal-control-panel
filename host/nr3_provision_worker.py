@@ -139,6 +139,22 @@ def write_result(job_id: str, payload: dict[str, Any]) -> None:
     os.replace(tmp, final)
 
 
+def atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def read_or_create_tenant_bridge_token(slug: str) -> str:
     BRIDGE_TOKEN_DIR.mkdir(parents=True, exist_ok=True)
     try:
