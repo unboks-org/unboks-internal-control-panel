@@ -71,8 +71,8 @@
       </select>
       {% if show_archived %}
         <a class="signup-secondary-link" href="/admin/signups">Hide archived</a>
-      {% elif archived_count %}
-        <a class="signup-secondary-link" href="/admin/signups?archived=1">View archived</a>
+      {% elif hidden_count %}
+        <a class="signup-secondary-link" href="/admin/signups?archived=1">View history</a>
       {% endif %}
     </div>
 
@@ -99,14 +99,35 @@
                     failed
                   {% elif signup.admin_alert_status == "not_configured" %}
                     not configured
+                  {% elif signup.admin_alert_status == "historical_untracked" %}
+                    historical
                   {% else %}
                     {{ signup.admin_alert_status }}
+                  {% endif %}
+                </span>
+              {% endif %}
+              {% if signup.confirmation_email_status %}
+                <span class="signup-created">
+                  Confirmation:
+                  {% if signup.confirmation_email_status == "sent" %}
+                    sent
+                  {% elif signup.confirmation_email_status == "failed" %}
+                    failed
+                  {% elif signup.confirmation_email_status == "not_configured" %}
+                    not configured
+                  {% elif signup.confirmation_email_status == "historical_untracked" %}
+                    historical
+                  {% else %}
+                    {{ signup.confirmation_email_status }}
                   {% endif %}
                 </span>
               {% endif %}
             </div>
 
             <div class="signup-card-state">
+              {% if signup.possible_duplicate %}
+                <span class="signup-status-badge badge-awaiting">Possible duplicate</span>
+              {% endif %}
               {% if signup.status == "verified_pending_review" %}
                 <span class="signup-status-badge badge-awaiting">Awaiting review</span>
               {% elif signup.status == "approved" %}

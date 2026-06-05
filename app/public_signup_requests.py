@@ -198,13 +198,20 @@ def list_signup_requests(
     requests = data.get("requests")
     if not isinstance(requests, dict):
         return []
+    if _normalize_historical_email_tracking(data, settings):
+        requests = data.get("requests")
+        if not isinstance(requests, dict):
+            return []
+    duplicate_meta = _duplicate_metadata(requests)
     safe_records: list[dict[str, Any]] = []
-    for record in requests.values():
+    for request_id, record in requests.items():
         if not isinstance(record, dict):
             continue
-        if not include_archived and is_archived_signup(record):
+        if not include_archived and _hidden_from_active_queue(record, duplicate_meta.get(request_id, {})):
             continue
-        safe_records.append(_safe_record(record))
+        safe = _safe_record(record)
+        safe.update(duplicate_meta.get(request_id, {}))
+        safe_records.append(safe)
     return sorted(
         safe_records,
         key=lambda item: str(item.get("created_at") or ""),
@@ -225,6 +232,93 @@ def is_archived_signup(record: dict[str, Any]) -> bool:
         "archived",
         "rejected",
     }
+
+
+def _hidden_from_active_queue(
+    record: dict[str, Any],
+    duplicate_info: dict[str, Any],
+) -> bool:
+    if is_archived_signup(record):
+        return True
+    if duplicate_info.get("duplicate_hidden_by_default"):
+        return True
+    return record.get("status") in {
+        "provisioned",
+        "verification_expired",
+    }
+
+
+def _normalize_historical_email_tracking(data: dict[str, Any], settings: Settings) -> bool:
+    """Mark legacy records as untracked without triggering any email delivery.
+
+    The public signup send flow is event-based. Older records may lack the
+    status fields added later; missing metadata must never be interpreted as a
+    reason to send or resend messages.
+    """
+    requests = data.get("requests")
+    if not isinstance(requests, dict):
+        return False
+    changed = False
+    now = utc_now().isoformat()
+    for request_id, record in requests.items():
+        if not isinstance(record, dict):
+            continue
+        if not record.get("admin_alert_status"):
+            record["admin_alert_status"] = "historical_untracked"
+            record["admin_alert_sent_at"] = None
+            record["admin_alert_error"] = (
+                "Historical record created before admin alert tracking. No resend was triggered."
+            )
+            record["admin_alert_recipient"] = ""
+            changed = True
+        elif record.get("admin_alert_status") == "sent" and "admin_alert_recipient" not in record:
+            record["admin_alert_recipient"] = settings.admin_alert_email or ""
+            changed = True
+        if not record.get("confirmation_email_status"):
+            record["confirmation_email_status"] = "historical_untracked"
+            record["confirmation_email_sent_at"] = None
+            record["confirmation_email_recipient"] = record.get("email") or ""
+            record["confirmation_email_error"] = (
+                "Historical record created before confirmation email tracking. No resend was triggered."
+            )
+            changed = True
+        requests[request_id] = record
+    if changed:
+        data["email_tracking_migrated_at"] = data.get("email_tracking_migrated_at") or now
+        _write_store(data, settings)
+    return changed
+
+
+def _duplicate_metadata(requests: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for request_id, record in requests.items():
+        if not isinstance(record, dict):
+            continue
+        email = normalize_email(str(record.get("email") or ""))
+        slug = str(record.get("slug_hint") or derive_slug_from_name(str(record.get("business_name") or ""))).strip().lower()
+        if not email or not slug:
+            continue
+        groups.setdefault((email, slug), []).append({"id": request_id, "record": record})
+
+    metadata: dict[str, dict[str, Any]] = {}
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        sorted_items = sorted(
+            items,
+            key=lambda item: str(item["record"].get("created_at") or ""),
+            reverse=True,
+        )
+        canonical_id = str(sorted_items[0]["id"])
+        for index, item in enumerate(sorted_items):
+            request_id = str(item["id"])
+            metadata[request_id] = {
+                "possible_duplicate": True,
+                "duplicate_count": len(items),
+                "duplicate_of": "" if index == 0 else canonical_id,
+                "duplicate_hidden_by_default": index != 0,
+            }
+    return metadata
 
 
 def _enforce_rate_limits(

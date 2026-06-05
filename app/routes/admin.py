@@ -2918,14 +2918,10 @@ def render_reviews(request: Request) -> HTMLResponse:
 
 def render_public_signups(request: Request, settings) -> HTMLResponse:
     show_archived = request.query_params.get("archived") == "1"
+    all_signups = list_signup_requests(settings, include_archived=True)
     signups = list_signup_requests(settings, include_archived=show_archived)
-    archived_count = len(
-        [
-            signup
-            for signup in list_signup_requests(settings, include_archived=True)
-            if is_archived_signup(signup)
-        ]
-    )
+    hidden_count = max(0, len(all_signups) - len(list_signup_requests(settings)))
+    archived_count = len([signup for signup in all_signups if is_archived_signup(signup)])
     pending_review = [
         signup
         for signup in signups
@@ -2963,6 +2959,7 @@ def render_public_signups(request: Request, settings) -> HTMLResponse:
             "pending_verification": pending_verification,
             "show_archived": show_archived,
             "archived_count": archived_count,
+            "hidden_count": hidden_count,
             "admin_alert_configured": admin_alert_configured,
             "admin_alert_warning": admin_alert_warning,
             "admin_alert_recipient": settings.admin_alert_email or "",

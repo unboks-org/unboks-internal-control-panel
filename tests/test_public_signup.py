@@ -436,6 +436,87 @@ def test_admin_public_signups_hides_legacy_rejected_requests(monkeypatch, tmp_pa
     assert "Archived" in archive_page.text
 
 
+def test_admin_public_signups_marks_historical_email_tracking_without_sending(
+    monkeypatch,
+    tmp_path,
+):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+    response = _signup(client, email="legacy@example.com")
+    assert response.status_code == 202
+    assert sent == []
+
+    store_path = tmp_path / "signup_requests.json"
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    request_id, record = next(iter(data["requests"].items()))
+    record.pop("admin_alert_status", None)
+    record.pop("confirmation_email_status", None)
+    data["requests"][request_id] = record
+    store_path.write_text(json.dumps(data), encoding="utf-8")
+
+    client.post("/login", data={"password": "test-password"})
+    list_page = client.get("/admin/signups")
+
+    assert list_page.status_code == 200
+    assert sent == []
+    assert "historical" in list_page.text
+    stored = json.loads(store_path.read_text(encoding="utf-8"))["requests"][request_id]
+    assert stored["admin_alert_status"] == "historical_untracked"
+    assert stored["confirmation_email_status"] == "historical_untracked"
+    assert stored["confirmation_email_recipient"] == "legacy@example.com"
+
+
+def test_admin_public_signups_hides_older_duplicates_by_default(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    first = _signup(client, email="duplicate@example.com")
+    second = _signup(client, email="duplicate@example.com")
+    assert first.status_code == 202
+    assert second.status_code == 202
+
+    client.post("/login", data={"password": "test-password"})
+    list_page = client.get("/admin/signups")
+    archive_page = client.get("/admin/signups?archived=1")
+
+    assert list_page.status_code == 200
+    assert list_page.text.count('<article class="signup-card"') == 1
+    assert "View history" in list_page.text
+    assert archive_page.status_code == 200
+    assert archive_page.text.count('<article class="signup-card"') == 2
+    assert "Possible duplicate" in archive_page.text
+    assert "token_hash" not in archive_page.text
+
+
+def test_admin_public_signup_pages_do_not_send_email(monkeypatch, tmp_path):
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body, "html": kwargs.get("html_body")})
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_PUBLIC_SIGNUP_ADMIN_EMAIL", "calvin@example.com")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+
+    response = _signup(client, email="event-only@example.com")
+    assert response.status_code == 202
+    assert len(sent) == 2
+    signup_id = _stored_request(tmp_path)["id"]
+
+    client.post("/login", data={"password": "test-password"})
+    assert client.get("/admin/signups").status_code == 200
+    assert client.get(f"/admin/signups/{signup_id}").status_code == 200
+    assert client.get("/admin/signups?archived=1").status_code == 200
+
+    assert len(sent) == 2
+
+
 def test_archived_signup_workspace_is_hidden_from_sidebar(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     registry = {
