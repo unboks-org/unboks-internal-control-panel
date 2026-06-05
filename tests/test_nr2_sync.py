@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.nr2_sync import Nr2KnowledgeSync
-from app.nr2_sync import fetch_nr2_knowledge
+from app.nr2_sync import fetch_nr2_knowledge, upload_nr2_photo, fetch_nr2_photo_image
 
 
 def test_nr2_sync_missing_credentials(monkeypatch):
@@ -135,7 +135,7 @@ def test_nr2_sync_handles_optional_missing_endpoint_as_partial(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path.endswith("/login"):
             return httpx.Response(200, json={"token": "safe-token"})
-        if request.url.path.endswith("/knowledge/media"):
+        if request.url.path.endswith("/knowledge/media") or request.url.path.endswith("/photos"):
             return httpx.Response(404)
         return httpx.Response(200, json={})
 
@@ -144,7 +144,113 @@ def test_nr2_sync_handles_optional_missing_endpoint_as_partial(monkeypatch):
     sync = fetch_nr2_knowledge("test", client=client)
 
     assert sync.status == "partial"
-    assert "/knowledge/media missing" in sync.error
+    assert "/photos missing" in sync.error
+
+
+def test_nr2_sync_falls_back_to_photo_library_for_images(monkeypatch):
+    monkeypatch.setattr(
+        "app.nr2_sync.get_tenant_client_data",
+        lambda tenant: {"dashboard_password": "dash-password"},
+    )
+    monkeypatch.setenv(
+        "NR3_TENANT_API_BASE_TEMPLATE",
+        "https://api.example.test/api/{tenant}/dashboard/api",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "safe-token"})
+        if request.url.path.endswith("/knowledge/media"):
+            return httpx.Response(404)
+        if request.url.path.endswith("/photos"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": 42,
+                        "filename": "photo_42.jpg",
+                        "original_filename": "Cupcake.jpg",
+                        "tags": ["cupcake", "red velvet"],
+                        "service_key": "red-velvet",
+                        "uploaded_at": "2026-06-05T00:00:00+00:00",
+                    }
+                ],
+            )
+        return httpx.Response(200, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    sync = fetch_nr2_knowledge("wibrandt", client=client)
+
+    assert sync.knowledge_media[0]["caption"] == "Cupcake.jpg"
+    assert sync.knowledge_media[0]["tags"] == "cupcake, red velvet"
+    assert sync.knowledge_media[0]["service_key"] == "red-velvet"
+    assert sync.knowledge_media[0]["url"] == "/admin/tenants/wibrandt/media/42"
+
+
+def test_upload_nr2_photo_posts_to_tenant_photo_library(monkeypatch):
+    monkeypatch.setattr(
+        "app.nr2_sync.get_tenant_client_data",
+        lambda tenant: {"password": "secret-password"},
+    )
+    monkeypatch.setenv(
+        "NR3_TENANT_API_BASE_TEMPLATE",
+        "https://api.example.test/api/{tenant}/dashboard/api",
+    )
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "safe-token"})
+        assert request.headers["authorization"] == "Bearer safe-token"
+        if request.method == "POST" and request.url.path.endswith("/photos/upload"):
+            body = request.content.decode("latin1")
+            seen["body"] = body
+            return httpx.Response(200, json={"ok": True, "photo": {"id": 7}})
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = upload_nr2_photo(
+        "wibrandt",
+        filename="product.png",
+        content_type="image/png",
+        content=b"PNGDATA",
+        tags="product, red",
+        service_key="product-red",
+        client=client,
+    )
+
+    assert result.ok is True
+    assert result.photo["id"] == 7
+    assert "product.png" in seen["body"]
+    assert "product, red" in seen["body"]
+    assert "product-red" in seen["body"]
+
+
+def test_fetch_nr2_photo_image_proxies_authenticated_image(monkeypatch):
+    monkeypatch.setattr(
+        "app.nr2_sync.get_tenant_client_data",
+        lambda tenant: {"password": "secret-password"},
+    )
+    monkeypatch.setenv(
+        "NR3_TENANT_API_BASE_TEMPLATE",
+        "https://api.example.test/api/{tenant}/dashboard/api",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "safe-token"})
+        assert request.headers["authorization"] == "Bearer safe-token"
+        if request.url.path.endswith("/photos/7/image"):
+            return httpx.Response(200, content=b"JPEGDATA", headers={"content-type": "image/jpeg"})
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    content, content_type, error = fetch_nr2_photo_image("wibrandt", "7", client=client)
+
+    assert error == ""
+    assert content == b"JPEGDATA"
+    assert content_type == "image/jpeg"
 
 
 def test_nr2_sync_returns_fresh_cache_without_hitting_runtime(monkeypatch, tmp_path):

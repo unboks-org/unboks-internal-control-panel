@@ -764,6 +764,25 @@
         </div>
       </div>
 
+      <form method="post" action="/admin/tenants/{{ tenant.id }}/media/upload#nr2-knowledge-section" enctype="multipart/form-data" class="media-upload-form">
+        <label class="media-upload-file">
+          <span>Upload product/property image</span>
+          <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+        </label>
+        <div class="media-upload-fields">
+          <label>
+            Tags
+            <input type="text" name="tags" placeholder="cupcake, oceanview, product code">
+          </label>
+          <label>
+            Product / item key
+            <input type="text" name="service_key" placeholder="red-velvet-cupcake">
+          </label>
+        </div>
+        <button type="submit" class="button-secondary">Upload image</button>
+        <p class="muted compact-note">Uploads into the same tenant media library used by Nr2.</p>
+      </form>
+
       {% if nr2_knowledge.total_items == 0 %}
         <p class="muted compact-note nr2-empty">
           No Nr2 company knowledge found yet, or this tenant runtime could not be reached.
@@ -843,6 +862,8 @@
                       <img src="{{ image.url }}" alt="{{ image.caption }}">
                     {% endif %}
                     <span>{{ image.caption }}</span>
+                    {% if image.tags %}<small>{{ image.tags }}</small>{% endif %}
+                    {% if image.service_key %}<small>{{ image.service_key }}</small>{% endif %}
                   </a>
                 {% endfor %}
               </div>

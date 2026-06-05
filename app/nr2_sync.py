@@ -59,6 +59,18 @@ class Nr2AutoBlockSync:
         return self.status == "ok"
 
 
+@dataclass(frozen=True)
+class Nr2MediaUploadResult:
+    status: str
+    source_url: str = ""
+    error: str = ""
+    photo: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
 def _api_base_for_tenant(tenant_id: str) -> str:
     template = os.getenv(
         "NR3_TENANT_API_BASE_TEMPLATE",
@@ -199,7 +211,7 @@ def _redact_secret_lines(text: str) -> str:
 
 def _tenant_password(tenant_id: str) -> str:
     data = get_tenant_client_data(tenant_id)
-    for key in ("password", "dashboard_access_key", "access_key"):
+    for key in ("password", "dashboard_password", "dashboard_access_key", "access_key"):
         value = data.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -281,7 +293,7 @@ def _safe_files(raw: Any) -> tuple[dict[str, Any], ...]:
     return tuple(out)
 
 
-def _safe_media(raw: Any) -> tuple[dict[str, Any], ...]:
+def _safe_media(raw: Any, tenant_id: str = "") -> tuple[dict[str, Any], ...]:
     media = raw.get("media") if isinstance(raw, dict) else raw
     if not isinstance(media, list):
         return tuple()
@@ -289,8 +301,21 @@ def _safe_media(raw: Any) -> tuple[dict[str, Any], ...]:
     for item in media[:60]:
         if not isinstance(item, dict):
             continue
+        photo_id = _clean_text(item.get("id") or item.get("photo_id"), 80)
         url = _clean_text(item.get("url"), 500)
-        caption = _clean_text(item.get("caption"), 180)
+        if not url and tenant_id and photo_id:
+            url = f"/admin/tenants/{tenant_id}/media/{photo_id}"
+        tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+        tag_text = ", ".join(_clean_text(tag, 40) for tag in tags[:8] if _clean_text(tag, 40))
+        service_key = _clean_text(item.get("service_key"), 120)
+        caption = _clean_text(
+            item.get("caption")
+            or item.get("original_filename")
+            or item.get("filename")
+            or tag_text
+            or service_key,
+            180,
+        )
         filename = _clean_text(item.get("originalFilename") or item.get("filename"), 180)
         if not (url or caption or filename):
             continue
@@ -300,6 +325,8 @@ def _safe_media(raw: Any) -> tuple[dict[str, Any], ...]:
             "url": url,
             "knowledge_id": _clean_text(item.get("knowledgeId") or item.get("knowledge_id"), 80),
             "uploaded_at": _clean_text(item.get("uploadedAt") or item.get("uploaded_at"), 80),
+            "tags": tag_text,
+            "service_key": service_key,
         })
     return tuple(out)
 
@@ -390,19 +417,24 @@ def fetch_nr2_knowledge(
 
         errors: list[str] = []
 
-        def optional(path: str) -> Any:
+        def optional(path: str, *, record_missing: bool = True) -> Any:
             try:
                 return _get_json(http, base, path, token)
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 404:
-                    errors.append(f"{path} missing")
+                    if record_missing:
+                        errors.append(f"{path} missing")
                     return {}
                 raise
 
         sot = optional("/source-of-truth")
         updates = optional("/settings/info-updates")
         files = optional("/knowledge/files")
-        media = optional("/knowledge/media")
+        media = optional("/knowledge/media", record_missing=False)
+        if not media:
+            # Older/current tenant runtimes expose the same image library as
+            # /photos. Nr3 normalizes it into the Knowledge images panel.
+            media = optional("/photos")
         runtime_prompt_manifest = optional("/runtime-prompt-manifest")
 
         status = "ok" if not errors else "partial"
@@ -414,7 +446,7 @@ def fetch_nr2_knowledge(
             sot_blocks=_safe_sot_blocks(sot),
             info_updates=_safe_info_updates(updates),
             knowledge_files=_safe_files(files),
-            knowledge_media=_safe_media(media),
+            knowledge_media=_safe_media(media, tenant_id),
             runtime_prompt_manifest=_safe_runtime_prompt_manifest(runtime_prompt_manifest),
         )
         if client is None and sync.status in {"ok", "partial"}:
@@ -463,6 +495,78 @@ def _login_token(http: httpx.Client, base: str, tenant_id: str) -> tuple[str, st
     if not isinstance(token, str) or not token:
         return "", "Nr2 login returned no token."
     return token, ""
+
+
+def upload_nr2_photo(
+    tenant_id: str,
+    *,
+    filename: str,
+    content_type: str,
+    content: bytes,
+    tags: str = "",
+    service_key: str = "",
+    client: httpx.Client | None = None,
+) -> Nr2MediaUploadResult:
+    """Upload an image into the tenant runtime's existing Nr2 photo library."""
+    base = _api_base_for_tenant(tenant_id)
+    owns_client = client is None
+    http = client or httpx.Client(timeout=10)
+    try:
+        token, error = _login_token(http, base, tenant_id)
+        if error:
+            return Nr2MediaUploadResult(status="missing_credentials", source_url=base, error=error)
+        response = http.post(
+            f"{base}/photos/upload",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": (filename or "image.jpg", content, content_type or "application/octet-stream")},
+            data={"tags": tags, "service_key": service_key},
+        )
+        response.raise_for_status()
+        data = response.json()
+        photo = data.get("photo") if isinstance(data, dict) else {}
+        return Nr2MediaUploadResult(status="ok", source_url=base, photo=photo if isinstance(photo, dict) else {})
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return Nr2MediaUploadResult(status="offline", source_url=base, error="Tenant runtime is offline or unreachable.")
+    except httpx.HTTPStatusError as exc:
+        return Nr2MediaUploadResult(
+            status="auth_failed" if exc.response.status_code in {401, 403, 405} else "unavailable",
+            source_url=base,
+            error=f"Nr2 returned HTTP {exc.response.status_code}.",
+        )
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return Nr2MediaUploadResult(status="unavailable", source_url=base, error=str(exc)[:220])
+    finally:
+        if owns_client:
+            http.close()
+
+
+def fetch_nr2_photo_image(
+    tenant_id: str,
+    photo_id: str,
+    *,
+    client: httpx.Client | None = None,
+) -> tuple[bytes, str, str]:
+    """Return image bytes, content type, and error for a tenant photo."""
+    if not re.fullmatch(r"\d+", str(photo_id or "")):
+        return b"", "text/plain", "Invalid photo id."
+    base = _api_base_for_tenant(tenant_id)
+    owns_client = client is None
+    http = client or httpx.Client(timeout=5)
+    try:
+        token, error = _login_token(http, base, tenant_id)
+        if error:
+            return b"", "text/plain", error
+        response = http.get(
+            f"{base}/photos/{photo_id}/image",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        response.raise_for_status()
+        return response.content, response.headers.get("content-type", "image/jpeg"), ""
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return b"", "text/plain", str(exc)[:220]
+    finally:
+        if owns_client:
+            http.close()
 
 
 def fetch_auto_block_settings(

@@ -50,9 +50,11 @@ from app.security import (
 )
 from app.provisioning import auto_provision_tenant, queue_tenant_host_action
 from app.nr2_sync import (
+    fetch_nr2_photo_image,
     fetch_auto_block_settings,
     fetch_nr2_knowledge,
     update_auto_block_settings,
+    upload_nr2_photo,
 )
 from app.port_registry import PortRegistryError, reserve_tenant_port
 from app.prompt_conflicts import (
@@ -2008,6 +2010,77 @@ def admin_refresh_nr2_knowledge(request: Request, tenant_id: str) -> Response:
         ),
         status_code=303,
     )
+
+
+@router.post("/admin/tenants/{tenant_id}/media/upload")
+async def admin_upload_tenant_media(
+    request: Request,
+    tenant_id: str,
+    image: UploadFile = File(...),
+    tags: str = Form(default=""),
+    service_key: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    content = await image.read()
+    result = upload_nr2_photo(
+        tenant.id,
+        filename=image.filename or "image.jpg",
+        content_type=image.content_type or "application/octet-stream",
+        content=content,
+        tags=tags.strip(),
+        service_key=service_key.strip(),
+    )
+    if result.ok:
+        fetch_nr2_knowledge(tenant.id, refresh=True)
+        audit_log.record_event(
+            action="tenant_media_uploaded",
+            actor="internal_admin",
+            tenant_id=tenant.id,
+            safe_summary="Tenant media image uploaded from Nr3.",
+            metadata={
+                "filename": image.filename or "image.jpg",
+                "photo_id": result.photo.get("id"),
+                "tags": tags.strip(),
+                "service_key": service_key.strip(),
+            },
+        )
+        message = "Image uploaded to the tenant media library."
+        level = "ok"
+    else:
+        message = f"Image upload failed: {result.error or result.status}."
+        level = "warn"
+
+    return RedirectResponse(
+        url=(
+            f"/admin/tenants/{tenant.id}"
+            f"?action_message={quote_plus(message)}"
+            f"&action_level={level}"
+            "#nr2-knowledge-section"
+        ),
+        status_code=303,
+    )
+
+
+@router.get("/admin/tenants/{tenant_id}/media/{photo_id}")
+def admin_tenant_media_image(request: Request, tenant_id: str, photo_id: str) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    content, content_type, error = fetch_nr2_photo_image(tenant.id, photo_id)
+    if error:
+        return Response(error, status_code=404, media_type="text/plain")
+    return Response(content, media_type=content_type)
 
 
 @router.post("/admin/tenants/{tenant_id}/prompt-conflicts/{conflict_id}/reviewed")

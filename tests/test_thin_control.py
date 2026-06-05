@@ -109,6 +109,7 @@ def test_workspace_has_no_not_wired_modal_buttons(client):
         "/admin/tenants/unboks/sot",
         "/admin/tenants/unboks/prompt-conflicts/",
         "/admin/tenants/unboks/nr2-knowledge/refresh",
+        "/admin/tenants/unboks/media/upload",
         "/admin/tenants/unboks/backup/import",
     )
     for action in real_forms:

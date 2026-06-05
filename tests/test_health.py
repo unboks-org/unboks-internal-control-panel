@@ -257,6 +257,10 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     # Danger zone
     assert "danger-zone" in workspace.text
     assert "The master Unboks tenant is protected from suspension." in workspace.text
+    # Nr3 can upload into the same tenant media library used by Nr2.
+    assert 'action="/admin/tenants/unboks/media/upload#nr2-knowledge-section"' in workspace.text
+    assert 'name="image"' in workspace.text
+    assert "Upload product/property image" in workspace.text
     # Thin-control rule: no fake disabled workspace controls.
     assert " disabled" not in workspace.text
     assert 'aria-current="page"' in workspace.text
@@ -283,6 +287,49 @@ def test_tenant_workspace_shows_no_activity_for_empty_tenant(monkeypatch, tmp_pa
     missing = client.get("/admin/tenants/no-such-tenant", follow_redirects=False)
     assert missing.status_code == 303
     assert missing.headers["location"] == "/admin/tenants"
+
+
+def test_admin_tenant_media_upload_posts_to_nr2(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    seen: dict[str, object] = {}
+
+    class Result:
+        ok = True
+        status = "ok"
+        error = ""
+        photo = {"id": 12}
+
+    def fake_upload(tenant_id, **kwargs):
+        seen["tenant_id"] = tenant_id
+        seen.update(kwargs)
+        return Result()
+
+    monkeypatch.setattr("app.routes.admin.upload_nr2_photo", fake_upload)
+    monkeypatch.setattr(
+        "app.routes.admin.fetch_nr2_knowledge",
+        lambda tenant_id, refresh=False: seen.setdefault("refreshed", (tenant_id, refresh)),
+    )
+
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"}, follow_redirects=False)
+
+    response = client.post(
+        "/admin/tenants/unboks/media/upload",
+        files={"image": ("product.png", b"image-bytes", "image/png")},
+        data={"tags": "product, hero", "service_key": "hero-product"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/admin/tenants/unboks")
+    assert seen["tenant_id"] == "unboks"
+    assert seen["filename"] == "product.png"
+    assert seen["content"] == b"image-bytes"
+    assert seen["tags"] == "product, hero"
+    assert seen["service_key"] == "hero-product"
+    assert seen["refreshed"] == ("unboks", True)
 
 def test_admin_onboarding_and_reviews_still_reachable(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
