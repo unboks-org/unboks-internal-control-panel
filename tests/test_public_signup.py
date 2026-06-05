@@ -149,8 +149,12 @@ def test_public_signup_sends_admin_alert_when_configured(monkeypatch, tmp_path):
     assert response.status_code == 202
     assert len(sent) == 2
     assert sent[0]["to"] == "ada@example.com"
+    assert sent[0]["subject"] == "Confirm your Unboks signup"
+    assert "Please confirm your Unboks signup." in sent[0]["body"]
+    assert "Please confirm your Unboks signup." in sent[0]["html"]
     assert sent[1]["to"] == "calvin@example.com"
     assert sent[1]["subject"] == "New Unboks free-trial signup: Lovelace Law"
+    assert sent[1]["body"].startswith("Admin alert: New free-trial signup received.")
     assert "Name: Ada Lovelace" in sent[1]["body"]
     assert "Email: ada@example.com" in sent[1]["body"]
     assert "Business: Lovelace Law" in sent[1]["body"]
@@ -162,6 +166,11 @@ def test_public_signup_sends_admin_alert_when_configured(monkeypatch, tmp_path):
     assert record["admin_alert_status"] == "sent"
     assert record["admin_alert_sent_at"]
     assert record["admin_alert_error"] is None
+    assert record["admin_alert_recipient"] == "calvin@example.com"
+    assert record["confirmation_email_status"] == "sent"
+    assert record["confirmation_email_sent_at"]
+    assert record["confirmation_email_recipient"] == "ada@example.com"
+    assert record["confirmation_email_error"] is None
 
     client.post("/login", data={"password": "test-password"})
     signups = client.get("/admin/signups")
@@ -170,6 +179,14 @@ def test_public_signup_sends_admin_alert_when_configured(monkeypatch, tmp_path):
     assert "Admin alert:" in signups.text
     assert "sent" in signups.text
     assert "token_hash" not in signups.text
+
+    detail = client.get(f"/admin/signups/{record['id']}")
+    assert detail.status_code == 200
+    assert "Email delivery" in detail.text
+    assert "Confirmation email" in detail.text
+    assert "ad***a@example.com" in detail.text
+    assert "ca***n@example.com" in detail.text
+    assert "token_hash" not in detail.text
 
 
 def test_public_signup_admin_alert_missing_recipient_does_not_fail_signup(
@@ -197,6 +214,7 @@ def test_public_signup_admin_alert_missing_recipient_does_not_fail_signup(
     record = _stored_request(tmp_path)
     assert record["admin_alert_status"] == "not_configured"
     assert "recipient" in record["admin_alert_error"].lower()
+    assert record["confirmation_email_status"] == "sent"
 
     client.post("/login", data={"password": "test-password"})
     signups = client.get("/admin/signups")
@@ -233,6 +251,8 @@ def test_public_signup_admin_alert_failure_does_not_fail_signup(monkeypatch, tmp
     assert record["admin_alert_status"] == "failed"
     assert record["admin_alert_sent_at"] is None
     assert record["admin_alert_error"] == "Admin alert email failed to send."
+    assert record["admin_alert_recipient"] == "calvin@example.com"
+    assert record["confirmation_email_status"] == "sent"
 
 
 def test_admin_public_signups_page_lists_verified_request(monkeypatch, tmp_path):

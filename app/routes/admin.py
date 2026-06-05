@@ -3002,6 +3002,27 @@ def render_public_signup_detail(
             linked_lead = get_lead(int(lead_id))
         except (TypeError, ValueError, LeadNotFoundError):
             linked_lead = None
+    def mask_email(value: str) -> str:
+        clean = (value or "").strip()
+        if "@" not in clean:
+            return clean or "—"
+        local, domain = clean.split("@", 1)
+        if len(local) <= 2:
+            masked_local = local[:1] + "***"
+        else:
+            masked_local = local[:2] + "***" + local[-1:]
+        return f"{masked_local}@{domain}"
+
+    email_delivery = {
+        "confirmation_status": signup.get("confirmation_email_status") or "unknown",
+        "confirmation_sent_at": signup.get("confirmation_email_sent_at") or "",
+        "confirmation_recipient": mask_email(signup.get("confirmation_email_recipient") or signup.get("email") or ""),
+        "confirmation_error": signup.get("confirmation_email_error") or "",
+        "admin_status": signup.get("admin_alert_status") or "unknown",
+        "admin_sent_at": signup.get("admin_alert_sent_at") or "",
+        "admin_recipient": mask_email(signup.get("admin_alert_recipient") or settings.admin_alert_email or ""),
+        "admin_error": signup.get("admin_alert_error") or "",
+    }
     return templates.TemplateResponse(
         request,
         "admin_public_signup_detail.html",
@@ -3012,6 +3033,7 @@ def render_public_signup_detail(
             "notice": notice,
             "error": error,
             "linked_lead": linked_lead,
+            "email_delivery": email_delivery,
         },
     )
 

@@ -102,6 +102,35 @@
         </dl>
       </article>
 
+      <article class="signup-step-card">
+        <span class="signup-step-number">Email</span>
+        <h3>Email delivery</h3>
+        <dl class="signup-detail-list">
+          <div>
+            <dt>Confirmation email</dt>
+            <dd>
+              {{ email_delivery.confirmation_status }}
+              {% if email_delivery.confirmation_sent_at %} · {{ email_delivery.confirmation_sent_at }}{% endif %}
+            </dd>
+          </div>
+          <div><dt>Confirmation recipient</dt><dd>{{ email_delivery.confirmation_recipient }}</dd></div>
+          {% if email_delivery.confirmation_error %}
+            <div><dt>Confirmation error</dt><dd>{{ email_delivery.confirmation_error }}</dd></div>
+          {% endif %}
+          <div>
+            <dt>Admin alert</dt>
+            <dd>
+              {{ email_delivery.admin_status }}
+              {% if email_delivery.admin_sent_at %} · {{ email_delivery.admin_sent_at }}{% endif %}
+            </dd>
+          </div>
+          <div><dt>Admin recipient</dt><dd>{{ email_delivery.admin_recipient }}</dd></div>
+          {% if email_delivery.admin_error %}
+            <div><dt>Admin error</dt><dd>{{ email_delivery.admin_error }}</dd></div>
+          {% endif %}
+        </dl>
+      </article>
+
       <article class="signup-step-card {% if next_step == 'approve' %}is-current{% endif %}">
         <span class="signup-step-number">2</span>
         <h3>{% if pre_approval %}Review decision{% else %}Decision{% endif %}</h3>

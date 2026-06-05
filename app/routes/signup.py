@@ -353,6 +353,8 @@ def _build_signup_verification_email(
     subject = "Confirm your Unboks signup"
     body = f"""Hi {first_name},
 
+Please confirm your Unboks signup.
+
 We received a request to create an Unboks workspace for {business_name}.
 
 Please confirm your email address to continue setting up your workspace:
@@ -388,6 +390,9 @@ The Unboks team
             <tr>
               <td style="padding:32px 32px 8px;">
                 <h1 style="margin:0 0 22px;font-size:22px;line-height:1.3;font-weight:700;color:#111827;">Hi {safe_first_name},</h1>
+                <p style="margin:0 0 18px;font-size:16px;line-height:1.55;color:#111827;font-weight:700;">
+                  Please confirm your Unboks signup.
+                </p>
                 <p style="margin:0 0 20px;font-size:16px;line-height:1.55;color:#111827;">
                   We received a request to create an Unboks workspace for <strong>{safe_business_name}</strong>.
                 </p>
@@ -446,7 +451,7 @@ def _build_admin_signup_alert_email(
     review_url: str,
 ) -> tuple[str, str]:
     subject = f"New Unboks free-trial signup: {business_name}"
-    body = f"""New Unboks free-trial signup received.
+    body = f"""Admin alert: New free-trial signup received.
 
 Prospect:
 - Name: {full_name}
@@ -488,9 +493,10 @@ def _send_admin_signup_alert(signup_request) -> None:
             admin_alert_status="not_configured",
             admin_alert_sent_at=None,
             admin_alert_error="SMTP is not configured.",
+            admin_alert_recipient=settings.admin_alert_email or "",
         )
         audit_log.record_event(
-            action="public_signup.admin_alert_skipped",
+            action="signup_admin_alert_skipped",
             result="warning",
             safe_summary="Admin signup alert skipped because SMTP is not configured.",
             metadata=metadata,
@@ -504,9 +510,10 @@ def _send_admin_signup_alert(signup_request) -> None:
             admin_alert_status="not_configured",
             admin_alert_sent_at=None,
             admin_alert_error="Admin alert recipient is not configured.",
+            admin_alert_recipient="",
         )
         audit_log.record_event(
-            action="public_signup.admin_alert_skipped",
+            action="signup_admin_alert_skipped",
             result="warning",
             safe_summary="Admin signup alert skipped because recipient is not configured.",
             metadata=metadata,
@@ -532,9 +539,10 @@ def _send_admin_signup_alert(signup_request) -> None:
             admin_alert_status="failed",
             admin_alert_sent_at=None,
             admin_alert_error="Admin alert email failed to send.",
+            admin_alert_recipient=settings.admin_alert_email,
         )
         audit_log.record_event(
-            action="public_signup.admin_alert_failed",
+            action="signup_admin_alert_failed",
             result="error",
             safe_summary="Admin signup alert email failed to send.",
             metadata={**metadata, "error": type(exc).__name__},
@@ -547,9 +555,10 @@ def _send_admin_signup_alert(signup_request) -> None:
         admin_alert_status="sent",
         admin_alert_sent_at=utc_now().isoformat(),
         admin_alert_error=None,
+        admin_alert_recipient=settings.admin_alert_email,
     )
     audit_log.record_event(
-        action="public_signup.admin_alert_sent",
+        action="signup_admin_alert_sent",
         result="ok",
         safe_summary="Admin signup alert email sent.",
         metadata={**metadata, "recipient": settings.admin_alert_email},
@@ -640,6 +649,24 @@ async def public_signup_submit(
                 html_body=html_body,
             )
         except Exception:
+            update_signup_request(
+                signup_request.id,
+                settings,
+                confirmation_email_status="failed",
+                confirmation_email_sent_at=None,
+                confirmation_email_recipient=signup_request.email,
+                confirmation_email_error="Confirmation email failed to send.",
+            )
+            audit_log.record_event(
+                action="signup_confirmation_email_failed",
+                result="error",
+                safe_summary="Signup confirmation email failed to send.",
+                metadata={
+                    "signup_id": signup_request.id,
+                    "email": signup_request.email,
+                    "business_name": signup_request.business_name,
+                },
+            )
             _send_admin_signup_alert(signup_request)
             return HTMLResponse(
                 _signup_info_html(
@@ -648,6 +675,25 @@ async def public_signup_submit(
                 ),
                 status_code=202,
             )
+        update_signup_request(
+            signup_request.id,
+            settings,
+            confirmation_email_status="sent",
+            confirmation_email_sent_at=utc_now().isoformat(),
+            confirmation_email_recipient=signup_request.email,
+            confirmation_email_error=None,
+        )
+        audit_log.record_event(
+            action="signup_confirmation_email_sent",
+            result="ok",
+            safe_summary="Signup confirmation email sent.",
+            metadata={
+                "signup_id": signup_request.id,
+                "email": signup_request.email,
+                "business_name": signup_request.business_name,
+                "recipient": signup_request.email,
+            },
+        )
         _send_admin_signup_alert(signup_request)
         return HTMLResponse(
             _signup_check_email_html(
@@ -658,6 +704,14 @@ async def public_signup_submit(
         )
 
     _send_admin_signup_alert(signup_request)
+    update_signup_request(
+        signup_request.id,
+        settings,
+        confirmation_email_status="not_configured",
+        confirmation_email_sent_at=None,
+        confirmation_email_recipient=signup_request.email,
+        confirmation_email_error="SMTP is not configured.",
+    )
     return HTMLResponse(
         _signup_info_html(
             "Signup received",
