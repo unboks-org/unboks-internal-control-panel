@@ -2301,6 +2301,74 @@ def admin_public_signup_approve(
     return _signup_detail_redirect(signup_id, notice="Signup approved.")
 
 
+@router.post("/admin/signups/{signup_id}/approve-send-onboarding", response_class=HTMLResponse)
+def admin_public_signup_approve_send_onboarding(
+    request: Request,
+    signup_id: str,
+    review_note: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        signup = get_signup_request(signup_id, settings)
+        if signup.get("archived_at") or signup.get("status") in {
+            "archived",
+            "rejected",
+            "provisioned",
+        }:
+            return _signup_detail_redirect(
+                signup_id,
+                error="This signup is not available for onboarding.",
+            )
+        if signup.get("status") == "onboarding_link_sent":
+            return _signup_detail_redirect(
+                signup_id,
+                generated_link=str(signup.get("onboarding_link") or ""),
+                notice="Onboarding link was already sent for this signup.",
+            )
+        lead = _ensure_onboarding_lead_for_signup(signup, settings)
+        result = prepare_or_send_onboarding_email(lead.id)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        update_signup_request(
+            signup_id,
+            settings,
+            status="onboarding_link_sent" if result.sent else "failed",
+            review_status="approved" if result.sent else "approval_email_failed",
+            reviewed_at=now,
+            review_note=review_note.strip(),
+            onboarding_lead_id=lead.id,
+            onboarding_link_generated_at=now,
+            onboarding_link=result.draft.onboarding_link,
+            onboarding_email_sent_at=now if result.sent else None,
+            onboarding_email_error=result.error or "",
+        )
+        audit_log.record_event(
+            action="public_signup.approved_and_onboarding_sent",
+            result="ok" if result.sent else "failed",
+            safe_summary=(
+                "Public signup approved and onboarding email sent."
+                if result.sent
+                else "Public signup approval failed while sending onboarding email."
+            ),
+            metadata={"signup_id": signup_id, "lead_id": lead.id},
+        )
+    except (TenantCreateError, LeadValidationError, LeadNotFoundError) as exc:
+        return _signup_detail_redirect(signup_id, error=str(exc))
+    if not result.sent:
+        return _signup_detail_redirect(
+            signup_id,
+            error=result.error or "Onboarding email could not be sent.",
+            generated_link=result.draft.onboarding_link,
+        )
+    return _signup_detail_redirect(
+        signup_id,
+        notice=f"Signup approved and onboarding link sent to {signup.get('email')}.",
+        generated_link=result.draft.onboarding_link,
+    )
+
+
 @router.post("/admin/signups/{signup_id}/reject", response_class=HTMLResponse)
 def admin_public_signup_reject(
     request: Request,

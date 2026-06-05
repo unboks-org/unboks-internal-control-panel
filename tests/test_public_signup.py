@@ -315,7 +315,7 @@ def test_admin_public_signup_review_and_onboarding_actions(monkeypatch, tmp_path
     assert detail.status_code == 200
     assert "Current state" in detail.text
     assert "Review details" in detail.text
-    assert "Approve signup" in detail.text
+    assert "Approve &amp; send onboarding link" in detail.text
     assert "Send info request email" in detail.text
     assert "Generate onboarding link" not in detail.text
     assert "Send onboarding link by email" not in detail.text
@@ -338,36 +338,34 @@ def test_admin_public_signup_review_and_onboarding_actions(monkeypatch, tmp_path
     assert "Generate onboarding link" not in info_sent.text
     assert _stored_request(tmp_path)["status"] == "info_requested"
 
+    sent_before = len(sent)
     approved = client.post(
-        f"/admin/signups/{signup_id}/approve",
+        f"/admin/signups/{signup_id}/approve-send-onboarding",
         data={"review_note": "Looks good"},
         follow_redirects=True,
     )
     assert approved.status_code == 200
-    assert "Signup approved." in approved.text
-    assert _stored_request(tmp_path)["status"] == "approved"
-
-    generated = client.post(
-        f"/admin/signups/{signup_id}/generate-link",
-        follow_redirects=True,
-    )
-    assert generated.status_code == 200
-    assert "Generated onboarding link" in generated.text
-    assert "https://icp.unboks.org/onboarding/" in generated.text
-    assert "token_hash" not in generated.text
-    assert _stored_request(tmp_path)["status"] == "onboarding_link_generated"
-
-    sent_before = len(sent)
-    mailed = client.post(
-        f"/admin/signups/{signup_id}/send-onboarding",
-        follow_redirects=True,
-    )
-    assert mailed.status_code == 200
-    assert "Onboarding email sent" in mailed.text
+    assert "Signup approved and onboarding link sent" in approved.text
+    assert "https://icp.unboks.org/onboarding/" in approved.text
+    assert "Copy link" in approved.text
     assert len(sent) == sent_before + 1
     assert sent[-1]["to"] == "ada@example.com"
     assert "Welcome to Unboks" in sent[-1]["subject"]
-    assert _stored_request(tmp_path)["status"] == "onboarding_link_sent"
+    stored = _stored_request(tmp_path)
+    assert stored["status"] == "onboarding_link_sent"
+    assert stored["review_status"] == "approved"
+    assert stored["onboarding_email_sent_at"]
+    assert stored["onboarding_link"].startswith("https://icp.unboks.org/onboarding/")
+    assert "token_hash" not in approved.text
+
+    resent_attempt = client.post(
+        f"/admin/signups/{signup_id}/approve-send-onboarding",
+        data={"review_note": "Looks good"},
+        follow_redirects=True,
+    )
+    assert resent_attempt.status_code == 200
+    assert "already sent" in resent_attempt.text
+    assert len(sent) == sent_before + 1
 
 
 def test_admin_public_signup_reject_archives_and_hides_request(monkeypatch, tmp_path):

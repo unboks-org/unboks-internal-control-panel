@@ -66,14 +66,6 @@
 
         {% if next_step == "approve" %}
           <span class="signup-detail-kicker">Awaiting decision</span>
-        {% elif next_step == "generate" %}
-          <form method="post" action="/admin/signups/{{ signup.id }}/generate-link">
-            <button type="submit">Generate onboarding link</button>
-          </form>
-        {% elif next_step == "send" %}
-          <form method="post" action="/admin/signups/{{ signup.id }}/send-onboarding">
-            <button type="submit">Send onboarding link</button>
-          </form>
         {% elif next_step == "workspace" %}
           <form method="post" action="/admin/signups/{{ signup.id }}/create-workspace">
             <button type="submit">Create workspace</button>
@@ -148,10 +140,11 @@
               {% endif %}
               <button type="submit">Send info request email</button>
             </form>
-            <form method="post" action="/admin/signups/{{ signup.id }}/approve" class="stacked-action-form">
+            <form method="post" action="/admin/signups/{{ signup.id }}/approve-send-onboarding" class="stacked-action-form">
               <label for="review-note">Approval note</label>
               <textarea id="review-note" name="review_note" rows="3" placeholder="Optional approval note">{{ signup.review_note or "" }}</textarea>
-              <button type="submit">Approve signup</button>
+              <p class="muted compact-note">Approves the prospect, generates the onboarding link, and sends the onboarding email in one step.</p>
+              <button type="submit">Approve &amp; send onboarding link</button>
             </form>
             <form method="post" action="/admin/signups/{{ signup.id }}/reject" class="stacked-action-form">
               <label for="reject-reason">Deny reason</label>
@@ -163,12 +156,25 @@
           <p class="muted compact-note">
             {% if current_status in ["archived", "rejected"] %}
               This signup was denied and archived. It is hidden from the normal signup queue.
-            {% elif current_status == "approved" %}
-              This signup is approved. The onboarding process can continue.
+            {% elif current_status == "onboarding_link_sent" %}
+              Onboarding was sent. Create the workspace after the prospect completes onboarding.
+            {% elif current_status in ["approved", "onboarding_link_generated"] %}
+              This signup is approved. Send onboarding if it has not been sent yet.
             {% else %}
               Decision completed.
             {% endif %}
           </p>
+          {% set stored_onboarding_link = generated_link or signup.onboarding_link or "" %}
+          {% if stored_onboarding_link %}
+            <label for="generated-onboarding-link">Onboarding link</label>
+            <div class="copy-row">
+              <input id="generated-onboarding-link" type="text" readonly value="{{ stored_onboarding_link }}">
+              <button type="button" data-ct-copy data-ct-copy-target="generated-onboarding-link">Copy link</button>
+            </div>
+          {% endif %}
+          {% if signup.onboarding_email_sent_at %}
+            <p class="muted compact-note">Onboarding email sent at {{ signup.onboarding_email_sent_at }}.</p>
+          {% endif %}
           {% if signup.reject_reason %}
             <p class="muted compact-note"><strong>Deny reason:</strong> {{ signup.reject_reason }}</p>
           {% endif %}
@@ -176,43 +182,8 @@
       </article>
 
       {% if not pre_approval and current_status not in ["archived", "rejected"] %}
-      <article class="signup-step-card {% if next_step == 'generate' %}is-current{% endif %}">
-        <span class="signup-step-number">3</span>
-        <h3>Generate onboarding link</h3>
-        <p class="muted compact-note">Uses the existing secure onboarding token system. The token hash is never shown.</p>
-        {% if linked_lead %}
-          <p class="muted compact-note">Linked onboarding lead: #{{ linked_lead.id }} · {{ linked_lead.status }}</p>
-        {% endif %}
-        {% if generated_link %}
-          <label for="generated-onboarding-link">Generated onboarding link</label>
-          <div class="copy-row">
-            <input id="generated-onboarding-link" type="text" readonly value="{{ generated_link }}">
-            <button type="button" data-ct-copy data-ct-copy-target="generated-onboarding-link">Copy link</button>
-          </div>
-        {% endif %}
-        <form method="post" action="/admin/signups/{{ signup.id }}/generate-link">
-          <button type="submit">Generate onboarding link</button>
-        </form>
-      </article>
-
-      <article class="signup-step-card {% if next_step == 'send' %}is-current{% endif %}">
-        <span class="signup-step-number">4</span>
-        <h3>Send onboarding link</h3>
-        {% if signup.onboarding_email_error %}
-          <div class="alert alert-error" role="alert">{{ signup.onboarding_email_error }}</div>
-        {% endif %}
-        {% if signup.onboarding_email_sent_at %}
-          <p class="muted compact-note">Sent at {{ signup.onboarding_email_sent_at }}.</p>
-        {% else %}
-          <p class="muted compact-note">Email will be sent to {{ signup.email or "the prospect" }}.</p>
-        {% endif %}
-        <form method="post" action="/admin/signups/{{ signup.id }}/send-onboarding">
-          <button type="submit">Send onboarding link by email</button>
-        </form>
-      </article>
-
       <article class="signup-step-card {% if next_step in ['workspace', 'open'] %}is-current{% endif %}">
-        <span class="signup-step-number">5</span>
+        <span class="signup-step-number">3</span>
         <h3>Create or open workspace</h3>
         {% if signup.provisioned_slug %}
           <p class="muted compact-note">Workspace is already linked.</p>
