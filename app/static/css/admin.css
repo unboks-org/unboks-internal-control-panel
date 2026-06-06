@@ -1969,16 +1969,22 @@ button.button-disabled,
 }
 
 .agent-sot-heading {
-  align-items: flex-start;
+  display: grid;
+  gap: 6px;
+}
+
+.agent-sot-title-row {
+  align-items: center;
   display: flex;
-  gap: 12px;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-start;
 }
 
 .sot-bulk-open {
   font-size: 12px;
   min-height: 34px;
-  padding: 7px 12px;
+  padding: 7px 14px;
   white-space: nowrap;
 }
 
@@ -2214,7 +2220,7 @@ button.button-disabled,
 }
 
 @media (max-width: 720px) {
-  .agent-sot-heading,
+  .agent-sot-title-row,
   .sot-bulk-upload-panel,
   .sot-bulk-actions,
   .sot-bulk-dialog-header {
