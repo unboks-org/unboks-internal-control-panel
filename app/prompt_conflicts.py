@@ -42,6 +42,7 @@ SAFETY_RULE_TEMPLATES = (
 )
 
 LANGUAGE_WORDS = ("english", "spanish", "dutch", "german", "portuguese", "papiamentu")
+KNOWN_AGENT_NAME_WORDS = ("Marina", "Helga", "Helgo", "Emma", "Sofia", "Pepa", "Alia")
 
 
 def safety_rules_for_agent(agent_name: str | None = None) -> tuple[str, ...]:
@@ -298,10 +299,42 @@ def _agent_identity_names(text: str) -> set[str]:
     return names
 
 
-def detect_conflicts(sources: list[PromptSource]) -> list[PromptConflict]:
+def _effective_agent_name_from_sources(sources: list[PromptSource], agent_name: str | None = None) -> str:
+    clean = " ".join(str(agent_name or "").strip().split())
+    if clean:
+        return clean
+    for source_name in ("Nr3 admin agent name override", "Client config agent name"):
+        source = next((s for s in sources if s.name == source_name and s.active), None)
+        if not source:
+            continue
+        names = _agent_identity_names(source.text)
+        if names:
+            return sorted(names)[0]
+    return "Marina"
+
+
+def _stale_sot_agent_name_mentions(text: str, effective_agent_name: str) -> set[str]:
+    effective = effective_agent_name.casefold()
+    candidates = "|".join(re.escape(name) for name in KNOWN_AGENT_NAME_WORDS)
+    found: set[str] = set()
+    patterns = (
+        rf"\b({candidates})\s+(?:should|must|may|will|can|cannot|can't|is|answers?|replies?)\b",
+        rf"\b(?:you are|your name is|assistant(?:'s)? name is|ai agent(?:'s)? name is|agent name is|called)\s+({candidates})\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            name = match.group(1)
+            if name.casefold() != effective:
+                canonical = next((known for known in KNOWN_AGENT_NAME_WORDS if known.casefold() == name.casefold()), name)
+                found.add(canonical)
+    return found
+
+
+def detect_conflicts(sources: list[PromptSource], *, agent_name: str | None = None) -> list[PromptConflict]:
     active = [s for s in sources if s.active and s.status == "indexed" and s.text.strip()]
     conflicts: list[PromptConflict] = []
     safety = next((s for s in sources if s.name == "Platform safety rules"), None)
+    effective_agent_name = _effective_agent_name_from_sources(sources, agent_name)
 
     for src in active:
         text = src.text.lower()
@@ -335,6 +368,30 @@ def detect_conflicts(sources: list[PromptSource]) -> list[PromptConflict]:
                 why_it_matters="This can make the agent give unsafe or unauthorized professional advice.",
                 recommended_fix="Rewrite as neutral information/intake guidance and escalate specific advice requests.",
             ))
+        if src.priority == "sot_company_facts":
+            stale_names = _stale_sot_agent_name_mentions(src.text, effective_agent_name)
+            if stale_names:
+                conflicts.append(PromptConflict(
+                    id=_hash(src.id, "stale-sot-agent-name", effective_agent_name),
+                    severity="Warning",
+                    title="SOT references old AI Agent name",
+                    source_a="AI Agent name setting",
+                    source_b=src.name,
+                    instruction_a=(
+                        f"Your name is {effective_agent_name}. If any Source of Truth entry references a "
+                        f"different assistant name, ignore that name and use {effective_agent_name}."
+                    ),
+                    instruction_b=src.text[:500],
+                    current_winner="AI Agent name setting",
+                    why_it_matters=(
+                        "Source of Truth should contain business facts, not rename the assistant. "
+                        "Old names can confuse live replies if they are not cleaned up."
+                    ),
+                    recommended_fix=(
+                        f"Remove or replace the old assistant name ({', '.join(sorted(stale_names))}) "
+                        f"in this SOT entry. The runtime will still use {effective_agent_name}."
+                    ),
+                ))
 
     language_sources = [(s, _language_directives(s.text)) for s in active]
     language_sources = [(s, langs) for s, langs in language_sources if langs]
@@ -420,7 +477,7 @@ def dangerous_candidate_conflicts(
     ]
     return [
         conflict
-        for conflict in detect_conflicts(sources)
+        for conflict in detect_conflicts(sources, agent_name=agent_name)
         if conflict.severity == "Critical"
     ]
 
@@ -489,7 +546,7 @@ def build_prompt_conflict_report(
         nr2_knowledge=nr2_knowledge,
         agent_name=agent_name,
     )
-    conflicts = detect_conflicts(sources)
+    conflicts = detect_conflicts(sources, agent_name=agent_name)
     reviewed = reviewed_conflict_ids(tenant_id)
     conflict_dicts: list[dict[str, Any]] = []
     for conflict in conflicts:

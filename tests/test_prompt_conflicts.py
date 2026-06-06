@@ -66,6 +66,29 @@ def test_prompt_conflict_report_detects_real_contradictions():
     assert report["effective_prompt_preview"]["active_rules"]
 
 
+def test_prompt_conflict_report_warns_when_sot_references_old_agent_name():
+    icp_overrides.set_agent_name_override("unboks", "Emma")
+    icp_overrides.add_sot_entry(
+        "unboks",
+        title="Old assistant instruction",
+        category="tone",
+        content="Helga should answer all product questions with a friendly tone.",
+    )
+
+    report = build_prompt_conflict_report("unboks", agent_name="Emma")
+    stale_name_conflicts = [
+        conflict
+        for conflict in report["active_conflicts"]
+        if conflict["title"] == "SOT references old AI Agent name"
+    ]
+
+    assert stale_name_conflicts
+    conflict = stale_name_conflicts[0]
+    assert conflict["current_winner"] == "AI Agent name setting"
+    assert "use Emma" in conflict["instruction_a"]
+    assert "Helga" in conflict["recommended_fix"]
+
+
 def test_prompt_conflict_report_indexes_runtime_manifest_sources():
     nr2 = Nr2KnowledgeSync(
         status="ok",
