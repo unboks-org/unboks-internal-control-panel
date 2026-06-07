@@ -36,7 +36,7 @@ def _html(client) -> str:
 
 
 def test_workspace_has_expected_sections(client):
-    """The keep-list sections plus the read-only Nr2 knowledge sync panel."""
+    """The keep-list sections plus tenant media and read-only Nr2 sync panels."""
     html = _html(client)
     aria_labels = re.findall(
         r'<details[^>]*ws-section[^>]*>.*?aria-label="([^"]+)"',
@@ -47,6 +47,7 @@ def test_workspace_has_expected_sections(client):
         "AI Agent",
         "Prompt Conflicts",
         "Auto-Block Rules",
+        "Tenant media images",
         "Nr2 company knowledge",
         "Escalations",
         "Tenant notes",

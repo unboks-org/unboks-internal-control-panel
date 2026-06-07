@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.nr2_sync import Nr2KnowledgeSync
 from app.nr2_sync import (
+    delete_nr2_photo,
     fetch_nr2_knowledge,
     fetch_nr2_photo_image,
     update_nr2_info_update,
@@ -227,9 +228,13 @@ def test_nr2_sync_falls_back_to_photo_library_for_images(monkeypatch):
     sync = fetch_nr2_knowledge("wibrandt", client=client)
 
     assert sync.knowledge_media[0]["caption"] == "Cupcake.jpg"
+    assert sync.knowledge_media[0]["id"] == "42"
     assert sync.knowledge_media[0]["tags"] == "cupcake, red velvet"
     assert sync.knowledge_media[0]["service_key"] == "red-velvet"
     assert sync.knowledge_media[0]["url"] == "/admin/tenants/wibrandt/media/42"
+    assert sync.knowledge_media[0]["provider_url"] == (
+        "https://api.unboks.org/api/wibrandt/dashboard/api/public/media/photo_42.jpg"
+    )
 
 
 def test_upload_nr2_photo_posts_to_tenant_photo_library(monkeypatch):
@@ -295,6 +300,33 @@ def test_fetch_nr2_photo_image_proxies_authenticated_image(monkeypatch):
     assert error == ""
     assert content == b"JPEGDATA"
     assert content_type == "image/jpeg"
+
+
+def test_delete_nr2_photo_deletes_from_tenant_photo_library(monkeypatch):
+    monkeypatch.setattr(
+        "app.nr2_sync.get_tenant_client_data",
+        lambda tenant: {"password": "secret-password"},
+    )
+    monkeypatch.setenv(
+        "NR3_TENANT_API_BASE_TEMPLATE",
+        "https://api.example.test/api/{tenant}/dashboard/api",
+    )
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "safe-token"})
+        assert request.headers["authorization"] == "Bearer safe-token"
+        if request.method == "DELETE" and request.url.path.endswith("/photos/7"):
+            seen["deleted"] = request.url.path
+            return httpx.Response(200, json={"ok": True})
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = delete_nr2_photo("wibrandt", "7", client=client)
+
+    assert result.ok is True
+    assert seen["deleted"] == "/api/wibrandt/dashboard/api/photos/7"
 
 
 def test_nr2_sync_returns_fresh_cache_without_hitting_runtime(monkeypatch, tmp_path):

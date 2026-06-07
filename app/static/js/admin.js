@@ -268,11 +268,12 @@
     document.querySelectorAll("[data-copy-text]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var text = btn.getAttribute("data-copy-text") || "";
+        var label = btn.getAttribute("data-copy-label") || btn.textContent || "Copy";
         if (!text) return;
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(text).then(function () {
             btn.textContent = "Copied";
-            window.setTimeout(function () { btn.textContent = "Copy email"; }, 1500);
+            window.setTimeout(function () { btn.textContent = label; }, 1500);
           });
         }
       });

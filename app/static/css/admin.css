@@ -3821,6 +3821,72 @@ button.button-disabled,
   white-space: nowrap;
 }
 
+.tenant-media-panel {
+  background: #f8fbff;
+}
+
+.tenant-media-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  margin-top: 14px;
+}
+
+.tenant-media-card {
+  background: #fff;
+  border: 1px solid #dfe8f5;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.tenant-media-thumb {
+  border: 1px solid #edf0f4;
+  border-radius: 7px;
+  display: block;
+  overflow: hidden;
+}
+
+.tenant-media-thumb img {
+  aspect-ratio: 4 / 3;
+  background: #f6f8fb;
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.tenant-media-meta {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tenant-media-meta strong,
+.tenant-media-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tenant-media-meta strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.tenant-media-meta span {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.tenant-media-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 @media (max-width: 760px) {
   .nr2-knowledge-header {
     flex-direction: column;

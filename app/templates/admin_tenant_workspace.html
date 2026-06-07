@@ -781,6 +781,95 @@
     </section>
   </details>
 
+  <span id="tenant-media-section"></span>
+  <details class="ws-section ws-tone-green">
+    <summary class="ws-summary">
+      <span class="ws-title">Media / Images for customers</span>
+      <span class="ws-desc muted">Upload and manage tenant images available to operators in Nr2.</span>
+      <span class="ws-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
+    <section class="nr2-knowledge-panel tenant-media-panel" aria-label="Tenant media images">
+      <header class="nr2-knowledge-header">
+        <div>
+          <h3>Media / Images for customers</h3>
+          <p class="muted compact-note">
+            Images uploaded here are stored in this tenant's media library. Available to operators in Nr2 image picker.
+          </p>
+        </div>
+        <span class="status-chip status-{{ 'ok' if nr2_knowledge.status == 'ok' else ('warn' if nr2_knowledge.status == 'partial' else 'unknown') }}">
+          {{ nr2_knowledge.knowledge_media | length }} images
+        </span>
+      </header>
+
+      {% if nr2_knowledge.status not in ['ok', 'partial'] %}
+        <div class="form-feedback form-feedback-warn" role="status">
+          Tenant media library is not reachable: {{ nr2_knowledge.error or nr2_knowledge.status }}.
+        </div>
+      {% endif %}
+
+      <form method="post" action="/admin/tenants/{{ tenant.id }}/media/upload#tenant-media-section" enctype="multipart/form-data" class="media-upload-form">
+        <label class="media-upload-file">
+          <span>Upload image</span>
+          <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+        </label>
+        <div class="media-upload-fields">
+          <label>
+            Tags
+            <input type="text" name="tags" placeholder="cupcake, product code, menu">
+          </label>
+          <label>
+            Product / item key
+            <input type="text" name="service_key" placeholder="red-velvet-cupcake">
+          </label>
+        </div>
+        <div class="agent-form-actions">
+          <button type="submit" class="button-secondary">Upload image</button>
+        </div>
+        <p class="muted compact-note">JPG, PNG, or WebP only. Max 10 MB. No raw VPS paths are exposed.</p>
+      </form>
+
+      {% if nr2_knowledge.knowledge_media %}
+        <div class="tenant-media-grid">
+          {% for image in nr2_knowledge.knowledge_media %}
+            <article class="tenant-media-card">
+              <a class="tenant-media-thumb" href="{{ image.provider_url or image.url }}" target="_blank" rel="noreferrer">
+                {% if image.url %}
+                  <img src="{{ image.url }}" alt="{{ image.caption }}">
+                {% endif %}
+              </a>
+              <div class="tenant-media-meta">
+                <strong>{{ image.caption }}</strong>
+                {% if image.filename %}<span>{{ image.filename }}</span>{% endif %}
+                {% if image.uploaded_at %}<span>Uploaded {{ image.uploaded_at }}</span>{% endif %}
+                {% if image.size_bytes %}<span>{{ image.size_bytes }} bytes</span>{% endif %}
+                {% if image.tags %}<span>Tags: {{ image.tags }}</span>{% endif %}
+                {% if image.service_key %}<span>Key: {{ image.service_key }}</span>{% endif %}
+              </div>
+              <div class="tenant-media-actions">
+                {% if image.provider_url %}
+                  <a class="text-button" href="{{ image.provider_url }}" target="_blank" rel="noreferrer">Open provider URL</a>
+                  <button type="button" class="text-button" data-copy-text="{{ image.provider_url }}" data-copy-label="Copy image URL">Copy image URL</button>
+                {% else %}
+                  <span class="status-chip status-unknown">No provider URL</span>
+                {% endif %}
+                {% if image.id %}
+                  <form method="post" action="/admin/tenants/{{ tenant.id }}/media/{{ image.id }}/delete#tenant-media-section" onsubmit="return confirm('Delete this image from the tenant media library?');">
+                    <button type="submit" class="text-button danger-text">Delete</button>
+                  </form>
+                {% endif %}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted compact-note nr2-empty">
+          No images yet. Upload an image here and it will appear in the tenant's Nr2 image picker.
+        </p>
+      {% endif %}
+    </section>
+  </details>
+
   <details class="ws-section ws-tone-green">
     <summary class="ws-summary">
       <span class="ws-title">Nr2 company knowledge</span>
@@ -833,25 +922,6 @@
           <span class="data-stat-value">{{ nr2_knowledge.knowledge_media | length }}</span>
         </div>
       </div>
-
-      <form method="post" action="/admin/tenants/{{ tenant.id }}/media/upload#nr2-knowledge-section" enctype="multipart/form-data" class="media-upload-form">
-        <label class="media-upload-file">
-          <span>Upload product/property image</span>
-          <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
-        </label>
-        <div class="media-upload-fields">
-          <label>
-            Tags
-            <input type="text" name="tags" placeholder="cupcake, oceanview, product code">
-          </label>
-          <label>
-            Product / item key
-            <input type="text" name="service_key" placeholder="red-velvet-cupcake">
-          </label>
-        </div>
-        <button type="submit" class="button-secondary">Upload image</button>
-        <p class="muted compact-note">Uploads into the same tenant media library used by Nr2.</p>
-      </form>
 
       {% if nr2_knowledge.total_items == 0 %}
         <p class="muted compact-note nr2-empty">

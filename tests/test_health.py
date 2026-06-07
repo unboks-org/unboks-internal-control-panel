@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app import audit_log
 from app.main import app
 from app.onboarding import (
     INTAKE_QUESTIONS,
@@ -258,9 +259,10 @@ def test_tenant_workspace_renders_with_status_and_actions(monkeypatch, tmp_path)
     assert "danger-zone" in workspace.text
     assert "The master Unboks tenant is protected from suspension." in workspace.text
     # Nr3 can upload into the same tenant media library used by Nr2.
-    assert 'action="/admin/tenants/unboks/media/upload#nr2-knowledge-section"' in workspace.text
+    assert "Media / Images for customers" in workspace.text
+    assert 'action="/admin/tenants/unboks/media/upload#tenant-media-section"' in workspace.text
     assert 'name="image"' in workspace.text
-    assert "Upload product/property image" in workspace.text
+    assert "Available to operators in Nr2 image picker" in workspace.text
     # Thin-control rule: no fake disabled workspace controls.
     assert " disabled" not in workspace.text
     assert 'aria-current="page"' in workspace.text
@@ -317,19 +319,85 @@ def test_admin_tenant_media_upload_posts_to_nr2(monkeypatch, tmp_path) -> None:
 
     response = client.post(
         "/admin/tenants/unboks/media/upload",
-        files={"image": ("product.png", b"image-bytes", "image/png")},
+        files={"image": ("product.png", b"\x89PNG\r\n\x1a\nimage-bytes", "image/png")},
         data={"tags": "product, hero", "service_key": "hero-product"},
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert response.headers["location"].startswith("/admin/tenants/unboks")
+    assert response.headers["location"].endswith("#tenant-media-section")
     assert seen["tenant_id"] == "unboks"
     assert seen["filename"] == "product.png"
-    assert seen["content"] == b"image-bytes"
+    assert seen["content"] == b"\x89PNG\r\n\x1a\nimage-bytes"
     assert seen["tags"] == "product, hero"
     assert seen["service_key"] == "hero-product"
     assert seen["refreshed"] == ("unboks", True)
+    events = audit_log.list_events(limit=5)
+    assert any(event.action == "tenant_media_uploaded" and event.tenant_id == "unboks" for event in events)
+
+
+def test_admin_tenant_media_upload_rejects_spoofed_file(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    called = False
+
+    def fake_upload(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("invalid image should not reach Nr2")
+
+    monkeypatch.setattr("app.routes.admin.upload_nr2_photo", fake_upload)
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"}, follow_redirects=False)
+
+    response = client.post(
+        "/admin/tenants/unboks/media/upload",
+        files={"image": ("product.png", b"not-a-real-png", "image/png")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "Invalid+image+file" in response.headers["location"]
+    assert called is False
+
+
+def test_admin_tenant_media_delete_posts_to_nr2_and_audits(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    seen: dict[str, object] = {}
+
+    class Result:
+        ok = True
+        status = "ok"
+        error = ""
+
+    def fake_delete(tenant_id, photo_id):
+        seen["tenant_id"] = tenant_id
+        seen["photo_id"] = photo_id
+        return Result()
+
+    monkeypatch.setattr("app.routes.admin.delete_nr2_photo", fake_delete)
+    monkeypatch.setattr(
+        "app.routes.admin.fetch_nr2_knowledge",
+        lambda tenant_id, refresh=False: seen.setdefault("refreshed", (tenant_id, refresh)),
+    )
+
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"}, follow_redirects=False)
+
+    response = client.post(
+        "/admin/tenants/unboks/media/12/delete",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("#tenant-media-section")
+    assert seen == {"tenant_id": "unboks", "photo_id": "12", "refreshed": ("unboks", True)}
+    events = audit_log.list_events(limit=5)
+    assert any(event.action == "tenant_media_deleted" and event.tenant_id == "unboks" for event in events)
 
 def test_admin_onboarding_and_reviews_still_reachable(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")

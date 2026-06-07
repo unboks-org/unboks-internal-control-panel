@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from urllib.parse import quote
 
 from app.tenants import get_tenant_client_data
 
@@ -65,6 +66,17 @@ class Nr2MediaUploadResult:
     source_url: str = ""
     error: str = ""
     photo: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
+@dataclass(frozen=True)
+class Nr2MediaDeleteResult:
+    status: str
+    source_url: str = ""
+    error: str = ""
 
     @property
     def ok(self) -> bool:
@@ -230,6 +242,21 @@ def _tenant_password(tenant_id: str) -> str:
     return ""
 
 
+def _public_media_url(tenant_id: str, filename: str) -> str:
+    safe_filename = _clean_text(filename, 240)
+    if not tenant_id or not safe_filename:
+        return ""
+    base = (
+        os.getenv("NR3_PUBLIC_API_BASE_URL")
+        or os.getenv("PUBLIC_API_BASE_URL")
+        or "https://api.unboks.org"
+    ).strip().rstrip("/")
+    return (
+        f"{base}/api/{quote(tenant_id)}/dashboard/api/public/media/"
+        f"{quote(safe_filename)}"
+    )
+
+
 def _safe_sot_blocks(raw: Any) -> tuple[dict[str, Any], ...]:
     blocks = raw.get("blocks") if isinstance(raw, dict) else raw
     if not isinstance(blocks, list):
@@ -332,13 +359,23 @@ def _safe_media(raw: Any, tenant_id: str = "") -> tuple[dict[str, Any], ...]:
             180,
         )
         filename = _clean_text(item.get("originalFilename") or item.get("filename"), 180)
+        stored_filename = _clean_text(item.get("filename"), 180)
+        provider_url = _clean_text(item.get("public_url") or item.get("provider_url"), 500)
+        if not provider_url and url.startswith("http") and "/public/media/" in url:
+            provider_url = url
+        if not provider_url and tenant_id and stored_filename:
+            provider_url = _public_media_url(tenant_id, stored_filename)
         if not (url or caption or filename):
             continue
         out.append({
+            "id": photo_id,
             "caption": caption or filename or "Image",
             "filename": filename,
+            "stored_filename": stored_filename,
             "url": url,
+            "provider_url": provider_url,
             "knowledge_id": _clean_text(item.get("knowledgeId") or item.get("knowledge_id"), 80),
+            "size_bytes": int(item.get("sizeBytes") or item.get("size_bytes") or item.get("file_size") or 0),
             "uploaded_at": _clean_text(item.get("uploadedAt") or item.get("uploaded_at"), 80),
             "tags": tag_text,
             "service_key": service_key,
@@ -657,6 +694,43 @@ def fetch_nr2_photo_image(
         return response.content, response.headers.get("content-type", "image/jpeg"), ""
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         return b"", "text/plain", str(exc)[:220]
+    finally:
+        if owns_client:
+            http.close()
+
+
+def delete_nr2_photo(
+    tenant_id: str,
+    photo_id: str,
+    *,
+    client: httpx.Client | None = None,
+) -> Nr2MediaDeleteResult:
+    """Delete one image from the tenant runtime's photo library."""
+    if not re.fullmatch(r"\d+", str(photo_id or "")):
+        return Nr2MediaDeleteResult(status="invalid", error="Invalid photo id.")
+    base = _api_base_for_tenant(tenant_id)
+    owns_client = client is None
+    http = client or httpx.Client(timeout=5)
+    try:
+        token, error = _login_token(http, base, tenant_id)
+        if error:
+            return Nr2MediaDeleteResult(status="missing_credentials", source_url=base, error=error)
+        response = http.delete(
+            f"{base}/photos/{photo_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        response.raise_for_status()
+        return Nr2MediaDeleteResult(status="ok", source_url=base)
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return Nr2MediaDeleteResult(status="offline", source_url=base, error="Tenant runtime is offline or unreachable.")
+    except httpx.HTTPStatusError as exc:
+        return Nr2MediaDeleteResult(
+            status="auth_failed" if exc.response.status_code in {401, 403, 405} else "unavailable",
+            source_url=base,
+            error=f"Nr2 returned HTTP {exc.response.status_code}.",
+        )
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return Nr2MediaDeleteResult(status="unavailable", source_url=base, error=str(exc)[:220])
     finally:
         if owns_client:
             http.close()

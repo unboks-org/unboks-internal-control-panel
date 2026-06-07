@@ -50,6 +50,7 @@ from app.security import (
 )
 from app.provisioning import auto_provision_tenant, queue_tenant_host_action
 from app.nr2_sync import (
+    delete_nr2_photo,
     fetch_nr2_photo_image,
     fetch_auto_block_settings,
     fetch_nr2_knowledge,
@@ -102,6 +103,40 @@ from urllib.parse import quote_plus
 
 
 logger = logging.getLogger(__name__)
+
+_ADMIN_MEDIA_MAX_BYTES = 10 * 1024 * 1024
+_ADMIN_MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+def _validate_admin_media_upload(filename: str, content_type: str, content: bytes) -> str:
+    """Return an error message for unsafe tenant media uploads, else empty string."""
+    clean_name = (filename or "").strip().lower()
+    suffix = ""
+    if "." in clean_name:
+        suffix = "." + clean_name.rsplit(".", 1)[-1]
+    expected = _ADMIN_MEDIA_TYPES.get(suffix)
+    if expected is None:
+        return "Use a JPG, PNG, or WebP image."
+    if len(content) > _ADMIN_MEDIA_MAX_BYTES:
+        return "Image is over 10 MB."
+    supplied_type = (content_type or "").lower().split(";", 1)[0].strip()
+    if supplied_type and supplied_type not in set(_ADMIN_MEDIA_TYPES.values()):
+        return "Use a JPG, PNG, or WebP image."
+    if expected == "image/jpeg":
+        if not content.startswith(b"\xff\xd8\xff"):
+            return "Invalid image file."
+    elif expected == "image/png":
+        if not content.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "Invalid image file."
+    elif expected == "image/webp":
+        if not (content.startswith(b"RIFF") and content[8:12] == b"WEBP"):
+            return "Invalid image file."
+    return ""
 
 
 router = APIRouter()
@@ -2260,6 +2295,22 @@ async def admin_upload_tenant_media(
         return RedirectResponse(url="/admin/tenants", status_code=303)
 
     content = await image.read()
+    validation_error = _validate_admin_media_upload(
+        image.filename or "",
+        image.content_type or "",
+        content,
+    )
+    if validation_error:
+        return RedirectResponse(
+            url=(
+                f"/admin/tenants/{tenant.id}"
+                f"?action_message={quote_plus(validation_error)}"
+                "&action_level=warn"
+                "#tenant-media-section"
+            ),
+            status_code=303,
+        )
+
     result = upload_nr2_photo(
         tenant.id,
         filename=image.filename or "image.jpg",
@@ -2293,7 +2344,48 @@ async def admin_upload_tenant_media(
             f"/admin/tenants/{tenant.id}"
             f"?action_message={quote_plus(message)}"
             f"&action_level={level}"
-            "#nr2-knowledge-section"
+            "#tenant-media-section"
+        ),
+        status_code=303,
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/media/{photo_id}/delete")
+def admin_delete_tenant_media(
+    request: Request,
+    tenant_id: str,
+    photo_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    result = delete_nr2_photo(tenant.id, photo_id)
+    if result.ok:
+        fetch_nr2_knowledge(tenant.id, refresh=True)
+        audit_log.record_event(
+            action="tenant_media_deleted",
+            actor="internal_admin",
+            tenant_id=tenant.id,
+            safe_summary="Tenant media image deleted from Nr3.",
+            metadata={"photo_id": photo_id},
+        )
+        message = "Image deleted from the tenant media library."
+        level = "ok"
+    else:
+        message = f"Image delete failed: {result.error or result.status}."
+        level = "warn"
+
+    return RedirectResponse(
+        url=(
+            f"/admin/tenants/{tenant.id}"
+            f"?action_message={quote_plus(message)}"
+            f"&action_level={level}"
+            "#tenant-media-section"
         ),
         status_code=303,
     )
