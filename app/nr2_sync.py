@@ -482,7 +482,7 @@ def fetch_nr2_knowledge(
         sot = optional("/source-of-truth")
         updates = optional("/settings/info-updates")
         files = optional("/knowledge/files")
-        media = optional("/knowledge/media", record_missing=False)
+        media = optional("/knowledge/media/library", record_missing=False)
         if not media:
             # Older/current tenant runtimes expose the same image library as
             # /photos. Nr3 normalizes it into the Knowledge images panel.

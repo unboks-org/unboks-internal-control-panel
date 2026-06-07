@@ -78,7 +78,7 @@ def test_nr2_sync_fetches_safe_company_knowledge(monkeypatch):
                     ]
                 },
             )
-        if request.url.path.endswith("/knowledge/media"):
+        if request.url.path.endswith("/knowledge/media/library"):
             return httpx.Response(
                 200,
                 json={
@@ -180,7 +180,7 @@ def test_nr2_sync_handles_optional_missing_endpoint_as_partial(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path.endswith("/login"):
             return httpx.Response(200, json={"token": "safe-token"})
-        if request.url.path.endswith("/knowledge/media") or request.url.path.endswith("/photos"):
+        if request.url.path.endswith("/knowledge/media/library") or request.url.path.endswith("/photos"):
             return httpx.Response(404)
         return httpx.Response(200, json={})
 
@@ -205,7 +205,7 @@ def test_nr2_sync_falls_back_to_photo_library_for_images(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path.endswith("/login"):
             return httpx.Response(200, json={"token": "safe-token"})
-        if request.url.path.endswith("/knowledge/media"):
+        if request.url.path.endswith("/knowledge/media/library"):
             return httpx.Response(404)
         if request.url.path.endswith("/photos"):
             return httpx.Response(
