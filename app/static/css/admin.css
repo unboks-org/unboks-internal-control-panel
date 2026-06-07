@@ -1966,6 +1966,11 @@ button.button-disabled,
   margin-top: 8px;
 }
 
+.inline-edit-panel-header {
+  margin-top: 0;
+  position: relative;
+}
+
 .inline-edit-panel > summary {
   cursor: pointer;
   display: inline-flex;
@@ -1984,6 +1989,22 @@ button.button-disabled,
   gap: 10px;
   margin-top: 8px;
   padding: 10px;
+}
+
+.agent-sot-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.agent-sot-edit-popout {
+  min-width: min(560px, calc(100vw - 48px));
+  position: absolute;
+  right: 0;
+  top: 18px;
+  z-index: 20;
 }
 
 .checkbox-row {

@@ -500,40 +500,42 @@
                     <span class="status-chip status-ok">{{ entry.category }}</span>
                     <strong>{{ entry.title }}</strong>
                   </div>
-                  <form method="post" action="/admin/tenants/{{ tenant.id }}/sot/{{ entry.id }}/delete">
-                    <button type="submit" class="text-button danger-text">Delete</button>
-                  </form>
+                  <div class="agent-sot-actions">
+                    <details class="inline-edit-panel inline-edit-panel-header">
+                      <summary class="text-button">Edit</summary>
+                      <form method="post" action="/admin/tenants/{{ tenant.id }}/sot/{{ entry.id }}/edit" class="agent-sot-form compact-edit-form agent-sot-edit-popout">
+                        <div class="agent-sot-row">
+                          <label class="agent-form-field">
+                            <span>Title</span>
+                            <input type="text" name="title" value="{{ entry.title }}" required>
+                          </label>
+                          <label class="agent-form-field">
+                            <span>Category</span>
+                            <select name="category">
+                              {% for option in ['general', 'services', 'pricing', 'hours', 'policy', 'faq', 'tone', 'other'] %}
+                                <option value="{{ option }}" {% if entry.category == option %}selected{% endif %}>{{ option }}</option>
+                              {% endfor %}
+                            </select>
+                          </label>
+                        </div>
+                        <label class="agent-form-field">
+                          <span>Fact / instruction</span>
+                          <textarea name="content" rows="4" required>{{ entry.content }}</textarea>
+                        </label>
+                        <div class="agent-form-actions">
+                          <button type="submit" class="button-secondary">Save edit</button>
+                        </div>
+                      </form>
+                    </details>
+                    <form method="post" action="/admin/tenants/{{ tenant.id }}/sot/{{ entry.id }}/delete">
+                      <button type="submit" class="text-button danger-text">Delete</button>
+                    </form>
+                  </div>
                 </div>
                 <p class="agent-sot-content">{{ entry.content }}</p>
                 {% if entry.updated_at %}
                   <p class="muted compact-note">Updated {{ entry.updated_at }}</p>
                 {% endif %}
-                <details class="inline-edit-panel">
-                  <summary class="text-button">Edit</summary>
-                  <form method="post" action="/admin/tenants/{{ tenant.id }}/sot/{{ entry.id }}/edit" class="agent-sot-form compact-edit-form">
-                    <div class="agent-sot-row">
-                      <label class="agent-form-field">
-                        <span>Title</span>
-                        <input type="text" name="title" value="{{ entry.title }}" required>
-                      </label>
-                      <label class="agent-form-field">
-                        <span>Category</span>
-                        <select name="category">
-                          {% for option in ['general', 'services', 'pricing', 'hours', 'policy', 'faq', 'tone', 'other'] %}
-                            <option value="{{ option }}" {% if entry.category == option %}selected{% endif %}>{{ option }}</option>
-                          {% endfor %}
-                        </select>
-                      </label>
-                    </div>
-                    <label class="agent-form-field">
-                      <span>Fact / instruction</span>
-                      <textarea name="content" rows="4" required>{{ entry.content }}</textarea>
-                    </label>
-                    <div class="agent-form-actions">
-                      <button type="submit" class="button-secondary">Save edit</button>
-                    </div>
-                  </form>
-                </details>
               </li>
             {% endfor %}
           </ul>
