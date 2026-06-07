@@ -53,6 +53,7 @@ from app.nr2_sync import (
     fetch_nr2_photo_image,
     fetch_auto_block_settings,
     fetch_nr2_knowledge,
+    update_nr2_info_update,
     update_auto_block_settings,
     upload_nr2_photo,
 )
@@ -950,6 +951,59 @@ def admin_add_sot_entry(
     )
 
 
+@router.post("/admin/tenants/{tenant_id}/sot/{entry_id}/edit")
+def admin_edit_sot_entry(
+    request: Request,
+    tenant_id: str,
+    entry_id: str,
+    title: str = Form(default=""),
+    category: str = Form(default="general"),
+    content: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+    conflicts = dangerous_candidate_conflicts(
+        tenant_id,
+        name="Edited Nr3 Source of Truth entry",
+        text=content,
+        priority="sot_company_facts",
+        agent_name=_effective_agent_name(tenant_id),
+    )
+    if conflicts:
+        return _workspace_redirect(
+            tenant_id,
+            "prompt-conflicts-section",
+            message=f"Source of Truth not saved: {conflicts[0].title}.",
+            level="warn",
+        )
+    from app import icp_overrides
+    try:
+        updated = icp_overrides.update_sot_entry(
+            tenant_id,
+            entry_id,
+            title=title,
+            category=category,
+            content=content,
+        )
+    except ValueError as exc:
+        return _workspace_redirect(
+            tenant_id,
+            "agent-section",
+            message=str(exc),
+            level="warn",
+        )
+    return _workspace_redirect(
+        tenant_id,
+        "agent-section",
+        message="Source of Truth entry updated." if updated else "Source of Truth entry was not found.",
+        level="ok" if updated else "warn",
+    )
+
+
 @router.post("/admin/tenants/{tenant_id}/sot/{entry_id}/delete")
 def admin_delete_sot_entry(
     request: Request,
@@ -969,6 +1023,68 @@ def admin_delete_sot_entry(
         "agent-section",
         message="Source of Truth entry deleted." if deleted else "Source of Truth entry was not found.",
         level="ok" if deleted else "warn",
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/nr2-knowledge/info-updates/{update_id}/edit")
+def admin_edit_nr2_info_update(
+    request: Request,
+    tenant_id: str,
+    update_id: str,
+    type_: str = Form(default="general", alias="type"),
+    text: str = Form(default=""),
+    active: Optional[str] = Form(default=None),
+    start_date: str = Form(default=""),
+    end_date: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    result = update_nr2_info_update(
+        tenant.id,
+        update_id,
+        type_=type_,
+        text=text,
+        active=active == "on",
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if result.ok:
+        fetch_nr2_knowledge(tenant.id, refresh=True)
+        audit_log.record_event(
+            action="nr2_info_update_edited",
+            actor="internal_admin",
+            tenant_id=tenant.id,
+            result="success",
+            safe_summary="Nr2 saved knowledge update edited from Nr3.",
+            metadata={"update_id": update_id, "source_url": result.source_url},
+        )
+        message = "Nr2 saved knowledge update edited."
+        level = "ok"
+    else:
+        audit_log.record_event(
+            action="nr2_info_update_edited",
+            actor="internal_admin",
+            tenant_id=tenant.id,
+            result="failed",
+            safe_summary=result.error or result.status,
+            metadata={"update_id": update_id, "source_url": result.source_url},
+        )
+        message = f"Nr2 edit failed: {result.error or result.status}."
+        level = "warn"
+    return RedirectResponse(
+        url=(
+            f"/admin/tenants/{tenant.id}"
+            f"?action_message={quote_plus(message)}"
+            f"&action_level={level}"
+            "#nr2-knowledge-section"
+        ),
+        status_code=303,
     )
 
 

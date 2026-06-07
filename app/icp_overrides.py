@@ -522,6 +522,55 @@ def add_sot_entry(
     return entry
 
 
+def update_sot_entry(
+    tenant_id: str,
+    entry_id: str,
+    *,
+    title: str,
+    content: str,
+    category: str = "general",
+    updated_by: str = "nr3-admin",
+) -> dict[str, Any] | None:
+    """Update one authoritative Source of Truth entry without changing its id."""
+    clean_id = _clean_text(entry_id)
+    clean_title = _clean_text(title)
+    clean_content = _clean_text(content)
+    if not clean_id:
+        raise ValueError("SOT entry id is required.")
+    if not clean_title:
+        raise ValueError("SOT title is required.")
+    if not clean_content:
+        raise ValueError("SOT content is required.")
+
+    data = _load_all()
+    tenants = data.get("tenants") if isinstance(data, dict) else {}
+    tenant_state = tenants.get(tenant_id) if isinstance(tenants, dict) else {}
+    if not isinstance(tenant_state, dict):
+        return None
+    entries = tenant_state.get("sot_entries")
+    if not isinstance(entries, list):
+        return None
+
+    for index, existing in enumerate(entries):
+        if _clean_text(existing.get("id")) != clean_id:
+            continue
+        updated = {
+            **existing,
+            "id": clean_id,
+            "title": clean_title,
+            "content": clean_content,
+            "category": _clean_text(category) or "general",
+            "source": existing.get("source") or "icp_override",
+            "updated_at": _now(),
+            "updated_by": updated_by,
+        }
+        entries[index] = updated
+        _save_all(data)
+        logger.info("icp_overrides.update_sot_entry tenant=%s entry=%s", tenant_id, clean_id)
+        return _normalize_sot_entry(updated)
+    return None
+
+
 def delete_sot_entry(tenant_id: str, entry_id: str) -> bool:
     data = _load_all()
     tenants = data.get("tenants") if isinstance(data, dict) else {}

@@ -1962,6 +1962,38 @@ button.button-disabled,
   justify-content: flex-start;
 }
 
+.inline-edit-panel {
+  margin-top: 8px;
+}
+
+.inline-edit-panel > summary {
+  cursor: pointer;
+  display: inline-flex;
+  list-style: none;
+}
+
+.inline-edit-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.compact-edit-form {
+  background: #f8fafc;
+  border: 1px solid #e6ebf2;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px;
+}
+
+.checkbox-row {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 8px;
+}
+
 .agent-sot-row {
   display: grid;
   gap: 8px;

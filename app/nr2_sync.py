@@ -71,6 +71,18 @@ class Nr2MediaUploadResult:
         return self.status == "ok"
 
 
+@dataclass(frozen=True)
+class Nr2InfoUpdateResult:
+    status: str
+    source_url: str = ""
+    error: str = ""
+    update: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
 def _api_base_for_tenant(tenant_id: str) -> str:
     template = os.getenv(
         "NR3_TENANT_API_BASE_TEMPLATE",
@@ -268,7 +280,10 @@ def _safe_info_updates(raw: Any) -> tuple[dict[str, Any], ...]:
             "type": _clean_text(update.get("type"), 40) or "general",
             "text": text,
             "active": update.get("active") is not False,
+            "start_date": _clean_text(update.get("startDate") or update.get("start_date"), 80),
+            "end_date": _clean_text(update.get("endDate") or update.get("end_date"), 80),
             "created_at": _clean_text(update.get("createdAt") or update.get("created_at"), 80),
+            "updated_at": _clean_text(update.get("updatedAt") or update.get("updated_at"), 80),
         })
     return tuple(out)
 
@@ -483,6 +498,84 @@ def fetch_nr2_knowledge(
                 + "Nr2 sync failed; showing cached data.",
             )
         return Nr2KnowledgeSync(status="unavailable", source_url=base, error=str(exc)[:220])
+
+
+def update_nr2_info_update(
+    tenant_id: str,
+    update_id: str,
+    *,
+    type_: str,
+    text: str,
+    active: bool = True,
+    start_date: str = "",
+    end_date: str = "",
+    client: httpx.Client | None = None,
+) -> Nr2InfoUpdateResult:
+    """Edit one saved Nr2 knowledge update through the tenant runtime."""
+    password = _tenant_password(tenant_id)
+    base = _api_base_for_tenant(tenant_id)
+    if not password:
+        return Nr2InfoUpdateResult(
+            status="missing_credentials",
+            source_url=base,
+            error="No dashboard password/access key found in tenant client.json.",
+        )
+    clean_id = _clean_text(update_id, 80)
+    if not clean_id:
+        return Nr2InfoUpdateResult(status="invalid", source_url=base, error="Missing update id.")
+    clean_text = _clean_text(text, 2000)
+    if not clean_text:
+        return Nr2InfoUpdateResult(status="invalid", source_url=base, error="Knowledge update text is required.")
+
+    owns_client = client is None
+    http = client or httpx.Client(timeout=5)
+    try:
+        login = http.post(f"{base}/login", json={"password": password})
+        login.raise_for_status()
+        token = login.json().get("token")
+        if not isinstance(token, str) or not token:
+            return Nr2InfoUpdateResult(status="unavailable", source_url=base, error="Nr2 login returned no token.")
+        payload = {
+            "type": _clean_text(type_, 40) or "general",
+            "text": clean_text,
+            "active": active,
+            "startDate": _clean_text(start_date, 80) or None,
+            "endDate": _clean_text(end_date, 80) or None,
+        }
+        response = http.put(
+            f"{base}/settings/info-updates/{clean_id}",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        response.raise_for_status()
+        try:
+            parsed = response.json()
+        except ValueError:
+            parsed = {}
+        return Nr2InfoUpdateResult(
+            status="ok",
+            source_url=base,
+            update=parsed if isinstance(parsed, dict) else {},
+        )
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return Nr2InfoUpdateResult(status="offline", source_url=base, error="Tenant runtime is offline or unreachable.")
+    except httpx.HTTPStatusError as exc:
+        detail = ""
+        try:
+            body = exc.response.json()
+            detail = str(body.get("detail") or "")
+        except Exception:
+            detail = exc.response.text[:160]
+        return Nr2InfoUpdateResult(
+            status="failed",
+            source_url=base,
+            error=detail or f"Nr2 returned HTTP {exc.response.status_code}.",
+        )
+    except (httpx.RequestError, ValueError, TypeError) as exc:
+        return Nr2InfoUpdateResult(status="unavailable", source_url=base, error=str(exc)[:220])
+    finally:
+        if owns_client:
+            http.close()
 
 
 def _login_token(http: httpx.Client, base: str, tenant_id: str) -> tuple[str, str]:

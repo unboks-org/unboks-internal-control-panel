@@ -296,6 +296,46 @@ def test_sot_entry_add_and_delete_are_visible_to_nr2_bridge(client):
     assert bridge_after_delete.json()["sot_entries"] == []
 
 
+def test_sot_entry_edit_preserves_id_and_updates_bridge(client):
+    client.post("/login", data={"password": "test-password"})
+    added = client.post(
+        "/admin/tenants/unboks/sot",
+        data={
+            "title": "Old pricing",
+            "category": "pricing",
+            "content": "Old price is 10.",
+        },
+        follow_redirects=False,
+    )
+    assert added.status_code == 303
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    entry = bridge.json()["sot_entries"][0]
+
+    edited = client.post(
+        f"/admin/tenants/unboks/sot/{entry['id']}/edit",
+        data={
+            "title": "Updated pricing",
+            "category": "pricing",
+            "content": "Updated price is 12.",
+        },
+        follow_redirects=False,
+    )
+
+    assert edited.status_code == 303
+    bridge_after_edit = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    entries = bridge_after_edit.json()["sot_entries"]
+    assert len(entries) == 1
+    assert entries[0]["id"] == entry["id"]
+    assert entries[0]["title"] == "Updated pricing"
+    assert entries[0]["content"] == "Updated price is 12."
+
+
 def test_whatsapp_connection_is_visible_to_nr2_bridge(client):
     from app import channel_connections
 

@@ -3,7 +3,12 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.nr2_sync import Nr2KnowledgeSync
-from app.nr2_sync import fetch_nr2_knowledge, upload_nr2_photo, fetch_nr2_photo_image
+from app.nr2_sync import (
+    fetch_nr2_knowledge,
+    fetch_nr2_photo_image,
+    update_nr2_info_update,
+    upload_nr2_photo,
+)
 
 
 def test_nr2_sync_missing_credentials(monkeypatch):
@@ -120,6 +125,45 @@ def test_nr2_sync_fetches_safe_company_knowledge(monkeypatch):
     assert sync.runtime_prompt_manifest["sources"][0]["id"] == "runtime.marina.whatsapp.system"
     assert "should-not-leak" not in sync.runtime_prompt_manifest["sources"][0]["text"]
     assert "[REDACTED]" in sync.runtime_prompt_manifest["sources"][0]["text"]
+
+
+def test_nr2_sync_updates_info_update(monkeypatch):
+    monkeypatch.setattr(
+        "app.nr2_sync.get_tenant_client_data",
+        lambda tenant: {"password": "secret-password"},
+    )
+    monkeypatch.setenv(
+        "NR3_TENANT_API_BASE_TEMPLATE",
+        "https://api.example.test/api/{tenant}/dashboard/api",
+    )
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path, request.content))
+        if request.method == "POST" and request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "safe-token"})
+        assert request.headers["authorization"] == "Bearer safe-token"
+        if request.method == "PUT" and request.url.path.endswith("/settings/info-updates/42"):
+            return httpx.Response(200, json={"ok": True, "id": 42})
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = update_nr2_info_update(
+        "wibrandt",
+        "42",
+        type_="pricing",
+        text="New cupcake price is 7 XCG.",
+        active=True,
+        start_date="",
+        end_date="",
+        client=client,
+    )
+
+    assert result.ok
+    assert calls[0][0] == "POST"
+    assert calls[1][0] == "PUT"
+    assert calls[1][1].endswith("/settings/info-updates/42")
+    assert b'"text":"New cupcake price is 7 XCG."' in calls[1][2]
 
 
 def test_nr2_sync_handles_optional_missing_endpoint_as_partial(monkeypatch):
@@ -348,6 +392,14 @@ def test_workspace_renders_synced_sot_items_without_jinja_dict_collision(monkeyp
                     ),
                 },
             ),
+            info_updates=(
+                {
+                    "id": "12",
+                    "type": "general",
+                    "text": "Ask discovery questions first.",
+                    "active": True,
+                },
+            ),
         ),
     )
     client = TestClient(app)
@@ -361,6 +413,8 @@ def test_workspace_renders_synced_sot_items_without_jinja_dict_collision(monkeyp
     assert "(cached)" in response.text
     assert "Oceanview Apartment" in response.text
     assert "Ask discovery questions first." in response.text
+    assert "/admin/tenants/unboks/nr2-knowledge/info-updates/12/edit" in response.text
+    assert "Save edit in Nr2" in response.text
 
 
 def test_workspace_refresh_route_forces_nr2_sync(monkeypatch, tmp_path):
