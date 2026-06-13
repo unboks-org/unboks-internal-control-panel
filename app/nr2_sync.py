@@ -32,6 +32,7 @@ class Nr2KnowledgeSync:
     info_updates: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     knowledge_files: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     knowledge_media: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    product_settings: dict[str, Any] = field(default_factory=dict)
     runtime_prompt_manifest: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -89,6 +90,18 @@ class Nr2InfoUpdateResult:
     source_url: str = ""
     error: str = ""
     update: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
+@dataclass(frozen=True)
+class Nr2ProductSettingsResult:
+    status: str
+    source_url: str = ""
+    error: str = ""
+    settings: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -171,6 +184,11 @@ def _sync_from_cache(raw: Any) -> Nr2KnowledgeSync | None:
             info_updates=tuple(raw.get("info_updates") or ()),
             knowledge_files=tuple(raw.get("knowledge_files") or ()),
             knowledge_media=tuple(raw.get("knowledge_media") or ()),
+            product_settings=(
+                raw.get("product_settings")
+                if isinstance(raw.get("product_settings"), dict)
+                else {}
+            ),
             runtime_prompt_manifest=(
                 raw.get("runtime_prompt_manifest")
                 if isinstance(raw.get("runtime_prompt_manifest"), dict)
@@ -427,6 +445,36 @@ def _safe_runtime_prompt_manifest(raw: Any) -> dict[str, Any]:
     }
 
 
+def _safe_product_settings(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {
+            "delivery_cost_amount": None,
+            "delivery_cost_currency": "XCG",
+        }
+    amount = raw.get("delivery_cost_amount", raw.get("deliveryCostAmount"))
+    clean_amount: float | None
+    if amount in ("", None):
+        clean_amount = None
+    else:
+        try:
+            clean_amount = round(float(amount), 2)
+        except (TypeError, ValueError):
+            clean_amount = None
+    currency = _clean_text(
+        raw.get("delivery_cost_currency")
+        or raw.get("deliveryCostCurrency")
+        or raw.get("currency")
+        or "XCG",
+        8,
+    ).upper()
+    if not re.fullmatch(r"[A-Z]{2,8}", currency):
+        currency = "XCG"
+    return {
+        "delivery_cost_amount": clean_amount,
+        "delivery_cost_currency": currency,
+    }
+
+
 def _get_json(client: httpx.Client, base: str, path: str, token: str) -> Any:
     response = client.get(
         f"{base}{path}",
@@ -487,6 +535,7 @@ def fetch_nr2_knowledge(
             # Older/current tenant runtimes expose the same image library as
             # /photos. Nr3 normalizes it into the Knowledge images panel.
             media = optional("/photos")
+        product_settings = optional("/settings/product-settings", record_missing=False)
         runtime_prompt_manifest = optional("/runtime-prompt-manifest")
 
         status = "ok" if not errors else "partial"
@@ -499,6 +548,7 @@ def fetch_nr2_knowledge(
             info_updates=_safe_info_updates(updates),
             knowledge_files=_safe_files(files),
             knowledge_media=_safe_media(media, tenant_id),
+            product_settings=_safe_product_settings(product_settings),
             runtime_prompt_manifest=_safe_runtime_prompt_manifest(runtime_prompt_manifest),
         )
         if client is None and sync.status in {"ok", "partial"}:
@@ -796,6 +846,70 @@ def update_auto_block_settings(
         )
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         return Nr2AutoBlockSync(status="unavailable", source_url=base, error=str(exc)[:220])
+    finally:
+        if owns_client:
+            http.close()
+
+
+def update_nr2_product_settings(
+    tenant_id: str,
+    *,
+    delivery_cost_amount: str | float | None,
+    delivery_cost_currency: str,
+    client: httpx.Client | None = None,
+) -> Nr2ProductSettingsResult:
+    base = _api_base_for_tenant(tenant_id)
+    amount: float | None
+    if delivery_cost_amount in ("", None):
+        amount = None
+    else:
+        try:
+            amount = round(float(delivery_cost_amount), 2)
+        except (TypeError, ValueError):
+            return Nr2ProductSettingsResult(status="invalid", source_url=base, error="Delivery cost must be a number.")
+        if amount < 0:
+            return Nr2ProductSettingsResult(status="invalid", source_url=base, error="Delivery cost cannot be negative.")
+    currency = _clean_text(delivery_cost_currency or "XCG", 8).upper()
+    if not re.fullmatch(r"[A-Z]{2,8}", currency):
+        return Nr2ProductSettingsResult(status="invalid", source_url=base, error="Use a currency code such as XCG, ANG, EUR, or USD.")
+
+    owns_client = client is None
+    http = client or httpx.Client(timeout=3)
+    try:
+        token, error = _login_token(http, base, tenant_id)
+        if error:
+            return Nr2ProductSettingsResult(status="missing_credentials", source_url=base, error=error)
+        response = http.put(
+            f"{base}/settings/product-settings",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "delivery_cost_amount": amount,
+                "delivery_cost_currency": currency,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        return Nr2ProductSettingsResult(
+            status="ok",
+            source_url=base,
+            settings=_safe_product_settings(data),
+        )
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return Nr2ProductSettingsResult(status="offline", source_url=base, error="Tenant runtime is offline or unreachable.")
+    except httpx.HTTPStatusError as exc:
+        detail = ""
+        try:
+            body = exc.response.json()
+            detail = str(body.get("detail") or "")
+        except Exception:
+            detail = exc.response.text[:160]
+        return Nr2ProductSettingsResult(
+            status="auth_failed" if exc.response.status_code in {401, 403, 405} else "unavailable",
+            source_url=base,
+            error=detail or f"Nr2 returned HTTP {exc.response.status_code}.",
+        )
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return Nr2ProductSettingsResult(status="unavailable", source_url=base, error=str(exc)[:220])
     finally:
         if owns_client:
             http.close()

@@ -54,6 +54,7 @@ from app.nr2_sync import (
     fetch_nr2_photo_image,
     fetch_auto_block_settings,
     fetch_nr2_knowledge,
+    update_nr2_product_settings,
     update_nr2_info_update,
     update_auto_block_settings,
     upload_nr2_photo,
@@ -2337,6 +2338,64 @@ async def admin_upload_tenant_media(
         level = "ok"
     else:
         message = f"Image upload failed: {result.error or result.status}."
+        level = "warn"
+
+    return RedirectResponse(
+        url=(
+            f"/admin/tenants/{tenant.id}"
+            f"?action_message={quote_plus(message)}"
+            f"&action_level={level}"
+            "#tenant-media-section"
+        ),
+        status_code=303,
+    )
+
+
+@router.post("/admin/tenants/{tenant_id}/product-settings")
+def admin_update_tenant_product_settings(
+    request: Request,
+    tenant_id: str,
+    delivery_cost_amount: str = Form(default=""),
+    delivery_cost_currency: str = Form(default="XCG"),
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    result = update_nr2_product_settings(
+        tenant.id,
+        delivery_cost_amount=delivery_cost_amount.strip(),
+        delivery_cost_currency=delivery_cost_currency.strip(),
+    )
+    if result.ok:
+        fetch_nr2_knowledge(tenant.id, refresh=True)
+        audit_log.record_event(
+            action="tenant_product_settings_updated",
+            actor="internal_admin",
+            tenant_id=tenant.id,
+            safe_summary="Tenant product delivery settings updated from Nr3.",
+            metadata={
+                "delivery_cost_amount": result.settings.get("delivery_cost_amount"),
+                "delivery_cost_currency": result.settings.get("delivery_cost_currency"),
+                "source_url": result.source_url,
+            },
+        )
+        message = "Delivery cost saved."
+        level = "ok"
+    else:
+        audit_log.record_event(
+            action="tenant_product_settings_updated",
+            actor="internal_admin",
+            tenant_id=tenant.id,
+            result="failed",
+            safe_summary=result.error or result.status,
+            metadata={"source_url": result.source_url},
+        )
+        message = f"Delivery cost save failed: {result.error or result.status}."
         level = "warn"
 
     return RedirectResponse(

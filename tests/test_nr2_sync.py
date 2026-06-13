@@ -7,6 +7,7 @@ from app.nr2_sync import (
     delete_nr2_photo,
     fetch_nr2_knowledge,
     fetch_nr2_photo_image,
+    update_nr2_product_settings,
     update_nr2_info_update,
     upload_nr2_photo,
 )
@@ -91,6 +92,14 @@ def test_nr2_sync_fetches_safe_company_knowledge(monkeypatch):
                     ]
                 },
             )
+        if request.url.path.endswith("/settings/product-settings"):
+            return httpx.Response(
+                200,
+                json={
+                    "delivery_cost_amount": 5,
+                    "delivery_cost_currency": "XCG",
+                },
+            )
         if request.url.path.endswith("/runtime-prompt-manifest"):
             return httpx.Response(
                 200,
@@ -123,6 +132,10 @@ def test_nr2_sync_fetches_safe_company_knowledge(monkeypatch):
     assert sync.info_updates[0]["text"] == "Ask discovery questions before offering viewings."
     assert sync.knowledge_files[0]["filename"] == "property-list.pdf"
     assert sync.knowledge_media[0]["caption"] == "Oceanview balcony"
+    assert sync.product_settings == {
+        "delivery_cost_amount": 5.0,
+        "delivery_cost_currency": "XCG",
+    }
     assert sync.runtime_prompt_manifest["sources"][0]["id"] == "runtime.marina.whatsapp.system"
     assert "should-not-leak" not in sync.runtime_prompt_manifest["sources"][0]["text"]
     assert "[REDACTED]" in sync.runtime_prompt_manifest["sources"][0]["text"]
@@ -165,6 +178,51 @@ def test_nr2_sync_updates_info_update(monkeypatch):
     assert calls[1][0] == "PUT"
     assert calls[1][1].endswith("/settings/info-updates/42")
     assert b'"text":"New cupcake price is 7 XCG."' in calls[1][2]
+
+
+def test_nr2_sync_updates_product_settings(monkeypatch):
+    monkeypatch.setattr(
+        "app.nr2_sync.get_tenant_client_data",
+        lambda tenant: {"password": "secret-password"},
+    )
+    monkeypatch.setenv(
+        "NR3_TENANT_API_BASE_TEMPLATE",
+        "https://api.example.test/api/{tenant}/dashboard/api",
+    )
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path, request.content))
+        if request.method == "POST" and request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "safe-token"})
+        assert request.headers["authorization"] == "Bearer safe-token"
+        if request.method == "PUT" and request.url.path.endswith("/settings/product-settings"):
+            return httpx.Response(
+                200,
+                json={
+                    "delivery_cost_amount": 7,
+                    "delivery_cost_currency": "XCG",
+                },
+            )
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = update_nr2_product_settings(
+        "wibrandt",
+        delivery_cost_amount="7",
+        delivery_cost_currency="xcg",
+        client=client,
+    )
+
+    assert result.ok
+    assert result.settings == {
+        "delivery_cost_amount": 7.0,
+        "delivery_cost_currency": "XCG",
+    }
+    assert calls[0][0] == "POST"
+    assert calls[1][0] == "PUT"
+    assert calls[1][1].endswith("/settings/product-settings")
+    assert b'"delivery_cost_amount":7.0' in calls[1][2]
 
 
 def test_nr2_sync_handles_optional_missing_endpoint_as_partial(monkeypatch):
