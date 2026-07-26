@@ -4,10 +4,15 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 
 from app.config import get_settings
-from app.icp_overrides import add_sot_entry, effective_state_envelope, set_ai_tone
+from app.icp_overrides import (
+    add_sot_entry,
+    effective_state_envelope,
+    set_ai_tone,
+    set_feature_toggle,
+)
 
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -24,6 +29,13 @@ class SotEntryWrite(BaseModel):
     title: str
     content: str
     category: str = "general"
+
+
+class FeatureToggleWrite(BaseModel):
+    value: StrictBool
+
+
+_TENANT_WRITABLE_FEATURES = {"ai_auto_reply"}
 
 
 def _require_internal_bridge(
@@ -88,6 +100,31 @@ def read_tenant_overrides(
 ) -> dict:
     _require_internal_bridge(tenant_id, authorization, x_tenant_identity)
     return effective_state_envelope(tenant_id)
+
+
+@router.put("/tenants/{tenant_id}/feature-toggles/{feature_key}")
+def write_tenant_feature_toggle(
+    tenant_id: str,
+    feature_key: str,
+    payload: FeatureToggleWrite,
+    authorization: str = Header(default=""),
+    x_tenant_identity: Optional[str] = Header(default=None),
+) -> dict:
+    _require_internal_bridge(tenant_id, authorization, x_tenant_identity)
+    if feature_key not in _TENANT_WRITABLE_FEATURES:
+        raise HTTPException(status_code=400, detail="Feature is not tenant-writable")
+    set_feature_toggle(
+        tenant_id,
+        feature_key,
+        payload.value,
+        updated_by="nr2-dashboard",
+    )
+    return {
+        "ok": True,
+        "tenant_id": tenant_id,
+        "feature_key": feature_key,
+        "value": payload.value,
+    }
 
 
 @router.put("/tenants/{tenant_id}/agent-style")

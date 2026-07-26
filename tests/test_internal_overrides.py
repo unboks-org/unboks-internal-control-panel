@@ -95,6 +95,41 @@ def test_internal_overrides_reports_empty_available_envelope(client):
     assert body["response_timing"] is None
 
 
+def test_tenant_can_update_auto_reply_through_authenticated_bridge(client):
+    response = client.put(
+        "/internal/tenants/unboks/feature-toggles/ai_auto_reply",
+        headers=_bridge_headers(),
+        json={"value": False},
+    )
+    assert response.status_code == 200
+    assert response.json()["value"] is False
+
+    bridge = client.get(
+        "/internal/tenants/unboks/overrides",
+        headers=_bridge_headers(),
+    )
+    toggle = bridge.json()["feature_toggles"]["ai_auto_reply"]
+    assert toggle["value"] is False
+    assert toggle["source"] == "icp_override"
+    assert toggle["updated_by"] == "nr2-dashboard"
+
+
+def test_tenant_feature_update_rejects_other_features_and_non_boolean_values(client):
+    forbidden = client.put(
+        "/internal/tenants/unboks/feature-toggles/learning_from_operator",
+        headers=_bridge_headers(),
+        json={"value": True},
+    )
+    assert forbidden.status_code == 400
+
+    invalid = client.put(
+        "/internal/tenants/unboks/feature-toggles/ai_auto_reply",
+        headers=_bridge_headers(),
+        json={"value": "false"},
+    )
+    assert invalid.status_code == 422
+
+
 def test_channel_toggle_is_visible_to_nr2_bridge(client):
     client.post("/login", data={"password": "test-password"})
     r = client.post(
