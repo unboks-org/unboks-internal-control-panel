@@ -2970,8 +2970,10 @@ def process_restore_tenant_runtime(job_id: str, job: dict[str, Any], slug: str) 
 def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
     action = str(job.get("action") or "")
     slug = validate_slug(job.get("slug"))
-    if slug in RESERVED_SLUGS:
-        raise RuntimeError(f"Tenant {slug!r} is reserved and cannot be changed by host action.")
+    if slug in RESERVED_SLUGS and action != "repair_whatsapp_allowlist":
+        raise RuntimeError(
+            f"Tenant {slug!r} is reserved and cannot be changed by this host action."
+        )
     if action == "prepare_delete_tenant":
         process_prepare_delete_tenant(job_id, job, slug)
         return

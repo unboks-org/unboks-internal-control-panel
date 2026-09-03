@@ -460,6 +460,80 @@ def test_host_worker_executes_strict_allowlist_repair(monkeypatch, tmp_path):
     assert result["action"] == "repair_whatsapp_allowlist"
 
 
+def test_host_worker_allows_verified_allowlist_repair_for_reserved_unboks(
+    monkeypatch,
+    tmp_path,
+):
+    from host import nr3_provision_worker as worker
+
+    tenant_dir = tmp_path / "clients" / "unboks"
+    client_path = tenant_dir / "config" / "client.json"
+    client_path.parent.mkdir(parents=True)
+    client_path.write_text(
+        json.dumps({
+            "business": {"slug": "unboks"},
+            "channel_account_allowlist": {
+                "mode": "strict",
+                "zernio_accounts": ["verified-unboks-account"],
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(worker, "CLIENTS_ROOT", tmp_path / "clients")
+    monkeypatch.setattr(worker, "RESULT_DIR", tmp_path / "results")
+    monkeypatch.setattr(worker, "FAILED_DIR", tmp_path / "failed")
+    generation = worker.tenant_generation_fingerprint("unboks", tenant_dir)
+    job_path = tmp_path / "repair-unboks.json"
+    job_path.write_text(
+        json.dumps({
+            "job_id": "repair-unboks",
+            "job_type": "tenant_action",
+            "action": "repair_whatsapp_allowlist",
+            "slug": "unboks",
+            "zernio_account_id": "verified-unboks-account",
+            "allowlist_note": "Verified by provider reconciliation.",
+            "generation_fingerprint": generation,
+        }),
+        encoding="utf-8",
+    )
+
+    worker.process_job(job_path)
+
+    result = json.loads((tmp_path / "results" / "repair-unboks.json").read_text())
+    assert result["status"] == "succeeded"
+    updated = json.loads(client_path.read_text(encoding="utf-8"))
+    assert updated["channel_account_allowlist"]["zernio_accounts"] == [
+        "verified-unboks-account"
+    ]
+
+
+def test_host_worker_keeps_destructive_reserved_unboks_actions_blocked(
+    monkeypatch,
+    tmp_path,
+):
+    from host import nr3_provision_worker as worker
+
+    monkeypatch.setattr(worker, "CLIENTS_ROOT", tmp_path / "clients")
+    monkeypatch.setattr(worker, "RESULT_DIR", tmp_path / "results")
+    monkeypatch.setattr(worker, "FAILED_DIR", tmp_path / "failed")
+    job_path = tmp_path / "delete-unboks.json"
+    job_path.write_text(
+        json.dumps({
+            "job_id": "delete-unboks",
+            "job_type": "tenant_action",
+            "action": "delete_tenant",
+            "slug": "unboks",
+        }),
+        encoding="utf-8",
+    )
+
+    worker.process_job(job_path)
+
+    result = json.loads((tmp_path / "results" / "delete-unboks.json").read_text())
+    assert result["status"] == "failed"
+    assert "reserved" in result["message"]
+
+
 def test_allowlist_repair_serializes_runtime_style_client_patch(
     monkeypatch,
     tmp_path,
