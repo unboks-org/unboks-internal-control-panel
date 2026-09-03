@@ -1,4 +1,5 @@
 import json
+import sqlite3
 
 from fastapi.testclient import TestClient
 
@@ -562,6 +563,178 @@ def test_whatsapp_status_returns_failed(monkeypatch, tmp_path):
     assert payload["status"] == "needs_reconnect_authorization_failed"
     assert payload["connected"] is False
     assert payload["lastError"] == "Client denied authorization."
+
+
+def test_whatsapp_status_retries_exact_verified_allowlist_failure(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    _set_allowlist(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    historical_link = channel_connections.create_connection_request(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        state_token="historical_allowlist_failure",
+        status="link_generated",
+    ).request
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="failed",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_1",
+        zernio_account_verified=True,
+        phone_number_id="phone_1",
+        display_phone_number="+1 223 276 0075",
+        waba_id="waba_1",
+        last_error=(
+            "Provider authorization succeeded, but strict tenant routing "
+            "could not be secured."
+        ),
+    )
+    with sqlite3.connect(tmp_path / "nr3.db") as conn:
+        conn.execute(
+            "UPDATE connection_requests SET created_at = ? WHERE id = ?",
+            ("2026-01-01T00:00:00+00:00", historical_link.id),
+        )
+        conn.execute(
+            "UPDATE tenant_channel_connections SET updated_at = ? WHERE tenant_id = ?",
+            ("2026-01-01T00:00:01+00:00", "lawyer"),
+        )
+    calls = []
+
+    class ExactAccountService:
+        def list_accounts(self, *, platform=None):
+            calls.append(platform)
+            return [
+                ZernioAccountSummary(
+                    id="account_1",
+                    platform="whatsapp",
+                    profile_id="profile_lawyer",
+                    profile_name="Lawyer",
+                    display_name="Mermaid WhatsApp",
+                    username="+1 223 276 0075",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+1 223 276 0075",
+                    phone_number_id="phone_1",
+                    waba_id="waba_1",
+                )
+            ]
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", ExactAccountService)
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "connected_healthy"
+    assert calls == ["whatsapp"]
+    repaired = channel_connections.get_tenant_channel_connection("lawyer")
+    assert repaired is not None
+    assert repaired.status == "connected"
+    assert repaired.zernio_account_verified is True
+    assert repaired.zernio_account_id == "account_1"
+    assert repaired.last_request_id is None
+    unchanged_link = channel_connections.get_connection_request(historical_link.id)
+    assert unchanged_link is not None
+    assert unchanged_link.status == "link_generated"
+    assert unchanged_link.zernio_account_verified is False
+
+
+def test_whatsapp_status_does_not_retry_unrelated_verified_failure(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="failed",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_1",
+        zernio_account_verified=True,
+        last_error="Provider account was disabled.",
+    )
+
+    class ProviderMustNotBeQueried:
+        def list_accounts(self, *, platform=None):
+            raise AssertionError("An unrelated failure must not be self-healed")
+
+    monkeypatch.setattr(
+        "app.routes.connect.ZernioService",
+        ProviderMustNotBeQueried,
+    )
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "needs_reconnect_authorization_failed"
+    unchanged = channel_connections.get_tenant_channel_connection("lawyer")
+    assert unchanged is not None
+    assert unchanged.status == "failed"
+    assert unchanged.last_error == "Provider account was disabled."
+
+
+def test_new_link_blocks_verified_allowlist_failure_recovery(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="failed",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_1",
+        zernio_account_verified=True,
+        last_error=(
+            "Provider authorization succeeded, but strict tenant routing "
+            "could not be secured."
+        ),
+    )
+    replacement = channel_connections.create_connection_request(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        state_token="replacement_after_allowlist_failure",
+        status="link_generated",
+    ).request
+    with sqlite3.connect(tmp_path / "nr3.db") as conn:
+        conn.execute(
+            "UPDATE tenant_channel_connections SET updated_at = ? WHERE tenant_id = ?",
+            ("2026-01-01T00:00:00+00:00", "lawyer"),
+        )
+        conn.execute(
+            "UPDATE connection_requests SET created_at = ? WHERE id = ?",
+            ("2026-01-01T00:00:01+00:00", replacement.id),
+        )
+
+    class ProviderMustNotBeQueried:
+        def list_accounts(self, *, platform=None):
+            raise AssertionError("A newer authorization request must win")
+
+    monkeypatch.setattr(
+        "app.routes.connect.ZernioService",
+        ProviderMustNotBeQueried,
+    )
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "connection_pending"
+    assert channel_connections.get_latest_connection_request_for_tenant(
+        "lawyer"
+    ).id == replacement.id
+    unchanged = channel_connections.get_tenant_channel_connection("lawyer")
+    assert unchanged is not None
+    assert unchanged.status == "failed"
+    assert unchanged.zernio_account_id == "account_1"
 
 
 def test_whatsapp_status_reconciles_connected_zernio_account(monkeypatch, tmp_path):

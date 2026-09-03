@@ -60,6 +60,9 @@ public_router = APIRouter(tags=["connect"])
 templates = Jinja2Templates(directory="app/templates")
 
 CALLBACK_RESULT_PATH = "/connect/whatsapp/result"
+STRICT_ALLOWLIST_REPAIR_FAILED_ERROR = (
+    "Provider authorization succeeded, but strict tenant routing could not be secured."
+)
 FAILED_STATUSES = {"failed", "failure", "error", "cancelled", "canceled", "denied"}
 PENDING_NUMBER_STATUSES = {
     "pending",
@@ -369,10 +372,7 @@ def _upsert_connected_account(
         last_error = "Strict tenant allowlist repair is queued."
     else:
         connection_status = "failed"
-        last_error = (
-            "Provider authorization succeeded, but strict tenant routing "
-            "could not be secured."
-        )
+        last_error = STRICT_ALLOWLIST_REPAIR_FAILED_ERROR
     connection = channel_connections.upsert_tenant_channel_connection(
         tenant_id=tenant_id,
         status=connection_status,
@@ -758,6 +758,14 @@ def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
         and not connection.zernio_account_verified
         and connection.zernio_account_id
     )
+    verified_allowlist_failure_can_reconcile = bool(
+        connection
+        and connection.status == "failed"
+        and connection.zernio_account_verified
+        and connection.zernio_account_id
+        and connection.zernio_profile_id
+        and connection.last_error == STRICT_ALLOWLIST_REPAIR_FAILED_ERROR
+    )
     expected_recovery_request_id: str | None = None
     attach_recovery_request = True
     superseded_unverified_candidate = False
@@ -797,22 +805,52 @@ def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
             # candidate left by an older failed/legacy request.
             unverified_account_can_reconcile = False
             superseded_unverified_candidate = True
+    if verified_allowlist_failure_can_reconcile and connection:
+        latest_request = (
+            channel_connections.get_latest_connection_request_for_tenant(tenant.id)
+        )
+        latest_is_newer_in_flight_request = bool(
+            latest_request
+            and latest_request.id != connection.last_request_id
+            and latest_request.status
+            in {
+                "pending",
+                "link_generated",
+                "auth_started",
+                "callback_received",
+                "pending_number",
+            }
+            and not _is_expired(latest_request)
+            and latest_request.created_at >= connection.updated_at
+        )
+        if latest_is_newer_in_flight_request:
+            verified_allowlist_failure_can_reconcile = False
     if not superseded_unverified_candidate and (
         connection is None
         or connection.status in {"pending", "not_connected"}
         or unverified_account_can_reconcile
+        or verified_allowlist_failure_can_reconcile
     ):
         connection = _sync_whatsapp_connection_from_zernio(
             tenant.id,
             expected_generation_id=expected_generation_id,
             expected_account_id=(
                 connection.zernio_account_id
-                if unverified_account_can_reconcile and connection
+                if (
+                    connection
+                    and (
+                        unverified_account_can_reconcile
+                        or verified_allowlist_failure_can_reconcile
+                    )
+                )
                 else None
             ),
             expected_request_id=expected_recovery_request_id,
             enforce_expected_request=unverified_account_can_reconcile,
-            attach_latest_request=attach_recovery_request,
+            attach_latest_request=(
+                attach_recovery_request
+                and not verified_allowlist_failure_can_reconcile
+            ),
         ) or connection
     return whatsapp_health_to_api(build_whatsapp_health(tenant.id), tenant.id)
 
