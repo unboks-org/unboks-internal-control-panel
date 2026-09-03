@@ -23,3 +23,13 @@ A regression test reproduces the complete router → tenant callback → authent
 ## Rollback
 
 Keep the current control-panel image tagged before deployment and record the deployed commit. Revert only the control-panel release if validation fails; do not alter Mermaid data, account routing, model credentials or other tenant containers. The known older image has this deadlock, so rollback is containment, not a repair.
+
+## Production result and prevention
+
+PR #97 is merged as a538d80. The exact tested image `unboks-control:tracy-bb8f49f` is pinned in the production Compose override and contains the same application code as that merge. The previous image is retained as `unboks-control:before-tracy-deadlock`.
+
+After deployment, a signed replay of an already completed inbound message returned 200 in 72 ms and was safely deduplicated. A fresh real incoming message at 23:41:35 UTC produced a Claude reply; Zernio confirmed sent at 23:41:46 and delivered at 23:41:49. Inbox and AI controls were active and the WhatsApp account connected. The replay initially used a `sha256=` prefix unsupported by the tenant verifier; correcting the test to Zernio's raw digest format resolved that test-only 403.
+
+`host/tracy_watchdog.py` and its systemd timer run on the VPS every minute, independently of the desktop or this conversation. The probe exercises an authenticated HTTP control read while holding the forwarding lifecycle read lease, and checks Mermaid's runtime health. Two consecutive process failures trigger a start/restart of the existing Mermaid container, with a ten-minute recovery cooldown. It never replaces an image, sends a WhatsApp message, changes tenant controls or restarts peer containers. Callback failures and paused/disconnected controls become visible unhealthy/attention states rather than ineffective restart loops.
+
+Operational state: `/var/lib/unboks-tracy-watchdog/status.json`. Logs: `journalctl -u unboks-tracy-watchdog.service`. Planned maintenance: create `/root/clients/mermaid/.maintenance` before stopping TRACY; remove it only when the intended release is safe to run. This protects deliberate maintenance from the recovery loop. The watchdog is supplementary; Docker's existing restart policy and Supervisor remain enabled.
