@@ -737,6 +737,183 @@ def test_new_link_blocks_verified_allowlist_failure_recovery(
     assert unchanged.zernio_account_id == "account_1"
 
 
+def test_provider_io_race_cannot_cross_new_authorization_request(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="failed",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_1",
+        zernio_account_verified=True,
+        last_error=(
+            "Provider authorization succeeded, but strict tenant routing "
+            "could not be secured."
+        ),
+    )
+    replacement_ids = []
+
+    class RacingAccountService:
+        def list_accounts(self, *, platform=None):
+            replacement = channel_connections.create_connection_request(
+                tenant_id="lawyer",
+                zernio_profile_id="profile_lawyer",
+                state_token="replacement_created_during_provider_io",
+                status="link_generated",
+            ).request
+            replacement_ids.append(replacement.id)
+            return [
+                ZernioAccountSummary(
+                    id="account_1",
+                    platform="whatsapp",
+                    profile_id="profile_lawyer",
+                    profile_name="Lawyer",
+                    display_name="Old WhatsApp",
+                    username="+1 223 276 0075",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+1 223 276 0075",
+                    phone_number_id="phone_1",
+                    waba_id="waba_1",
+                )
+            ]
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", RacingAccountService)
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "connection_pending"
+    assert len(replacement_ids) == 1
+    assert channel_connections.get_latest_connection_request_for_tenant(
+        "lawyer"
+    ).id == replacement_ids[0]
+    unchanged = channel_connections.get_tenant_channel_connection("lawyer")
+    assert unchanged is not None
+    assert unchanged.status == "failed"
+    assert unchanged.zernio_account_id == "account_1"
+    assert unchanged.last_error == (
+        "Provider authorization succeeded, but strict tenant routing "
+        "could not be secured."
+    )
+    client_json = json.loads(
+        (tenants_root / "lawyer" / "config" / "client.json").read_text()
+    )
+    assert "channel_account_allowlist" not in client_json
+
+
+def test_queued_allowlist_retry_keeps_exact_verified_account_fence(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="failed",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_1",
+        zernio_account_verified=True,
+        last_error=(
+            "Provider authorization succeeded, but strict tenant routing "
+            "could not be secured."
+        ),
+    )
+    provider_calls = []
+    queue_calls = []
+
+    class ReorderedAccountService:
+        def list_accounts(self, *, platform=None):
+            provider_calls.append(platform)
+            return [
+                ZernioAccountSummary(
+                    id="different_account",
+                    platform="whatsapp",
+                    profile_id="profile_lawyer",
+                    profile_name="Lawyer",
+                    display_name="Different WhatsApp",
+                    username="+1 555 000 0000",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+1 555 000 0000",
+                    phone_number_id="different_phone",
+                    waba_id="different_waba",
+                ),
+                ZernioAccountSummary(
+                    id="account_1",
+                    platform="whatsapp",
+                    profile_id="profile_lawyer",
+                    profile_name="Lawyer",
+                    display_name="Expected WhatsApp",
+                    username="+1 223 276 0075",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+1 223 276 0075",
+                    phone_number_id="phone_1",
+                    waba_id="waba_1",
+                ),
+            ]
+
+    def read_only_client_root(*args, **kwargs):
+        return False
+
+    def queued_then_repaired(**kwargs):
+        queue_calls.append(kwargs)
+        if len(queue_calls) == 1:
+            return AutoProvisionResult(status="queued", message="repair queued")
+        _set_allowlist(tenants_root, account_id=kwargs["zernio_account_id"])
+        return AutoProvisionResult(status="succeeded", message="allowlist repaired")
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", ReorderedAccountService)
+    monkeypatch.setattr(
+        "app.routes.connect.update_tenant_channel_account_allowlist",
+        read_only_client_root,
+    )
+    monkeypatch.setattr(
+        "app.routes.connect.queue_tenant_host_action",
+        queued_then_repaired,
+    )
+
+    queued = _status(client)
+    pending = channel_connections.get_tenant_channel_connection("lawyer")
+    repaired = _status(client)
+
+    assert queued.status_code == 200
+    assert queued.json()["status"] == "connection_pending"
+    assert pending is not None
+    assert pending.status == "pending"
+    assert pending.zernio_account_id == "account_1"
+    assert pending.last_error == "Strict tenant allowlist repair is queued."
+    assert repaired.status_code == 200
+    assert repaired.json()["status"] == "connected_healthy"
+    assert provider_calls == ["whatsapp", "whatsapp"]
+    assert [call["zernio_account_id"] for call in queue_calls] == [
+        "account_1",
+        "account_1",
+    ]
+    connected = channel_connections.get_tenant_channel_connection("lawyer")
+    assert connected is not None
+    assert connected.status == "connected"
+    assert connected.zernio_account_id == "account_1"
+    assert connected.phone_number_id == "phone_1"
+    client_json = json.loads(
+        (tenants_root / "lawyer" / "config" / "client.json").read_text()
+    )
+    assert client_json["channel_account_allowlist"]["zernio_accounts"] == [
+        "account_1"
+    ]
+
+
 def test_whatsapp_status_reconciles_connected_zernio_account(monkeypatch, tmp_path):
     tenants_root = tmp_path / "tenants"
     _write_tenant(tenants_root)
