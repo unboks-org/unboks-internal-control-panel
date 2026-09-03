@@ -1,7 +1,8 @@
 [Unit]
 Description=Nr3 tenant provisioning worker
-After=docker.service nginx.service
-Requires=docker.service
+After=network-online.target docker.service nginx.service
+Wants=network-online.target
+Requires=docker.service nginx.service
 
 [Service]
 Type=simple
@@ -13,7 +14,14 @@ Environment=NR3_PROVISION_FAILED_DIR=/root/unboks-internal-control-panel/data/pr
 Environment=NR3_PROVISION_CLIENTS_ROOT=/root/clients
 Environment=NR3_PROVISION_NGINX_SITE=/etc/nginx/sites-enabled/api-unboks
 Environment=NR3_PROVISION_NGINX_BACKUP_DIR=/root/nginx-sites-enabled-backups
-Environment=NR3_PROVISION_BRIDGE_TOKEN_FILE=/root/clients/_shared/nr3_internal_api_token
+Environment=NR3_PROVISION_BRIDGE_TOKEN_DIR=/root/clients/_shared/nr3_bridge_tokens
+Environment=NR3_PROVISION_ANTHROPIC_KEY_FILE=/root/clients/_shared/anthropic_api_key
+Environment=NR3_PROVISION_LATE_API_KEY_FILE=/root/clients/_shared/late_api_key
+Environment=NR3_PROVISION_ZERNIO_WEBHOOK_SECRET_FILE=/root/clients/_shared/zernio_webhook_secret
+Environment=NR3_DELETED_TENANTS_ROOT=/root/_deleted_tenants
+Environment=NR3_ICP_DATA_DIR=/root/unboks-internal-control-panel/data
+Environment=NR3_PROVISION_POLL_SECONDS=2
+UMask=0077
 ExecStart=/usr/bin/python3 /root/unboks-internal-control-panel/host/nr3_provision_worker.py
 Restart=always
 RestartSec=3

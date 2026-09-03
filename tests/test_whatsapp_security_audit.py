@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from app import audit_log, channel_connections
 from app.main import app
-from app.zernio import ZernioConnectUrl, ZernioProfile
+from app.zernio import ZernioAccountSummary, ZernioConnectUrl, ZernioProfile
 
 
 def _write_tenant(root, slug="lawyer", name="Lawyer"):
@@ -70,6 +70,7 @@ def test_start_connection_records_safe_audit_event(monkeypatch, tmp_path):
 
 
 def test_callback_records_safe_audit_event(monkeypatch, tmp_path):
+    _write_tenant(tmp_path / "tenants")
     client = _client(monkeypatch, tmp_path)
     created = channel_connections.create_connection_request(
         tenant_id="lawyer",
@@ -81,7 +82,20 @@ def test_callback_records_safe_audit_event(monkeypatch, tmp_path):
 
     class FakeZernioService:
         def get_account(self, account_id):
-            return None
+            return ZernioAccountSummary(
+                id=account_id,
+                platform="whatsapp",
+                profile_id="profile_lawyer",
+                profile_name="Lawyer",
+                display_name="Lawyer WhatsApp",
+                username="+599 1",
+                enabled=True,
+                is_active=True,
+                platform_status="active",
+                display_phone_number="+599 1",
+                phone_number_id="phone_1",
+                waba_id="waba_1",
+            )
 
     monkeypatch.setattr("app.routes.connect.ZernioService", FakeZernioService)
 

@@ -1,8 +1,10 @@
-"""Read-only Nr2 tenant knowledge sync for the Nr3 workspace.
+"""Tenant-scoped Nr2 knowledge bridge for the Nr3 workspace.
 
 Nr2 remains the customer/operator dashboard and the canonical runtime for
 tenant Company knowledge. Nr3 should show Calvin what the tenant has already
 configured there, without copying secrets or inventing placeholder state.
+Guarded operator mutations hold the tenant lifecycle lease and may update only
+the explicitly supported Nr2 controls for the same tenant generation.
 """
 from __future__ import annotations
 
@@ -12,12 +14,14 @@ import re
 import tempfile
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
 import httpx
 from urllib.parse import quote
 
+from app.file_lock import exclusive_file_lock
 from app.tenants import get_tenant_client_data
 
 
@@ -120,6 +124,11 @@ def _cache_path() -> Path:
     return Path(os.getenv("NR3_NR2_KNOWLEDGE_CACHE_PATH", "data/nr2_knowledge_cache.json"))
 
 
+def _cache_lock_path() -> Path:
+    path = _cache_path()
+    return path.with_name(f"{path.name}.lock")
+
+
 def _cache_ttl_seconds() -> int:
     try:
         ttl = int(os.getenv("NR3_NR2_KNOWLEDGE_CACHE_TTL_SECONDS", "900"))
@@ -152,6 +161,21 @@ def _load_cache() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _load_cache_strict() -> dict[str, Any]:
+    """Load mutation state without turning corruption into an empty store."""
+    path = _cache_path()
+    try:
+        with path.open(encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeError(f"Nr2 knowledge cache is unreadable: {path}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Nr2 knowledge cache is malformed: {path}")
+    return data
+
+
 def _save_cache(data: dict[str, Any]) -> None:
     path = _cache_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,10 +183,19 @@ def _save_cache(data: dict[str, Any]) -> None:
         prefix=".nr2_knowledge_cache.", suffix=".json", dir=str(path.parent)
     )
     try:
+        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, sort_keys=True)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
-    except OSError:
+        parent_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except Exception:
         try:
             os.unlink(tmp)
         except OSError:
@@ -213,10 +246,80 @@ def _fresh_cached_sync(tenant_id: str) -> Nr2KnowledgeSync | None:
     return None
 
 
-def _write_tenant_cache(tenant_id: str, sync: Nr2KnowledgeSync) -> None:
-    cache = _load_cache()
-    cache[tenant_id] = asdict(replace(sync, cached=False))
-    _save_cache(cache)
+def _capture_tenant_generation(tenant_id: str) -> str:
+    """Capture the generation that owns an in-flight runtime fetch."""
+    from app.delete_operations import require_tenant_mutation_generation
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(tenant_id):
+        return require_tenant_mutation_generation(tenant_id)
+
+
+def _serialized_nr2_mutation(function):
+    """Fence one outbound Nr2 write with the tenant lifecycle generation.
+
+    The lease deliberately spans credential lookup, authentication, and the
+    remote mutation. This prevents a concurrent delete/recreate from swapping
+    the runtime or its credentials underneath an already-started operation.
+    """
+
+    @wraps(function)
+    def wrapped(tenant_id: str, *args, **kwargs):
+        from app.delete_operations import require_tenant_mutation_generation
+        from app.provisioning import tenant_creation_lock
+
+        with tenant_creation_lock(tenant_id):
+            require_tenant_mutation_generation(
+                tenant_id,
+                expected_generation_id=kwargs.get("expected_generation_id"),
+            )
+            return function(tenant_id, *args, **kwargs)
+
+    return wrapped
+
+
+def _write_tenant_cache(
+    tenant_id: str,
+    sync: Nr2KnowledgeSync,
+    *,
+    expected_generation_id: str | None = None,
+) -> None:
+    """Persist one exact tenant row only while its generation still owns it."""
+    from app.delete_operations import require_tenant_mutation_generation
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(tenant_id):
+        require_tenant_mutation_generation(
+            tenant_id,
+            expected_generation_id=expected_generation_id,
+        )
+        with exclusive_file_lock(_cache_lock_path()):
+            cache = _load_cache_strict()
+            cache[tenant_id] = asdict(replace(sync, cached=False))
+            _save_cache(cache)
+
+
+def forget_tenant(tenant_id: str) -> bool:
+    """Atomically remove only ``tenant_id`` from the active Nr2 cache."""
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(tenant_id):
+        with exclusive_file_lock(_cache_lock_path()):
+            cache = _load_cache_strict()
+            if tenant_id not in cache:
+                return False
+            cache.pop(tenant_id)
+            _save_cache(cache)
+    return True
+
+
+def tenant_state_exists(tenant_id: str) -> bool:
+    """Prove whether the exact tenant has active Nr2 cache state."""
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(tenant_id):
+        with exclusive_file_lock(_cache_lock_path()):
+            return tenant_id in _load_cache_strict()
 
 
 def _clean_text(value: Any, max_len: int = 1200) -> str:
@@ -507,6 +610,9 @@ def fetch_nr2_knowledge(
         )
 
     owns_client = client is None
+    cache_generation_id = (
+        _capture_tenant_generation(tenant_id) if owns_client else None
+    )
     http = client or httpx.Client(timeout=3)
     try:
         login = http.post(f"{base}/login", json={"password": password})
@@ -552,7 +658,11 @@ def fetch_nr2_knowledge(
             runtime_prompt_manifest=_safe_runtime_prompt_manifest(runtime_prompt_manifest),
         )
         if client is None and sync.status in {"ok", "partial"}:
-            _write_tenant_cache(tenant_id, sync)
+            _write_tenant_cache(
+                tenant_id,
+                sync,
+                expected_generation_id=cache_generation_id,
+            )
         return sync
     except (httpx.ConnectError, httpx.TimeoutException):
         if stale_cache is not None:
@@ -587,6 +697,7 @@ def fetch_nr2_knowledge(
         return Nr2KnowledgeSync(status="unavailable", source_url=base, error=str(exc)[:220])
 
 
+@_serialized_nr2_mutation
 def update_nr2_info_update(
     tenant_id: str,
     update_id: str,
@@ -597,6 +708,7 @@ def update_nr2_info_update(
     start_date: str = "",
     end_date: str = "",
     client: httpx.Client | None = None,
+    expected_generation_id: str | None = None,
 ) -> Nr2InfoUpdateResult:
     """Edit one saved Nr2 knowledge update through the tenant runtime."""
     password = _tenant_password(tenant_id)
@@ -677,6 +789,7 @@ def _login_token(http: httpx.Client, base: str, tenant_id: str) -> tuple[str, st
     return token, ""
 
 
+@_serialized_nr2_mutation
 def upload_nr2_photo(
     tenant_id: str,
     *,
@@ -686,6 +799,7 @@ def upload_nr2_photo(
     tags: str = "",
     service_key: str = "",
     client: httpx.Client | None = None,
+    expected_generation_id: str | None = None,
 ) -> Nr2MediaUploadResult:
     """Upload an image into the tenant runtime's existing Nr2 photo library."""
     base = _api_base_for_tenant(tenant_id)
@@ -749,11 +863,13 @@ def fetch_nr2_photo_image(
             http.close()
 
 
+@_serialized_nr2_mutation
 def delete_nr2_photo(
     tenant_id: str,
     photo_id: str,
     *,
     client: httpx.Client | None = None,
+    expected_generation_id: str | None = None,
 ) -> Nr2MediaDeleteResult:
     """Delete one image from the tenant runtime's photo library."""
     if not re.fullmatch(r"\d+", str(photo_id or "")):
@@ -815,11 +931,13 @@ def fetch_auto_block_settings(
             http.close()
 
 
+@_serialized_nr2_mutation
 def update_auto_block_settings(
     tenant_id: str,
     settings: dict[str, Any],
     *,
     client: httpx.Client | None = None,
+    expected_generation_id: str | None = None,
 ) -> Nr2AutoBlockSync:
     base = _api_base_for_tenant(tenant_id)
     owns_client = client is None
@@ -851,12 +969,14 @@ def update_auto_block_settings(
             http.close()
 
 
+@_serialized_nr2_mutation
 def update_nr2_product_settings(
     tenant_id: str,
     *,
     delivery_cost_amount: str | float | None,
     delivery_cost_currency: str,
     client: httpx.Client | None = None,
+    expected_generation_id: str | None = None,
 ) -> Nr2ProductSettingsResult:
     base = _api_base_for_tenant(tenant_id)
     amount: float | None

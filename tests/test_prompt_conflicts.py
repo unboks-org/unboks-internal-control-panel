@@ -4,6 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import icp_overrides
+from app import prompt_conflicts
+from app.delete_operations import DeleteOperationConflict
 from app.main import app
 from app.nr2_sync import Nr2KnowledgeSync
 from app.prompt_conflicts import build_prompt_conflict_report
@@ -145,8 +147,13 @@ def test_prompt_conflicts_render_in_workspace_and_can_be_marked_reviewed():
     assert "Mark reviewed" in response.text
 
     conflict_id = build_prompt_conflict_report("unboks")["active_conflicts"][0]["id"]
+    from app.channel_connections import current_tenant_generation_id
+
     marked = client.post(
         f"/admin/tenants/unboks/prompt-conflicts/{conflict_id}/reviewed",
+        data={
+            "tenant_generation_id": current_tenant_generation_id("unboks"),
+        },
         follow_redirects=False,
     )
     assert marked.status_code == 303
@@ -154,6 +161,72 @@ def test_prompt_conflicts_render_in_workspace_and_can_be_marked_reviewed():
 
     report = build_prompt_conflict_report("unboks")
     assert conflict_id in report["reviewed_conflict_ids"]
+
+
+def test_prompt_resolution_forget_tenant_removes_exact_slug_and_preserves_others(
+    tmp_path,
+):
+    path = tmp_path / "resolutions.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "tenants": {
+                    "mermaid": {"conflict-a": {"status": "reviewed"}},
+                    "mermaid-demo": {"conflict-b": {"status": "ignored"}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert prompt_conflicts.tenant_state_exists("mermaid") is True
+    assert prompt_conflicts.forget_tenant("mermaid") is True
+    assert prompt_conflicts.tenant_state_exists("mermaid") is False
+    assert prompt_conflicts.forget_tenant("mermaid") is False
+
+    remaining = json.loads(path.read_text(encoding="utf-8"))
+    assert remaining == {
+        "version": 1,
+        "tenants": {
+            "mermaid-demo": {"conflict-b": {"status": "ignored"}}
+        },
+    }
+
+
+def test_prompt_resolution_cleanup_fails_closed_on_malformed_store(tmp_path):
+    path = tmp_path / "resolutions.json"
+    path.write_text('{"tenants": []}', encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="malformed"):
+        prompt_conflicts.tenant_state_exists("unboks")
+    with pytest.raises(RuntimeError, match="malformed"):
+        prompt_conflicts.forget_tenant("unboks")
+
+    assert path.read_text(encoding="utf-8") == '{"tenants": []}'
+
+
+def test_prompt_resolution_absence_check_fails_closed_on_unreadable_store(tmp_path):
+    path = tmp_path / "resolutions.json"
+    path.mkdir()
+
+    with pytest.raises(RuntimeError, match="unreadable"):
+        prompt_conflicts.tenant_state_exists("unboks")
+
+
+def test_mark_reviewed_rejects_stale_tenant_generation(tmp_path):
+    path = tmp_path / "resolutions.json"
+    prompt_conflicts.mark_reviewed("unboks", "current-conflict")
+    before = path.read_text(encoding="utf-8")
+
+    with pytest.raises(DeleteOperationConflict, match="generation changed"):
+        prompt_conflicts.mark_reviewed(
+            "unboks",
+            "stale-conflict",
+            expected_generation_id="stale-generation",
+        )
+
+    assert path.read_text(encoding="utf-8") == before
 
 
 def test_workspace_uses_tenant_agent_name_when_no_admin_override(tmp_path):

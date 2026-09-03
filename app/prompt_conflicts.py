@@ -12,12 +12,14 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app import icp_overrides
+from app.file_lock import exclusive_file_lock
 from app.nr2_sync import Nr2KnowledgeSync
 from app.tenants import get_tenant_client_data
 
@@ -503,13 +505,70 @@ def _resolution_path() -> Path:
     return Path(os.getenv("NR3_PROMPT_CONFLICT_RESOLUTIONS_PATH", "data/prompt_conflict_resolutions.json"))
 
 
-def _read_resolutions() -> dict[str, Any]:
+def _resolution_lock_path() -> Path:
+    path = _resolution_path()
+    return path.with_name(f"{path.name}.lock")
+
+
+def _read_resolutions(*, fail_closed: bool = False) -> dict[str, Any]:
     path = _resolution_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
         return {"tenants": {}}
-    return data if isinstance(data, dict) else {"tenants": {}}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        if fail_closed:
+            raise RuntimeError(
+                f"Prompt conflict resolution state is unreadable: {path}"
+            ) from exc
+        return {"tenants": {}}
+    tenants = data.get("tenants") if isinstance(data, dict) else None
+    malformed = not isinstance(data, dict) or (
+        tenants is not None and not isinstance(tenants, dict)
+    )
+    if malformed:
+        if fail_closed:
+            raise RuntimeError(
+                f"Prompt conflict resolution state is malformed: {path}"
+            )
+        return {"tenants": {}}
+    if tenants is None:
+        data["tenants"] = {}
+    return data
+
+
+def _write_resolutions(data: dict[str, Any]) -> None:
+    path = _resolution_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            json.dump(data, handle, indent=2, ensure_ascii=False, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        parent_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except Exception:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def reviewed_conflict_ids(tenant_id: str) -> set[str]:
@@ -523,16 +582,61 @@ def reviewed_conflict_ids(tenant_id: str) -> set[str]:
     }
 
 
-def mark_reviewed(tenant_id: str, conflict_id: str) -> None:
-    path = _resolution_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = _read_resolutions()
-    tenants = data.setdefault("tenants", {})
-    reviewed = tenants.setdefault(tenant_id, {})
-    reviewed[conflict_id] = {"status": "reviewed", "updated_at": _now_iso()}
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+def mark_reviewed(
+    tenant_id: str,
+    conflict_id: str,
+    *,
+    expected_generation_id: str | None = None,
+) -> None:
+    """Record a review only while the same tenant generation owns the slug."""
+    from app.delete_operations import require_tenant_mutation_generation
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(tenant_id):
+        require_tenant_mutation_generation(
+            tenant_id,
+            expected_generation_id=expected_generation_id,
+        )
+        with exclusive_file_lock(_resolution_lock_path()):
+            data = _read_resolutions(fail_closed=True)
+            tenants = data.setdefault("tenants", {})
+            reviewed = tenants.get(tenant_id)
+            if reviewed is None:
+                reviewed = {}
+                tenants[tenant_id] = reviewed
+            elif not isinstance(reviewed, dict):
+                raise RuntimeError(
+                    f"Prompt conflict state for {tenant_id} is malformed."
+                )
+            reviewed[conflict_id] = {
+                "status": "reviewed",
+                "updated_at": _now_iso(),
+            }
+            _write_resolutions(data)
+
+
+def forget_tenant(tenant_id: str) -> bool:
+    """Atomically remove only ``tenant_id`` from active review state."""
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(tenant_id):
+        with exclusive_file_lock(_resolution_lock_path()):
+            data = _read_resolutions(fail_closed=True)
+            tenants = data["tenants"]
+            if tenant_id not in tenants:
+                return False
+            tenants.pop(tenant_id)
+            _write_resolutions(data)
+    return True
+
+
+def tenant_state_exists(tenant_id: str) -> bool:
+    """Prove whether the exact tenant has active prompt-review state."""
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(tenant_id):
+        with exclusive_file_lock(_resolution_lock_path()):
+            return tenant_id in _read_resolutions(fail_closed=True)["tenants"]
 
 
 def build_prompt_conflict_report(

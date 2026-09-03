@@ -11,12 +11,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import tempfile
 import zipfile
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -28,15 +30,28 @@ from app.tenants import (
     tenant_account_details,
     update_tenant_account_details,
     validate_slug,
+    write_private_client_json,
+    write_private_text,
 )
 
 
 EXPORT_VERSION = "2.0"
 SECRET_HINTS = ("password", "secret", "token", "access_key", "api_key", "private_key")
+COMPOSE_FILENAMES = {
+    "compose.yaml",
+    "compose.yml",
+    "compose.override.yaml",
+    "compose.override.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+    "docker-compose.override.yaml",
+    "docker-compose.override.yml",
+}
 PROVIDER_JSON_KEYS_TO_CLEAR = {
     "channel_account_allowlist",
     "whatsapp_connect_token",
     "zernio_account_id",
+    "zernio_account_verified",
     "zernio_profile_id",
     "phone_number_id",
     "selected_phone_number_id",
@@ -61,8 +76,13 @@ PROVIDER_ENV_KEYS_TO_CLEAR = {
     "WHATSAPP_PROVIDER_ACCOUNT_ID",
     "WHATSAPP_WABA_ID",
     "ZERNIO_ACCOUNT_ID",
+    "ZERNIO_ACCOUNT_VERIFIED",
     "ZERNIO_PHONE_NUMBER_ID",
     "ZERNIO_PROFILE_ID",
+}
+REQUIRED_RUNTIME_ENV = {
+    "TENANT_RUNTIME_CONTROLS_REQUIRED": "true",
+    "TENANT_ACCOUNT_ALLOWLIST_REQUIRED": "true",
 }
 
 
@@ -154,6 +174,78 @@ def _write_zip_json(zf: zipfile.ZipFile, name: str, value: Any, checksums: dict[
 def _tenant_root(slug: str) -> Path:
     client_dir = os.getenv("NR3_TENANTS_CLIENT_DIR", "/root/clients").strip()
     return Path(client_dir) / validate_slug(slug)
+
+
+def discard_unqueued_clone_runtime(slug: str) -> None:
+    """Remove clone files only while the caller still owns its lifecycle claim."""
+    root = _tenant_root(slug)
+    if root.exists():
+        shutil.rmtree(root)
+
+
+def _canonical_docker_compose_text(slug: str, host_port: int) -> str:
+    if isinstance(host_port, bool) or host_port < 1024 or host_port > 65535:
+        raise ValueError("clone host port must be an integer from 1024 through 65535")
+    return (
+        f"# docker-compose.yml for tenant {slug}\n"
+        "services:\n"
+        "  agent:\n"
+        "    image: wtyj-agent\n"
+        f"    container_name: wtyj-{slug}\n"
+        "    restart: unless-stopped\n"
+        "    ports:\n"
+        f'      - "127.0.0.1:{host_port}:8001"\n'
+        "    env_file:\n"
+        "      - ./config/platform.env\n"
+        "    environment:\n"
+        "      - GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/app/config/calendar-key.json\n"
+        "      - TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+        "      - TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n"
+        "    volumes:\n"
+        "      - ./config:/app/config:rw\n"
+        "      - ./data:/app/data\n"
+        "      - ./logs:/app/logs\n"
+        "    networks:\n"
+        "      - default\n"
+        "      - unboks-control\n"
+        "networks:\n"
+        "  unboks-control:\n"
+        "    external: true\n"
+    )
+
+
+def _trusted_canonical_compose(
+    slug: str,
+    text: str,
+    *,
+    expected_host_port: int | None = None,
+) -> tuple[str, int]:
+    ports = [
+        match.group(1)
+        for line in text.splitlines()
+        if (
+            match := re.fullmatch(
+                r'\s*-\s*"127\.0\.0\.1:([0-9]{1,5}):8001"\s*',
+                line,
+            )
+        )
+    ]
+    if len(ports) != 1:
+        raise ValueError("existing target compose is not canonical")
+    host_port = int(ports[0])
+    if expected_host_port is not None and host_port != expected_host_port:
+        raise ValueError("existing target compose does not match its reserved host port")
+    canonical = _canonical_docker_compose_text(slug, host_port)
+    normalized = text.rstrip("\n") + "\n"
+    if normalized != canonical:
+        legacy = canonical.replace(
+            "      - TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+            "      - TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n",
+            "",
+        )
+        if normalized != legacy:
+            raise ValueError("existing target compose is not canonical")
+    return canonical, host_port
 
 
 def _write_zip_file(zf: zipfile.ZipFile, name: str, path: Path, checksums: dict[str, str]) -> None:
@@ -437,24 +529,58 @@ def _read_text_if_exists(path: Path) -> str:
         return ""
 
 
+def _env_value(text: str, key: str) -> str:
+    for line in text.splitlines():
+        name, separator, value = line.partition("=")
+        if separator and name.strip() == key:
+            return value.strip()
+    return ""
+
+
+def _trusted_client_allowlist(target: str) -> dict[str, Any] | None:
+    client_path = _tenant_root(target) / "config" / "client.json"
+    try:
+        client = json.loads(client_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(client, dict):
+        return None
+    allowlist = client.get("channel_account_allowlist")
+    if not isinstance(allowlist, dict):
+        return None
+    return json.loads(json.dumps(allowlist))
+
+
+def _verified_connection_account_id(connection: Any) -> str:
+    if connection is None:
+        return ""
+    data = asdict(connection) if is_dataclass(connection) else connection
+    if not isinstance(data, dict) or data.get("zernio_account_verified") is not True:
+        return ""
+    account_id = str(data.get("zernio_account_id") or "").strip()
+    if not account_id or len(account_id) > 512 or any(
+        ord(char) < 32 or ord(char) == 127 for char in account_id
+    ):
+        return ""
+    return account_id
+
+
 def _restore_client_tree(
     target: str,
     source_root: Path,
     previous_root: Path,
     *,
     preserve_provider_connection: bool = True,
-) -> None:
+    trusted_channel_allowlist: dict[str, Any] | None = None,
+    trusted_host_port: int | None = None,
+    target_creation_id: str = "",
+) -> int:
     target_root = _tenant_root(target)
     previous_compose = _read_text_if_exists(previous_root / "docker-compose.yml")
-    source_config = source_root / "config" / "client.json"
-    source_client = {}
-    if source_config.exists():
-        try:
-            loaded = json.loads(source_config.read_text(encoding="utf-8"))
-            source_client = loaded if isinstance(loaded, dict) else {}
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
-            source_client = {}
-    source_slug = validate_slug(str(source_client.get("slug") or target))
+    previous_bridge_token = _env_value(
+        _read_text_if_exists(previous_root / "config" / "platform.env"),
+        "NR3_INTERNAL_API_TOKEN",
+    )
     previous_config = previous_root / "config" / "client.json"
     previous_client = {}
     if previous_config.exists():
@@ -464,10 +590,29 @@ def _restore_client_tree(
         except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
             previous_client = {}
 
+    if previous_compose:
+        previous_compose, runtime_host_port = _trusted_canonical_compose(
+            target,
+            previous_compose,
+            expected_host_port=trusted_host_port,
+        )
+    elif trusted_host_port is not None:
+        runtime_host_port = trusted_host_port
+    else:
+        raise ValueError("new clone runtime requires a trusted reserved host port")
+
     if target_root.exists():
         shutil.rmtree(target_root)
     target_root.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source_root, target_root)
+
+    source_root_resolved = source_root.resolve()
+
+    def ignore_archive_compose(directory: str, names: list[str]) -> list[str]:
+        if Path(directory).resolve() != source_root_resolved:
+            return []
+        return [name for name in names if name in COMPOSE_FILENAMES]
+
+    shutil.copytree(source_root, target_root, ignore=ignore_archive_compose)
 
     client_path = target_root / "config" / "client.json"
     if client_path.exists():
@@ -477,72 +622,115 @@ def _restore_client_tree(
             data = {}
         if not isinstance(data, dict):
             data = {}
-        if not preserve_provider_connection:
-            data = _clear_provider_json_values(data)
+        # Backup checksums detect corruption, not authorship. Provider IDs and
+        # allowlists from the uploaded tree are never trusted, even for a
+        # same-slug restore. Only a separately captured target allowlist may be
+        # put back after the donor values are cleared.
+        data = _clear_provider_json_values(data)
+        if preserve_provider_connection and trusted_channel_allowlist is not None:
+            data["channel_account_allowlist"] = json.loads(
+                json.dumps(trusted_channel_allowlist)
+            )
         data["slug"] = target
+        generation_keys = (
+            "tenant_generation_id",
+            "creation_id",
+            "created_at",
+            "access_key",
+        )
+        if target_creation_id:
+            for key in generation_keys:
+                data.pop(key, None)
+            data["creation_id"] = target_creation_id
+        else:
+            for key in generation_keys:
+                if previous_client.get(key) not in (None, ""):
+                    data[key] = previous_client[key]
+                else:
+                    data.pop(key, None)
         # Preserve target-only runtime fields when present. Business content
         # still comes from the donor backup.
         for key in ("host_port", "port"):
             if previous_client.get(key) is not None:
                 data[key] = previous_client[key]
+        data["host_port"] = runtime_host_port
         business = data.get("business")
         if isinstance(business, dict):
             business["slug"] = target
         client_path.parent.mkdir(parents=True, exist_ok=True)
-        client_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        write_private_client_json(client_path, data)
 
     env_path = target_root / "config" / "platform.env"
-    if env_path.exists():
-        lines = env_path.read_text(encoding="utf-8").splitlines()
-        seen_tenant_id = False
-        seen_tenant_slug = False
-        out: list[str] = []
-        for line in lines:
-            if line.startswith("TENANT_ID="):
-                out.append(f"TENANT_ID={target}")
-                seen_tenant_id = True
-            elif line.startswith("TENANT_SLUG="):
-                out.append(f"TENANT_SLUG={target}")
-                seen_tenant_slug = True
-            elif line.split("=", 1)[0].strip() in PROVIDER_ENV_KEYS_TO_CLEAR:
-                continue
-            elif line.startswith("# platform.env for tenant "):
-                out.append(f"# platform.env for tenant {target}")
-            else:
-                out.append(line)
-        if not seen_tenant_id:
+    lines = (
+        env_path.read_text(encoding="utf-8").splitlines()
+        if env_path.exists()
+        else []
+    )
+    seen_tenant_id = False
+    seen_tenant_slug = False
+    seen_bridge_token = False
+    seen_required_runtime_env: set[str] = set()
+    out: list[str] = []
+    for line in lines:
+        key = line.split("=", 1)[0].strip()
+        if key == "TENANT_ID":
             out.append(f"TENANT_ID={target}")
-        if not seen_tenant_slug:
+            seen_tenant_id = True
+        elif key == "TENANT_SLUG":
             out.append(f"TENANT_SLUG={target}")
-        env_path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+            seen_tenant_slug = True
+        elif key == "NR3_INTERNAL_API_TOKEN":
+            # Runtime archives may contain a donor's live bridge token.
+            # Keep only the target's existing token; clones with no target
+            # identity strip the donor token entirely.
+            if previous_bridge_token and not seen_bridge_token:
+                out.append(f"NR3_INTERNAL_API_TOKEN={previous_bridge_token}")
+                seen_bridge_token = True
+        elif key in REQUIRED_RUNTIME_ENV:
+            if key not in seen_required_runtime_env:
+                out.append(f"{key}={REQUIRED_RUNTIME_ENV[key]}")
+                seen_required_runtime_env.add(key)
+        elif key in PROVIDER_ENV_KEYS_TO_CLEAR:
+            continue
+        elif line.startswith("# platform.env for tenant "):
+            out.append(f"# platform.env for tenant {target}")
+        else:
+            out.append(line)
+    if not seen_tenant_id:
+        out.append(f"TENANT_ID={target}")
+    if not seen_tenant_slug:
+        out.append(f"TENANT_SLUG={target}")
+    if previous_bridge_token and not seen_bridge_token:
+        out.append(f"NR3_INTERNAL_API_TOKEN={previous_bridge_token}")
+    for key, value in REQUIRED_RUNTIME_ENV.items():
+        if key not in seen_required_runtime_env:
+            out.append(f"{key}={value}")
+    write_private_text(env_path, "\n".join(out).rstrip() + "\n")
 
+    # Compose files are executable host configuration. Remove every archive
+    # candidate before restoring only a pre-existing target compose or a fresh
+    # canonical clone compose generated from the reserved target host port.
+    for filename in COMPOSE_FILENAMES:
+        candidate = target_root / filename
+        if candidate.is_file() or candidate.is_symlink():
+            candidate.unlink()
+    compose_path = target_root / "docker-compose.yml"
     if previous_compose:
-        (target_root / "docker-compose.yml").write_text(previous_compose, encoding="utf-8")
+        compose_text = previous_compose
     else:
-        compose_path = target_root / "docker-compose.yml"
-        if compose_path.exists():
-            text = compose_path.read_text(encoding="utf-8")
-            text = text.replace(f"container_name: wtyj-{source_slug}", f"container_name: wtyj-{target}")
-            text = text.replace(f"/api/{source_slug}/", f"/api/{target}/")
-            text = text.replace(f"tenant {source_slug}", f"tenant {target}")
-            compose_path.write_text(text, encoding="utf-8")
+        compose_text = _canonical_docker_compose_text(target, runtime_host_port)
+    write_private_text(compose_path, compose_text.rstrip("\n") + "\n")
+    return runtime_host_port
 
 
-def _restore_channel_connection(target: str, connections: dict[str, Any]) -> None:
-    connection = connections.get("whatsapp") if isinstance(connections, dict) else None
-    if not isinstance(connection, dict):
+def _restore_trusted_channel_connection(target: str, connection: Any) -> None:
+    """Restore a connection captured locally before import, never archive data."""
+    if connection is None:
         return
-    zernio_profile_id = connection.get("zernio_profile_id")
-    if zernio_profile_id:
-        channel_connections.set_tenant_zernio_profile_id(
-            tenant_id=target,
-            name=target,
-            zernio_profile_id=str(zernio_profile_id),
-        )
-    metadata = connection.get("metadata_json")
+    connection_data = asdict(connection) if is_dataclass(connection) else connection
+    if not isinstance(connection_data, dict):
+        return
+    metadata = connection_data.get("metadata_json")
     if isinstance(metadata, str):
         try:
             metadata = json.loads(metadata)
@@ -550,26 +738,55 @@ def _restore_channel_connection(target: str, connections: dict[str, Any]) -> Non
             metadata = {"raw": metadata}
     if not isinstance(metadata, dict):
         metadata = {}
-    status = str(connection.get("status") or "not_connected")
+    status = str(connection_data.get("status") or "not_connected")
     if status not in channel_connections.TENANT_CONNECTION_STATUSES:
         status = "not_connected"
     channel_connections.upsert_tenant_channel_connection(
         tenant_id=target,
-        channel=str(connection.get("channel") or "whatsapp"),
-        provider=str(connection.get("provider") or "zernio"),
+        channel=str(connection_data.get("channel") or "whatsapp"),
+        provider=str(connection_data.get("provider") or "zernio"),
         status=status,
-        zernio_profile_id=connection.get("zernio_profile_id"),
-        zernio_account_id=connection.get("zernio_account_id"),
-        phone_number_id=connection.get("phone_number_id"),
-        display_phone_number=connection.get("display_phone_number"),
-        waba_id=connection.get("waba_id"),
+        zernio_profile_id=connection_data.get("zernio_profile_id"),
+        zernio_account_id=connection_data.get("zernio_account_id"),
+        zernio_account_verified=(
+            connection_data.get("zernio_account_verified") is True
+        ),
+        phone_number_id=connection_data.get("phone_number_id"),
+        display_phone_number=connection_data.get("display_phone_number"),
+        waba_id=connection_data.get("waba_id"),
         metadata=metadata,
-        last_request_id=connection.get("last_request_id"),
-        last_error=connection.get("last_error"),
-        connected_at=connection.get("connected_at"),
+        last_request_id=connection_data.get("last_request_id"),
+        last_error=connection_data.get("last_error"),
+        connected_at=connection_data.get("connected_at"),
     )
 
 
+def _serialized_tenant_import(function):
+    """Hold one generation lease across every destructive import side effect."""
+    @wraps(function)
+    def wrapped(upload_file, *args, **kwargs):
+        mode = str(kwargs.get("mode") or "")
+        if mode == "validate":
+            return function(upload_file, *args, **kwargs)
+        target_tenant = str(kwargs.get("target_tenant") or "")
+        new_slug = str(kwargs.get("new_slug") or "")
+        target = validate_slug(new_slug or target_tenant)
+        expected_generation_id = kwargs.pop("expected_generation_id", None)
+        from app.delete_operations import require_tenant_mutation_generation
+        from app.provisioning import tenant_creation_lock
+
+        with tenant_creation_lock(target):
+            if mode == "restore":
+                require_tenant_mutation_generation(
+                    target,
+                    expected_generation_id=expected_generation_id,
+                )
+            return function(upload_file, *args, **kwargs)
+
+    return wrapped
+
+
+@_serialized_tenant_import
 def import_uploaded_package(
     upload_file,
     *,
@@ -577,6 +794,8 @@ def import_uploaded_package(
     mode: str,
     new_slug: str = "",
     confirmation: str = "",
+    clone_creation_id: str = "",
+    trusted_clone_host_port: int | None = None,
 ) -> dict[str, Any]:
     package_path = _save_upload(upload_file)
     summary = validate_import_package(package_path)
@@ -596,6 +815,50 @@ def import_uploaded_package(
             raise ValueError("target slug already exists")
         if confirmation != "IMPORT CLONE":
             raise ValueError("type IMPORT CLONE to confirm clone")
+        if not clone_creation_id:
+            raise ValueError("clone import requires a lifecycle creation id")
+        if (
+            isinstance(trusted_clone_host_port, bool)
+            or not isinstance(trusted_clone_host_port, int)
+            or trusted_clone_host_port < 1024
+            or trusted_clone_host_port > 65535
+        ):
+            raise ValueError("clone import requires a trusted reserved host port")
+        from app.provisioning import tenant_provision_claim
+
+        claim = tenant_provision_claim(target)
+        if not claim or claim.get("creation_id") != clone_creation_id:
+            raise ValueError("clone import lifecycle reservation does not match")
+        from app.delete_operations import bind_tenant_generation_for_creation
+
+        bind_tenant_generation_for_creation(
+            slug=target,
+            generation_id=clone_creation_id,
+        )
+
+    preserve_target_provider_state = mode == "restore" and not cross_tenant_import
+    trusted_connection = (
+        channel_connections.get_tenant_channel_connection(target)
+        if preserve_target_provider_state
+        else None
+    )
+    verified_target_account_id = _verified_connection_account_id(
+        trusted_connection
+    )
+    trusted_allowlist = (
+        {
+            "mode": "strict",
+            "zernio_accounts": [verified_target_account_id],
+            "notes": "Rebuilt from the Nr3-verified target connection during restore.",
+        }
+        if preserve_target_provider_state and verified_target_account_id
+        else None
+    )
+    trusted_channel_visibility = (
+        bool(channel_state.read_channels(target).get("whatsapp"))
+        if preserve_target_provider_state
+        else False
+    )
 
     if mode == "restore":
         rollback = build_export_package(target_tenant)
@@ -632,7 +895,12 @@ def import_uploaded_package(
             target,
             client_tree,
             _tenant_root(target),
-            preserve_provider_connection=not cross_tenant_import,
+            preserve_provider_connection=preserve_target_provider_state,
+            trusted_channel_allowlist=trusted_allowlist,
+            trusted_host_port=(
+                trusted_clone_host_port if mode == "clone" else None
+            ),
+            target_creation_id=(clone_creation_id if mode == "clone" else ""),
         )
 
     account = tenant_payload.get("account") if isinstance(tenant_payload, dict) else {}
@@ -645,6 +913,11 @@ def import_uploaded_package(
             contact_person=str(account.get("contact_person") or ""),
             email=str(account.get("email") or ""),
             phone=str(account.get("phone") or ""),
+            whatsapp=(
+                str(account.get("whatsapp") or "")
+                if "whatsapp" in account
+                else None
+            ),
             website=str(account.get("website") or ""),
             address=str(account.get("address") or ""),
             logo_url=str(account.get("logo_url") or ""),
@@ -679,13 +952,19 @@ def import_uploaded_package(
     visibility = channels.get("visibility") if isinstance(channels, dict) else {}
     if isinstance(visibility, dict):
         for key, value in visibility.items():
-            if cross_tenant_import and str(key) == "whatsapp":
-                channel_state.set_channel(target, "whatsapp", False)
-            else:
+            if str(key) != "whatsapp":
                 channel_state.set_channel(target, str(key), bool(value))
-    connections = channels.get("connections") if isinstance(channels, dict) else {}
-    if isinstance(connections, dict) and not cross_tenant_import:
-        _restore_channel_connection(target, connections)
+    trusted_connection_verified = bool(verified_target_account_id)
+    if preserve_target_provider_state:
+        # Activation validation reads the current Nr3 connection, so restore
+        # the locally captured trusted record before re-enabling visibility.
+        # Archive-supplied provider identity is never consulted here.
+        _restore_trusted_channel_connection(target, trusted_connection)
+    channel_state.set_channel(
+        target,
+        "whatsapp",
+        trusted_channel_visibility and trusted_connection_verified,
+    )
     for note in (learning.get("tenant_notes") if isinstance(learning, dict) else []) or []:
         if isinstance(note, dict) and note.get("body"):
             added = tenant_notes.add_note(
@@ -718,4 +997,9 @@ def import_uploaded_package(
         "client_tree_restored": client_tree is not None,
         "runtime_restore_package": runtime_restore_package,
         "channels_require_reconnect": cross_tenant_import,
+        "creation_id": clone_creation_id if mode == "clone" else "",
+        "host_port": trusted_clone_host_port if mode == "clone" else None,
+        "verified_zernio_account_id": (
+            verified_target_account_id if preserve_target_provider_state else ""
+        ),
     }

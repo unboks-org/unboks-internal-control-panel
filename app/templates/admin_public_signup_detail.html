@@ -29,8 +29,10 @@
       {% set next_step = "send" %}
     {% elif current_status == "onboarding_link_sent" %}
       {% set next_step = "workspace" %}
-    {% elif signup.provisioned_slug or current_status == "provisioned" %}
+    {% elif current_status == "provisioned" and signup.provisioned_slug %}
       {% set next_step = "open" %}
+    {% elif current_status in ["provisioning_dispatching", "provisioning_pending", "onboarding_link_generating", "onboarding_email_sending", "info_request_sending"] %}
+      {% set next_step = "busy" %}
     {% elif current_status in ["archived", "rejected"] %}
       {% set next_step = "archived" %}
     {% endif %}
@@ -50,13 +52,23 @@
           <span class="signup-status-badge badge-awaiting">Info requested</span>
         {% elif current_status == "info_request_failed" %}
           <span class="signup-status-badge badge-danger">Info request failed</span>
+        {% elif current_status == "info_request_sending" %}
+          <span class="signup-status-badge badge-awaiting">Sending info request</span>
         {% elif current_status in ["archived", "rejected"] %}
           <span class="signup-status-badge badge-neutral">Archived</span>
         {% elif current_status == "onboarding_link_generated" %}
           <span class="signup-status-badge badge-awaiting">Onboarding link generated</span>
         {% elif current_status == "onboarding_link_sent" %}
           <span class="signup-status-badge badge-good">Onboarding sent</span>
-        {% elif signup.provisioned_slug or current_status == "provisioned" %}
+        {% elif current_status == "onboarding_link_generating" %}
+          <span class="signup-status-badge badge-awaiting">Generating onboarding link</span>
+        {% elif current_status == "onboarding_email_sending" %}
+          <span class="signup-status-badge badge-awaiting">Sending onboarding email</span>
+        {% elif current_status == "provisioning_dispatching" %}
+          <span class="signup-status-badge badge-awaiting">Starting workspace creation</span>
+        {% elif current_status == "provisioning_pending" %}
+          <span class="signup-status-badge badge-awaiting">Workspace creation in progress</span>
+        {% elif current_status == "provisioned" and signup.provisioned_slug %}
           <span class="signup-status-badge badge-good">Workspace created</span>
         {% elif current_status == "failed" %}
           <span class="signup-status-badge badge-danger">Needs attention</span>
@@ -72,6 +84,8 @@
           </form>
         {% elif next_step == "open" %}
           <a class="signup-review-button" href="/admin/tenants/{{ signup.provisioned_slug }}">Open tenant workspace</a>
+        {% elif next_step == "busy" %}
+          <span class="signup-detail-kicker">Operation in progress</span>
         {% endif %}
       </div>
     </section>
@@ -120,7 +134,33 @@
           {% if email_delivery.admin_error %}
             <div><dt>Admin error</dt><dd>{{ email_delivery.admin_error }}</dd></div>
           {% endif %}
+          {% set credential_status = signup.credential_delivery_status or ("untracked" if current_status == "provisioned" else "not_started") %}
+          <div>
+            <dt>Workspace credentials</dt>
+            <dd>
+              <code>{{ credential_status }}</code>
+              {% if signup.credential_delivery_sent_at %} · {{ signup.credential_delivery_sent_at }}{% endif %}
+            </dd>
+          </div>
+          {% if signup.credential_delivery_attempt_count %}
+            <div><dt>Credential attempts</dt><dd>{{ signup.credential_delivery_attempt_count }}</dd></div>
+          {% endif %}
+          {% if signup.credential_delivery_last_attempt_at %}
+            <div><dt>Last credential attempt</dt><dd>{{ signup.credential_delivery_last_attempt_at }}</dd></div>
+          {% endif %}
+          {% if credential_status == "sending" and signup.credential_delivery_lease_expires_at %}
+            <div><dt>Delivery lease expires</dt><dd>{{ signup.credential_delivery_lease_expires_at }}</dd></div>
+          {% endif %}
+          {% if signup.credential_delivery_error %}
+            <div><dt>Credential error</dt><dd>{{ signup.credential_delivery_error }}</dd></div>
+          {% endif %}
         </dl>
+        {% if current_status == "provisioned" and credential_status != "sent" %}
+          <form method="post" action="/admin/signups/{{ signup.id }}/retry-credentials">
+            <button type="submit">Retry workspace credential email</button>
+          </form>
+          <p class="muted compact-note">A live delivery lease prevents concurrent retries from sending a duplicate email.</p>
+        {% endif %}
       </article>
 
       <article class="signup-step-card {% if next_step == 'approve' %}is-current{% endif %}">
@@ -181,13 +221,20 @@
         {% endif %}
       </article>
 
-      {% if not pre_approval and current_status not in ["archived", "rejected"] %}
+      {% if current_status in ["approved", "onboarding_link_generated", "onboarding_link_sent", "provisioning_dispatching", "provisioning_pending", "provisioned", "failed"] %}
       <article class="signup-step-card {% if next_step in ['workspace', 'open'] %}is-current{% endif %}">
         <span class="signup-step-number">3</span>
         <h3>Create or open workspace</h3>
-        {% if signup.provisioned_slug %}
+        {% if current_status == "provisioned" and signup.provisioned_slug %}
           <p class="muted compact-note">Workspace is already linked.</p>
           <a class="signup-review-button" href="/admin/tenants/{{ signup.provisioned_slug }}">Open tenant workspace</a>
+        {% elif current_status in ["provisioning_dispatching", "provisioning_pending"] %}
+          <p class="muted compact-note">Workspace creation is in progress. Credentials remain hidden until the host confirms success.</p>
+        {% elif current_status == "failed" %}
+          <p class="muted compact-note">Workspace creation failed. Resolve the recorded error before retrying; an unsafe host rollback keeps the slug reserved.</p>
+          <form method="post" action="/admin/signups/{{ signup.id }}/create-workspace">
+            <button type="submit">Retry workspace creation</button>
+          </form>
         {% else %}
           <p class="muted compact-note">Create the workspace only after review is approved.</p>
           <form method="post" action="/admin/signups/{{ signup.id }}/create-workspace">

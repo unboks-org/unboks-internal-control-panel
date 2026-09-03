@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -45,23 +47,74 @@ def _load(path: Path) -> dict[str, int]:
     if not isinstance(raw, dict):
         raise PortRegistryError("Tenant port registry must be an object.")
     out: dict[str, int] = {}
+    owners_by_port: dict[int, str] = {}
     for slug, value in raw.items():
-        if isinstance(slug, str):
-            try:
-                out[slug] = int(value)
-            except (TypeError, ValueError):
-                continue
+        if not isinstance(slug, str) or re.fullmatch(
+            r"[a-z][a-z0-9_-]{1,49}", slug
+        ) is None:
+            raise PortRegistryError(
+                "Tenant port registry contains an invalid tenant slug."
+            )
+        if isinstance(value, bool):
+            raise PortRegistryError(
+                f"Tenant port registry contains an invalid port for {slug}."
+            )
+        if isinstance(value, int):
+            port = value
+        elif isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+            # Accept legacy numeric strings, but normalize only after the whole
+            # shared registry has been validated.
+            port = int(value)
+        else:
+            raise PortRegistryError(
+                f"Tenant port registry contains an invalid port for {slug}."
+            )
+        if not 1 <= port <= 65535:
+            raise PortRegistryError(
+                f"Tenant port registry contains an out-of-range port for {slug}."
+            )
+        prior_owner = owners_by_port.get(port)
+        if prior_owner is not None and prior_owner != slug:
+            raise PortRegistryError(
+                "Tenant port registry assigns one port to multiple tenants."
+            )
+        owners_by_port[port] = slug
+        out[slug] = port
     return out
 
 
 def _write(path: Path, data: dict[str, int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(
-        json.dumps(dict(sorted(data.items())), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
-    temp.replace(path)
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(
+                json.dumps(dict(sorted(data.items())), indent=2, ensure_ascii=False)
+                + "\n"
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+        parent_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except Exception:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def reserve_tenant_port(slug: str) -> int:

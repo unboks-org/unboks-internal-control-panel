@@ -136,16 +136,26 @@
                 <span class="signup-status-badge badge-awaiting">Info requested</span>
               {% elif signup.status == "info_request_failed" %}
                 <span class="signup-status-badge badge-danger">Info request failed</span>
+              {% elif signup.status == "info_request_sending" %}
+                <span class="signup-status-badge badge-awaiting">Sending info request</span>
               {% elif signup.status in ["archived", "rejected"] %}
                 <span class="signup-status-badge badge-neutral">Archived</span>
               {% elif signup.status == "onboarding_link_generated" %}
                 <span class="signup-status-badge badge-awaiting">Link generated</span>
               {% elif signup.status == "onboarding_link_sent" %}
                 <span class="signup-status-badge badge-good">Onboarding sent</span>
+              {% elif signup.status == "onboarding_link_generating" %}
+                <span class="signup-status-badge badge-awaiting">Generating link</span>
+              {% elif signup.status == "onboarding_email_sending" %}
+                <span class="signup-status-badge badge-awaiting">Sending onboarding</span>
               {% elif signup.status == "verification_pending" %}
                 <span class="signup-status-badge badge-neutral">Awaiting email verification</span>
               {% elif signup.status == "provisioned" %}
                 <span class="signup-status-badge badge-good">Workspace created</span>
+              {% elif signup.status == "provisioning_dispatching" %}
+                <span class="signup-status-badge badge-awaiting">Starting workspace</span>
+              {% elif signup.status == "provisioning_pending" %}
+                <span class="signup-status-badge badge-awaiting">Provisioning</span>
               {% elif signup.status == "failed" %}
                 <span class="signup-status-badge badge-danger">Failed</span>
               {% elif signup.status == "verification_expired" %}
@@ -160,8 +170,22 @@
                 </div>
                 <div>
                   <dt>Workspace</dt>
-                  <dd>{{ signup.provisioned_slug or "Not created" }}</dd>
+                  <dd>
+                    {% if signup.status == "provisioned" and signup.provisioned_slug %}
+                      {{ signup.provisioned_slug }}
+                    {% elif signup.status in ["provisioning_dispatching", "provisioning_pending"] %}
+                      Provisioning…
+                    {% else %}
+                      Not created
+                    {% endif %}
+                  </dd>
                 </div>
+                {% if signup.status == "provisioned" %}
+                  <div>
+                    <dt>Credentials</dt>
+                    <dd><code>{{ signup.credential_delivery_status or "untracked" }}</code></dd>
+                  </div>
+                {% endif %}
                 <div>
                   <dt>Slug hint</dt>
                   <dd>{{ signup.slug_hint or "—" }}</dd>
@@ -172,7 +196,7 @@
             <div class="signup-card-actions">
               <a class="signup-review-button" href="/admin/signups/{{ signup.id }}">Review</a>
               <button type="button" class="signup-copy-button" data-copy-text="{{ signup.email or '' }}">Copy email</button>
-              {% if signup.provisioned_slug %}
+              {% if signup.status == "provisioned" and signup.provisioned_slug %}
                 <a class="signup-secondary-link" href="/admin/tenants/{{ signup.provisioned_slug }}">Open tenant</a>
               {% endif %}
             </div>

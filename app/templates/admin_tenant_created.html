@@ -1,22 +1,32 @@
 {% extends "admin_base.html" %}
 
-{% block page_title %}Tenant created{% endblock %}
+{% block page_title %}{{ 'Tenant creation failed' if provision_result and provision_result.status == 'failed' else 'Tenant created' }}{% endblock %}
 {% block section_eyebrow %}Unboks tenants{% endblock %}
 
 {% block content %}
 <section class="page-card create-tenant">
   <header class="create-tenant-header">
-    <h2>Tenant created: <code>{{ slug }}</code></h2>
+    <h2>{{ 'Tenant creation failed' if provision_result and provision_result.status == 'failed' else 'Tenant created' }}: <code>{{ slug }}</code></h2>
     {% if provision_result and provision_result.status == 'succeeded' %}
       <p class="muted">
         Nr 3 provisioned this tenant on the VPS automatically. The tenant can
         sign in at <a href="{{ provision_result.dashboard_url or dashboard_url }}">{{ provision_result.dashboard_url or dashboard_url }}</a>.
       </p>
-    {% else %}
+    {% elif provision_result and provision_result.status == 'disabled' %}
       <p class="muted">
-        Automatic provisioning did not finish. Use the first button below as
+        Automatic provisioning is disabled. Use the first button below as
         the fallback: it copies one complete VPS script. SSH into the VPS,
         paste the script once, press Enter, and wait for it to finish.
+      </p>
+    {% elif provision_result and provision_result.status == 'queued' %}
+      <p class="muted">
+        Automatic provisioning is still in progress. Keep the job ID below;
+        do not run the fallback in parallel with the worker.
+      </p>
+    {% else %}
+      <p class="muted">
+        Tenant creation did not complete. No deployable credentials or stale
+        fallback artifacts are exposed; correct the error and create it again.
       </p>
     {% endif %}
     <p class="muted">
@@ -55,7 +65,7 @@
       {% if provision_result.job_id %}
         <p class="ct-help muted">Job: <code>{{ provision_result.job_id }}</code></p>
       {% endif %}
-      <p>Use the manual fallback script below if the tenant is not available shortly.</p>
+      <p>Wait for this owned job to finish; do not start a parallel manual deployment.</p>
     </div>
   {% elif provision_result and provision_result.status == 'failed' %}
     <div class="form-feedback form-feedback-warn">
@@ -64,7 +74,11 @@
       {% if provision_result.job_id %}
         <p class="ct-help muted">Job: <code>{{ provision_result.job_id }}</code></p>
       {% endif %}
-      <p>No success was faked. Use the manual fallback script below or inspect the provisioning worker logs.</p>
+      {% if provision_result.safe_to_release %}
+        <p>No success was faked. The host proved rollback completed, so the slug can be retried after the worker error is corrected.</p>
+      {% else %}
+        <p>No success was faked. The slug and port remain reserved because complete host rollback was not proven. Inspect and reconcile the worker artifacts before retrying.</p>
+      {% endif %}
     </div>
   {% elif provision_result and provision_result.status == 'disabled' %}
     <div class="form-feedback form-feedback-info">
@@ -73,7 +87,7 @@
     </div>
   {% endif %}
 
-  {% set manual_artifacts_required = not provision_result or provision_result.status != 'succeeded' %}
+  {% set manual_artifacts_required = not provision_result or provision_result.status == 'disabled' %}
 
   {% if welcome_status == 'sent' %}
     <div class="form-feedback form-feedback-success">
@@ -101,11 +115,16 @@
       credential handoff below; internal access keys are not shown
       unless VPS fallback files are needed.
     </div>
+  {% elif welcome_status == 'provisioning_pending' %}
+    <div class="form-feedback form-feedback-info">
+      Welcome email was not sent or scheduled before provisioning completed.
+      {{ welcome_error }}
+    </div>
   {% endif %}
 
   <p class="ct-action-feedback" data-ct-copy-feedback aria-live="polite"></p>
 
-  {% if welcome_status in ['unchecked', 'no_smtp', 'failed'] %}
+  {% if provision_result and provision_result.status != 'failed' and welcome_status in ['unchecked', 'no_smtp', 'failed', 'provisioning_pending'] %}
     <fieldset class="ct-fieldset">
       <legend>Manual credential handoff</legend>
       <p class="ct-help muted">
@@ -268,6 +287,7 @@ Temporary password: {{ temporary_password }}</pre>
   </fieldset>
   {% endif %}
 
+  {% if not provision_result or provision_result.status != 'failed' %}
   <fieldset class="ct-fieldset">
     <legend>Credentials reminder</legend>
     <p class="muted">
@@ -288,6 +308,7 @@ Temporary password: {{ temporary_password }}</pre>
       {% endif %}
     </p>
   </fieldset>
+  {% endif %}
 
   <div class="ct-actions">
     <a href="/admin/tenants/new" class="button-secondary">Create another tenant</a>

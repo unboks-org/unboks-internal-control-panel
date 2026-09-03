@@ -50,6 +50,44 @@ def test_invalid_registry_json_fails_closed(monkeypatch, tmp_path):
         reserve_tenant_port("alpha")
 
 
+def test_release_fails_closed_without_erasing_other_malformed_row(
+    monkeypatch, tmp_path
+):
+    path = tmp_path / "ports.json"
+    original = '{"alpha": 8100, "bravo": "not-a-port"}\n'
+    path.write_text(original, encoding="utf-8")
+    monkeypatch.setenv("NR3_PORT_REGISTRY_PATH", str(path))
+
+    with pytest.raises(PortRegistryError, match="invalid port for bravo"):
+        release_tenant_port("alpha")
+
+    assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("bad_port", [True, 8100.5, 0, 65536])
+def test_registry_rejects_ambiguous_or_out_of_range_ports(
+    monkeypatch, tmp_path, bad_port
+):
+    path = tmp_path / "ports.json"
+    path.write_text(json.dumps({"alpha": bad_port}), encoding="utf-8")
+    monkeypatch.setenv("NR3_PORT_REGISTRY_PATH", str(path))
+
+    with pytest.raises(PortRegistryError):
+        read_port_registry()
+
+
+def test_registry_rejects_duplicate_cross_tenant_port(monkeypatch, tmp_path):
+    path = tmp_path / "ports.json"
+    path.write_text(
+        json.dumps({"alpha": 8100, "bravo": 8100}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NR3_PORT_REGISTRY_PATH", str(path))
+
+    with pytest.raises(PortRegistryError, match="multiple tenants"):
+        reserve_tenant_port("charlie")
+
+
 def test_registry_file_is_sorted_json(monkeypatch, tmp_path):
     path = tmp_path / "ports.json"
     monkeypatch.setenv("NR3_PORT_REGISTRY_PATH", str(path))

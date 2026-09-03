@@ -11,7 +11,10 @@ The wizard:
 """
 import html
 import json
+import os
 import re
+import stat
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -36,6 +39,7 @@ def _isolated_env(tmp_path, monkeypatch):
         "NR3_PORT_REGISTRY_PATH",
         str(tmp_path / "port_registry.json"),
     )
+    monkeypatch.setenv("NR3_ICP_STATE_PATH", str(tmp_path / "icp_overrides.json"))
     (tmp_path / "client_root").mkdir()
     yield
 
@@ -155,6 +159,14 @@ def test_create_writes_client_json_locally_for_sidebar(client, tmp_path):
     written = _json.loads(config_path.read_text())
     assert written["slug"] == "sidebar-co"
     assert written["name"] == "Sidebar Co"
+    assert written["channel_account_allowlist"]["mode"] == "strict"
+    assert written["channel_account_allowlist"]["zernio_accounts"] == []
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+    state = _json.loads((tmp_path / "icp_overrides.json").read_text())
+    toggles = state["tenants"]["sidebar-co"]["feature_toggles"]
+    assert toggles["ai_auto_reply"]["value"] is False
+    assert toggles["whatsapp_inbox"]["value"] is False
+    assert toggles["facebook_dms"]["value"] is False
     # And list_tenants() now sees the new tenant.
     listed = [t.id for t in tenants.list_tenants()]
     assert "sidebar-co" in listed
@@ -236,7 +248,18 @@ def test_create_rejects_bad_slug(client):
     assert "Slug must be" in r.text
 
 
-def test_create_rejects_duplicate_slug(client):
+def test_create_rejects_reserved_slug(client):
+    response = client.post(
+        "/admin/tenants/create",
+        data={"name": "Reserved", "slug": "unboks"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "reserved and cannot be created" in response.text
+
+
+def test_create_rejects_duplicate_slug(client, tmp_path):
     """The wizard refuses to overwrite an existing slug folder so a
     duplicate submit can't silently regenerate the password and
     invalidate the operator's paper trail."""
@@ -245,12 +268,43 @@ def test_create_rejects_duplicate_slug(client):
         data={"name": "Dup A", "slug": "dupe-slug"},
         follow_redirects=False)
     assert r1.status_code == 200
+    from app import icp_overrides
+    icp_overrides.set_feature_toggle(
+        "dupe-slug", "ai_auto_reply", True, updated_by="existing-tenant"
+    )
     r2 = client.post(
         "/admin/tenants/create",
         data={"name": "Dup B", "slug": "dupe-slug"},
         follow_redirects=False)
     assert r2.status_code == 400
     assert "already exists" in r2.text
+    state = json.loads((tmp_path / "icp_overrides.json").read_text())
+    toggle = state["tenants"]["dupe-slug"]["feature_toggles"]["ai_auto_reply"]
+    assert toggle["value"] is True
+    assert toggle["updated_by"] == "existing-tenant"
+
+
+def test_create_releases_reserved_port_if_paused_state_cannot_initialize(
+    client, monkeypatch, tmp_path,
+):
+    from app import icp_overrides
+
+    def fail_initialize(*_args, **_kwargs):
+        raise OSError("read-only state")
+
+    monkeypatch.setattr(
+        icp_overrides, "initialize_new_tenant_fail_closed", fail_initialize
+    )
+    response = client.post(
+        "/admin/tenants/create",
+        data={"name": "State Failure", "slug": "state-failure"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    registry_path = tmp_path / "port_registry.json"
+    registry = json.loads(registry_path.read_text()) if registry_path.exists() else {}
+    assert "state-failure" not in registry
 
 
 # --- welcome email -----------------------------------------------
@@ -270,7 +324,30 @@ def email_capture(monkeypatch):
     return sent
 
 
-def test_welcome_email_sent_when_checked(client, email_capture):
+def _mock_successful_provision(monkeypatch):
+    from app.routes import admin
+
+    captured = {}
+
+    def fake_auto_provision_tenant(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            status="succeeded",
+            message="Tenant was provisioned.",
+            job_id="job-welcome",
+            details=("health check passed",),
+            dashboard_url=kwargs["dashboard_url"],
+            health_url="http://127.0.0.1:8123/health",
+        )
+
+    monkeypatch.setattr(admin, "auto_provision_tenant", fake_auto_provision_tenant)
+    return captured
+
+
+def test_welcome_email_sent_only_after_provisioning_succeeds(
+    client, email_capture, monkeypatch,
+):
+    captured = _mock_successful_provision(monkeypatch)
     r = client.post(
         "/admin/tenants/create",
         data={
@@ -286,8 +363,7 @@ def test_welcome_email_sent_when_checked(client, email_capture):
     assert msg["to"] == "ops@acme.test"
     assert "Acme" in msg["subject"]
     assert "https://dashboard.unboks.org/login?workspace=acme" in msg["body"]
-    data = _extract_client_json(r.text)
-    assert data["password"] in msg["body"]
+    assert captured["client_data"]["password"] in msg["body"]
     assert "Welcome email sent to" in r.text
 
 
@@ -305,7 +381,10 @@ def test_welcome_email_skipped_when_unchecked(client, email_capture):
     assert "checkbox was not ticked" in r.text
 
 
-def test_welcome_email_skipped_without_contact_email(client, email_capture):
+def test_welcome_email_skipped_without_contact_email(
+    client, email_capture, monkeypatch,
+):
+    _mock_successful_provision(monkeypatch)
     r = client.post(
         "/admin/tenants/create",
         data={"name": "No Email", "send_welcome": "1"},
@@ -320,6 +399,7 @@ def test_welcome_email_send_failure_does_not_crash(client, monkeypatch):
     JSON is still shown so the operator can send credentials
     manually."""
     from app import emailer
+    _mock_successful_provision(monkeypatch)
     monkeypatch.setattr(emailer, "smtp_is_configured", lambda s: True)
 
     def boom(*args, **kwargs):
@@ -337,12 +417,12 @@ def test_welcome_email_send_failure_does_not_crash(client, monkeypatch):
         follow_redirects=False)
     assert r.status_code == 200
     assert "Welcome email send failed" in r.text
-    data = _extract_client_json(r.text)
-    assert data["slug"] == "boom"
+    assert "Workspace: boom" in r.text
 
 
 def test_welcome_email_no_smtp(client, monkeypatch):
     from app import emailer
+    _mock_successful_provision(monkeypatch)
     monkeypatch.setattr(emailer, "smtp_is_configured", lambda s: False)
     r = client.post(
         "/admin/tenants/create",
@@ -355,6 +435,27 @@ def test_welcome_email_no_smtp(client, monkeypatch):
         follow_redirects=False)
     assert r.status_code == 200
     assert "SMTP is not configured" in r.text
+
+
+def test_disabled_provisioning_never_emails_unusable_credentials(
+    client, email_capture,
+):
+    r = client.post(
+        "/admin/tenants/create",
+        data={
+            "name": "Manual First",
+            "slug": "manual-first",
+            "contact_email": "owner@example.com",
+            "send_welcome": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert r.status_code == 200
+    assert email_capture == []
+    assert "Welcome email was not sent or scheduled" in r.text
+    assert "Complete and verify provisioning" in r.text
+    assert "ct-full-vps-setup" in r.text
 
 
 # --- slug helpers (unchanged unit tests) --------------------------
@@ -437,6 +538,8 @@ def test_platform_env_carries_dashboard_password(client):
     assert "ANTHROPIC_API_KEY=SET_BY_FULL_VPS_SETUP_SCRIPT" in env_text
     assert "PASTE_NR3_INTERNAL_API_TOKEN_HERE" not in env_text
     assert "ICP_OVERRIDES_TTL_SECONDS=5" in env_text
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in env_text
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in env_text
 
 
 def test_docker_compose_names_container_and_port(client):
@@ -449,6 +552,8 @@ def test_docker_compose_names_container_and_port(client):
     assert "container_name: wtyj-acme" in compose
     assert "image: wtyj-agent" in compose
     assert "env_file:\n      - ./config/platform.env" in compose
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in compose
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in compose
     assert "./logs:/app/logs" in compose
     assert re.search(r'"127\.0\.0\.1:\d{4}:8001"', compose),         f"no localhost host_port mapping in compose: {compose!r}"
 
@@ -464,6 +569,10 @@ def test_nginx_snippet_routes_slug_to_proxy_pass(client):
     assert "proxy_set_header X-Tenant-Slug acme;" in nginx
     assert "Access-Control-Allow-Credentials" in nginx
     assert "Cache-Control, Pragma" in nginx
+    assert "proxy_hide_header X-Unboks-Tenant;" in nginx
+    assert 'add_header X-Unboks-Tenant "acme" always;' in nginx
+    assert 'add_header Access-Control-Expose-Headers "X-Unboks-Tenant" always;' in nginx
+    assert nginx.count('add_header X-Unboks-Tenant "acme" always;') == 1
     assert re.search(r"proxy_pass http://127\.0\.0\.1:\d{4}/;", nginx)
 
 
@@ -499,6 +608,8 @@ def test_full_vps_setup_script_is_ready_to_paste(client):
     assert "cat > \"$TENANT_DIR/config/client.json\"" in script
     assert '"slug": "one-paste"' in script
     assert "cat > \"$TENANT_DIR/config/platform.env\"" in script
+    assert 'chmod 600 "$TENANT_DIR/config/client.json" "$TENANT_DIR/config/platform.env"' in script
+    assert "umask 077" in script
     assert "PASTE_NR3_INTERNAL_API_TOKEN_HERE" not in script
     assert "BRIDGE_TOKEN=$(tr -d" in script
     assert "ANTHROPIC_API_KEY=$(tr -d" in script
@@ -507,6 +618,8 @@ def test_full_vps_setup_script_is_ready_to_paste(client):
     assert "cat > \"$TENANT_DIR/docker-compose.yml\"" in script
     assert "docker network inspect unboks-control" in script
     assert "NR3_INTERNAL_OVERRIDES_URL=http://wtyj-admin:8010" in script
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in script
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in script
     assert "python3 - <<'UNBOKS_NGINX_INSERT'" in script
     assert "# BEGIN UNBOKS TENANT one-paste" in script
     assert "docker compose down || true" in script
@@ -547,7 +660,9 @@ def test_create_shows_auto_provision_success_when_worker_succeeds(client, monkey
     assert "Internal access keys were written by automatic provisioning" in r.text
 
 
-def test_create_shows_auto_provision_failure_without_fake_success(client, monkeypatch):
+def test_create_shows_auto_provision_failure_without_fake_success(
+    client, monkeypatch, email_capture,
+):
     from app.routes import admin
 
     def fake_auto_provision_tenant(**kwargs):
@@ -558,15 +673,34 @@ def test_create_shows_auto_provision_failure_without_fake_success(client, monkey
             details=(),
             dashboard_url=kwargs["dashboard_url"],
             health_url="",
+            safe_to_release=False,
         )
 
     monkeypatch.setattr(admin, "auto_provision_tenant", fake_auto_provision_tenant)
     r = client.post(
         "/admin/tenants/create",
-        data={"name": "Failed Auto", "slug": "failed-auto"},
+        data={
+            "name": "Failed Auto",
+            "slug": "failed-auto",
+            "contact_email": "owner@example.com",
+            "send_welcome": "1",
+        },
         follow_redirects=False)
     assert r.status_code == 200
     assert "Automatic provisioning failed" in r.text
     assert "nginx config test failed" in r.text
     assert "No success was faked" in r.text
-    assert "ct-full-vps-setup" in r.text
+    assert "remain reserved" in r.text
+    assert "Tenant creation failed" in r.text
+    assert "ct-full-vps-setup" not in r.text
+    assert "ct-tenant-login" not in r.text
+    registry_path = Path(os.environ["NR3_PORT_REGISTRY_PATH"])
+    registry = json.loads(registry_path.read_text()) if registry_path.exists() else {}
+    assert registry["failed-auto"] == 8100
+    state_path = Path(os.environ["NR3_ICP_STATE_PATH"])
+    state = json.loads(state_path.read_text()) if state_path.exists() else {"tenants": {}}
+    toggles = state["tenants"]["failed-auto"]["feature_toggles"]
+    assert toggles["ai_auto_reply"]["value"] is False
+    assert toggles["whatsapp_inbox"]["value"] is False
+    assert toggles["facebook_dms"]["value"] is False
+    assert email_capture == []

@@ -575,6 +575,7 @@
       return;
     }
     var tenantId = root.getAttribute("data-tenant-id") || "";
+    var tenantGenerationId = root.getAttribute("data-tenant-generation-id") || "";
     var slugInput = root.querySelector("[data-delete-slug]");
     var openBtn = root.querySelector("[data-delete-open]");
     var modal = root.querySelector("[data-delete-modal]");
@@ -590,7 +591,7 @@
     }
 
     function setOpenReady() {
-      var ready = slugInput && slugInput.value === tenantId;
+      var ready = tenantGenerationId && slugInput && slugInput.value === tenantId;
       if (openBtn) {
         openBtn.disabled = !ready;
         openBtn.setAttribute("data-delete-ready", ready ? "true" : "false");
@@ -620,6 +621,10 @@
       openBtn.addEventListener("click", function () {
         if (!slugInput || slugInput.value !== tenantId) {
           setFeedback("Type the tenant slug exactly first.");
+          return;
+        }
+        if (!tenantGenerationId) {
+          setFeedback("Tenant generation proof is unavailable. Reload before deleting.");
           return;
         }
         setFeedback("");
@@ -660,7 +665,8 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             typedSlug: slugInput.value,
-            finalConfirmation: finalInput.value
+            finalConfirmation: finalInput.value,
+            tenantGenerationId: tenantGenerationId
           })
         })
           .then(function (response) {

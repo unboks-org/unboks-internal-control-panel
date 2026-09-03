@@ -1,5 +1,9 @@
+import hashlib
 import json
+import stat
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Event
 
 from fastapi.testclient import TestClient
 
@@ -12,6 +16,7 @@ def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
     monkeypatch.setenv("NR3_TENANT_REGISTRY_PATH", str(tmp_path / "registry.json"))
     monkeypatch.setenv("NR3_PORT_REGISTRY_PATH", str(tmp_path / "port_registry.json"))
+    monkeypatch.setenv("NR3_ICP_STATE_PATH", str(tmp_path / "icp_overrides.json"))
     monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "clients"))
     monkeypatch.setenv("NR3_PUBLIC_SIGNUP_REQUESTS_PATH", str(tmp_path / "signup_requests.json"))
     monkeypatch.delenv("NR3_AUTO_PROVISION", raising=False)
@@ -35,9 +40,65 @@ def _signup(client, email="ada@example.com"):
     )
 
 
+def test_public_signup_nginx_block_sets_exact_tenant_identity_header():
+    from app.signup_service import _managed_nginx_block_text
+
+    block = _managed_nginx_block_text("lovelace-law", 8123)
+
+    assert "proxy_hide_header X-Unboks-Tenant;" in block
+    assert 'add_header X-Unboks-Tenant "lovelace-law" always;' in block
+    assert 'add_header Access-Control-Expose-Headers "X-Unboks-Tenant" always;' in block
+    assert block.count('add_header X-Unboks-Tenant "lovelace-law" always;') == 1
+
+
 def _stored_request(tmp_path):
     data = json.loads((tmp_path / "signup_requests.json").read_text(encoding="utf-8"))
     return next(iter(data["requests"].values()))
+
+
+def _prepare_provisioned_delivery(
+    tmp_path,
+    *,
+    signup_status="provisioned",
+    delivery_status="pending",
+    delivery_error="",
+    attempt_count=0,
+    lease_expires_at=None,
+    job_id="job-1",
+):
+    store_path = tmp_path / "signup_requests.json"
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    record = next(iter(data["requests"].values()))
+    secret_digest = hashlib.sha256(
+        b"v1\0creation-1\0lovelace-law\0initial-secret"
+    ).hexdigest()
+    record.update({
+        "status": signup_status,
+        "provisioned_slug": "lovelace-law",
+        "provisioning_creation_id": "creation-1",
+        "provisioning_job_id": job_id,
+        "credential_delivery_status": delivery_status,
+        "credential_delivery_attempt_id": (
+            "existing-attempt" if delivery_status == "sending" else ""
+        ),
+        "credential_delivery_attempt_count": attempt_count,
+        "credential_delivery_lease_expires_at": lease_expires_at,
+        "credential_delivery_error": delivery_error,
+        "credential_delivery_secret_digest": secret_digest,
+    })
+    store_path.write_text(json.dumps(data), encoding="utf-8")
+
+    config_dir = tmp_path / "clients" / "lovelace-law" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "client.json").write_text(
+        json.dumps({
+            "slug": "lovelace-law",
+            "name": "Lovelace Law",
+            "password": "initial-secret",
+        }),
+        encoding="utf-8",
+    )
+    return record
 
 
 def test_public_signup_stores_request_without_creating_tenant(monkeypatch, tmp_path):
@@ -368,6 +429,143 @@ def test_admin_public_signup_review_and_onboarding_actions(monkeypatch, tmp_path
     assert len(sent) == sent_before + 1
 
 
+def test_onboarding_email_claim_blocks_concurrent_reject_before_send(
+    monkeypatch, tmp_path,
+):
+    from app.config import get_settings
+    from app.emailer import EmailDraft, EmailSendResult
+    from app.public_signup_requests import (
+        get_signup_request,
+        update_signup_request,
+    )
+    from app.tenants import TenantCreateError
+
+    client = _client(monkeypatch, tmp_path)
+    response = _signup(client)
+    assert response.status_code == 202
+    record = _stored_request(tmp_path)
+    signup_id = record["id"]
+    settings = get_settings()
+    update_signup_request(
+        signup_id,
+        settings,
+        allowed_current_statuses={"verification_pending"},
+        status="verified_pending_review",
+    )
+
+    observed = []
+
+    def fake_prepare(lead_id):
+        current = get_signup_request(signup_id, settings)
+        observed.append(current["status"])
+        try:
+            update_signup_request(
+                signup_id,
+                settings,
+                allowed_current_statuses={"verified_pending_review"},
+                status="archived",
+            )
+        except TenantCreateError:
+            observed.append("reject-blocked")
+        return EmailSendResult(
+            lead_id=lead_id,
+            sent=True,
+            smtp_configured=True,
+            error=None,
+            draft=EmailDraft(
+                subject="Welcome",
+                body="Body",
+                onboarding_link="https://icp.unboks.org/onboarding/claimed",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.routes.admin.prepare_or_send_onboarding_email",
+        fake_prepare,
+    )
+    client.post("/login", data={"password": "test-password"})
+    sent = client.post(
+        f"/admin/signups/{signup_id}/approve-send-onboarding",
+        data={"review_note": "Approved"},
+        follow_redirects=False,
+    )
+
+    assert sent.status_code == 303
+    assert observed == ["onboarding_email_sending", "reject-blocked"]
+    assert _stored_request(tmp_path)["status"] == "onboarding_link_sent"
+
+
+def test_failed_signup_with_reserved_slug_never_renders_workspace_link(
+    monkeypatch, tmp_path,
+):
+    client = _client(monkeypatch, tmp_path)
+    response = _signup(client)
+    assert response.status_code == 202
+    record = _stored_request(tmp_path)
+    store_path = tmp_path / "signup_requests.json"
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    data["requests"][record["id"]].update({
+        "status": "failed",
+        "provisioned_slug": "lovelace-law",
+        "workspace_error": "Host rollback could not be proven.",
+    })
+    store_path.write_text(json.dumps(data), encoding="utf-8")
+
+    client.post("/login", data={"password": "test-password"})
+    detail = client.get(f"/admin/signups/{record['id']}")
+    listing = client.get("/admin/signups")
+
+    assert detail.status_code == 200
+    assert listing.status_code == 200
+    assert "Open tenant workspace" not in detail.text
+    assert "Open tenant" not in listing.text
+    assert "unsafe host rollback keeps the slug reserved" in detail.text
+
+
+def test_failed_signup_retry_never_skips_unsafe_claim_to_second_slug(
+    monkeypatch, tmp_path,
+):
+    import pytest
+
+    from app.config import get_settings
+    from app.provisioning import (
+        create_tenant_provision_claim,
+        tenant_provision_claim,
+    )
+    from app.public_signup_requests import update_signup_request
+    from app.signup_service import create_public_signup_tenant
+    from app.tenants import TenantCreateError
+
+    client = _client(monkeypatch, tmp_path)
+    assert _signup(client).status_code == 202
+    record = _stored_request(tmp_path)
+    settings = get_settings()
+    update_signup_request(
+        record["id"],
+        settings,
+        allowed_current_statuses={"verification_pending"},
+        status="failed",
+        provisioned_slug="lovelace-law",
+        provisioning_creation_id="unsafe-generation",
+        workspace_error="Rollback not proven.",
+    )
+    assert create_tenant_provision_claim("lovelace-law", "unsafe-generation")
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
+
+    with pytest.raises(TenantCreateError, match="original workspace slug is still reserved"):
+        create_public_signup_tenant(
+            full_name="Ada Lovelace",
+            business_name="Lovelace Law",
+            email="ada@example.com",
+            phone="+599 123 4567",
+            settings=settings,
+            signup_request_id=record["id"],
+        )
+
+    assert tenant_provision_claim("lovelace-law")["creation_id"] == "unsafe-generation"
+    assert tenant_provision_claim("lovelace-law-1") is None
+
+
 def test_admin_public_signup_create_workspace_requires_successful_provision(
     monkeypatch,
     tmp_path,
@@ -542,6 +740,34 @@ def test_admin_public_signups_hides_older_duplicates_by_default(monkeypatch, tmp
     assert "token_hash" not in archive_page.text
 
 
+def test_admin_public_signups_keeps_duplicate_with_failed_credentials_visible(
+    monkeypatch,
+    tmp_path,
+):
+    client = _client(monkeypatch, tmp_path)
+    assert _signup(client, email="duplicate@example.com").status_code == 202
+    assert _signup(client, email="duplicate@example.com").status_code == 202
+    store_path = tmp_path / "signup_requests.json"
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    older_id, newer_id = data["requests"]
+    data["requests"][older_id]["created_at"] = "2026-01-01T00:00:00+00:00"
+    data["requests"][newer_id]["created_at"] = "2026-01-02T00:00:00+00:00"
+    data["requests"][older_id].update({
+        "status": "provisioned",
+        "provisioned_slug": "lovelace-law",
+        "credential_delivery_status": "failed",
+        "credential_delivery_error": "temporary SMTP outage",
+    })
+    store_path.write_text(json.dumps(data), encoding="utf-8")
+
+    client.post("/login", data={"password": "test-password"})
+    list_page = client.get("/admin/signups")
+
+    assert list_page.status_code == 200
+    assert list_page.text.count('<article class="signup-card"') == 2
+    assert "<code>failed</code>" in list_page.text
+
+
 def test_admin_public_signup_pages_do_not_send_email(monkeypatch, tmp_path):
     sent = []
 
@@ -681,7 +907,7 @@ def test_public_signup_expired_verification_link_rejected(monkeypatch, tmp_path)
     assert not (tmp_path / "clients" / "lovelace-law").exists()
 
 
-def test_public_signup_verified_auto_provision_requires_explicit_flag(
+def test_public_signup_auto_activation_stays_reviewable_when_worker_disabled(
     monkeypatch,
     tmp_path,
 ):
@@ -704,12 +930,337 @@ def test_public_signup_verified_auto_provision_requires_explicit_flag(
     assert response.status_code == 202
     verify_path = sent[0]["body"].split("https://icp.unboks.org", 1)[1].split()[0]
     verify = client.get(verify_path, follow_redirects=False)
-    assert verify.status_code == 303
-    assert verify.headers["location"] == (
-        "https://dashboard.unboks.org/login?workspace=lovelace-law"
-    )
+    assert verify.status_code == 200
+    assert "Email confirmed" in verify.text
     cfg = tmp_path / "clients" / "lovelace-law" / "config" / "client.json"
-    data = json.loads(cfg.read_text(encoding="utf-8"))
-    assert data["status"] == "active"
-    assert data["billing_status"] == "trialing"
-    assert _stored_request(tmp_path)["status"] == "provisioned"
+    assert not cfg.exists()
+    assert not (tmp_path / "icp_overrides.json").exists()
+    stored = _stored_request(tmp_path)
+    assert stored["status"] == "verified_pending_review"
+    assert not stored.get("provisioned_slug")
+    assert not stored.get("provisioning_job_id")
+
+
+def test_queued_public_signup_replay_is_idempotent_and_async_success_sends_once(
+    monkeypatch,
+    tmp_path,
+):
+    from app.provisioning import reconcile_host_action_results, tenant_provision_claim
+
+    sent = []
+
+    def fake_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append({"to": to_email, "subject": subject, "body": body})
+
+    client = _client(monkeypatch, tmp_path)
+    jobs = tmp_path / "jobs"
+    results = tmp_path / "results"
+    reconciled = tmp_path / "reconciled"
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+    monkeypatch.setenv("NR3_PUBLIC_SIGNUP_AUTO_PROVISION_AFTER_VERIFY", "true")
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
+    monkeypatch.setenv("NR3_PROVISION_QUEUE_DIR", str(jobs))
+    monkeypatch.setenv("NR3_PROVISION_RESULT_DIR", str(results))
+    monkeypatch.setenv("NR3_PROVISION_RECONCILED_DIR", str(reconciled))
+    monkeypatch.setenv("NR3_PROVISION_TIMEOUT_SECONDS", "0")
+    monkeypatch.setattr("app.routes.signup.send_email", fake_send_email)
+    monkeypatch.setattr("app.emailer.send_email", fake_send_email)
+
+    response = _signup(client)
+    verify_path = sent[0]["body"].split("https://icp.unboks.org", 1)[1].split()[0]
+    first = client.get(verify_path, follow_redirects=False)
+    second = client.get(verify_path, follow_redirects=False)
+
+    assert response.status_code == 202
+    assert first.status_code == 202
+    assert second.status_code == 202
+    job_files = list(jobs.glob("*.json"))
+    assert len(job_files) == 1
+    job = json.loads(job_files[0].read_text(encoding="utf-8"))
+    signup = _stored_request(tmp_path)
+    assert signup["status"] == "provisioning_pending"
+    assert signup["provisioning_job_id"] == job["job_id"]
+    assert signup["provisioning_creation_id"] == job["creation_id"]
+    assert job["signup_request_id"] == signup["id"]
+    assert tenant_provision_claim("lovelace-law")["job_id"] == job["job_id"]
+    assert len(sent) == 1
+
+    config_dir = tmp_path / "clients" / "lovelace-law" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "client.json").write_text(
+        json.dumps(job["client_data"]),
+        encoding="utf-8",
+    )
+    results.mkdir(parents=True, exist_ok=True)
+    (results / f"{job['job_id']}.json").write_text(
+        json.dumps({
+            "job_id": job["job_id"],
+            "job_type": "tenant_provision",
+            "status": "succeeded",
+            "slug": "lovelace-law",
+            "creation_id": job["creation_id"],
+            "signup_request_id": signup["id"],
+            "message": "workspace ready",
+        }),
+        encoding="utf-8",
+    )
+
+    assert reconcile_host_action_results() == 1
+    assert reconcile_host_action_results() == 0
+    completed = _stored_request(tmp_path)
+    assert completed["status"] == "provisioned"
+    assert completed["credential_delivery_status"] == "sent"
+    assert tenant_provision_claim("lovelace-law") is None
+    assert len(sent) == 2
+    assert sent[-1]["to"] == "ada@example.com"
+
+    replay = client.get(verify_path, follow_redirects=False)
+    assert replay.status_code == 303
+    assert replay.headers["location"].endswith("workspace=lovelace-law")
+    assert len(list(jobs.glob("*.json"))) == 1
+    assert len(sent) == 2
+
+
+def test_success_result_replay_retries_failed_credential_delivery(
+    monkeypatch,
+    tmp_path,
+):
+    from app.config import get_settings
+    from app.public_signup_requests import reconcile_signup_provisioning_result
+
+    client = _client(monkeypatch, tmp_path)
+    assert _signup(client).status_code == 202
+    record = _prepare_provisioned_delivery(
+        tmp_path,
+        signup_status="provisioning_pending",
+    )
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    attempts = []
+
+    def flaky_send_email(to_email, subject, body, settings, **kwargs):
+        attempts.append(to_email)
+        if len(attempts) == 1:
+            raise RuntimeError("temporary SMTP outage")
+
+    monkeypatch.setattr("app.emailer.send_email", flaky_send_email)
+    settings = get_settings()
+    def reconcile():
+        return reconcile_signup_provisioning_result(
+            record["id"],
+            slug="lovelace-law",
+            creation_id="creation-1",
+            job_id="job-1",
+            status="succeeded",
+            message="workspace ready",
+            settings=settings,
+        )
+
+    assert reconcile() is True
+    failed = _stored_request(tmp_path)
+    assert failed["status"] == "provisioned"
+    assert failed["credential_delivery_status"] == "failed"
+    assert failed["credential_delivery_attempt_count"] == 1
+    assert failed["credential_delivery_error"] == "temporary SMTP outage"
+
+    assert reconcile() is True
+    delivered = _stored_request(tmp_path)
+    assert delivered["credential_delivery_status"] == "sent"
+    assert delivered["credential_delivery_attempt_count"] == 2
+    assert delivered["credential_delivery_sent_at"]
+    assert attempts == ["ada@example.com", "ada@example.com"]
+
+    assert reconcile() is True
+    assert attempts == ["ada@example.com", "ada@example.com"]
+
+
+def test_success_result_replay_reclaims_stale_credential_delivery_lease(
+    monkeypatch,
+    tmp_path,
+):
+    from app.config import get_settings
+    from app.public_signup_requests import (
+        get_signup_request,
+        reconcile_signup_provisioning_result,
+    )
+
+    client = _client(monkeypatch, tmp_path)
+    assert _signup(client).status_code == 202
+    expired_lease = (
+        datetime.now(timezone.utc).replace(microsecond=0) - timedelta(minutes=1)
+    ).isoformat()
+    record = _prepare_provisioned_delivery(
+        tmp_path,
+        delivery_status="sending",
+        attempt_count=1,
+        lease_expires_at=expired_lease,
+    )
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    sent = []
+    monkeypatch.setattr(
+        "app.emailer.send_email",
+        lambda to_email, subject, body, settings, **kwargs: sent.append(to_email),
+    )
+    settings = get_settings()
+
+    assert "credential_delivery_attempt_id" not in get_signup_request(
+        record["id"], settings
+    )
+    assert "credential_delivery_secret_digest" not in get_signup_request(
+        record["id"], settings
+    )
+    assert reconcile_signup_provisioning_result(
+        record["id"],
+        slug="lovelace-law",
+        creation_id="creation-1",
+        job_id="job-1",
+        status="succeeded",
+        message="workspace ready",
+        settings=settings,
+    ) is True
+
+    delivered = _stored_request(tmp_path)
+    assert sent == ["ada@example.com"]
+    assert delivered["credential_delivery_status"] == "sent"
+    assert delivered["credential_delivery_attempt_count"] == 2
+    assert delivered["credential_delivery_attempt_id"] == ""
+    assert delivered["credential_delivery_lease_expires_at"] is None
+
+
+def test_concurrent_success_replays_share_one_credential_delivery_lease(
+    monkeypatch,
+    tmp_path,
+):
+    from app.config import get_settings
+    from app.public_signup_requests import reconcile_signup_provisioning_result
+
+    client = _client(monkeypatch, tmp_path)
+    assert _signup(client).status_code == 202
+    record = _prepare_provisioned_delivery(tmp_path)
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    entered_send = Event()
+    release_send = Event()
+    sent = []
+
+    def blocking_send_email(to_email, subject, body, settings, **kwargs):
+        sent.append(to_email)
+        entered_send.set()
+        if not release_send.wait(timeout=5):
+            raise RuntimeError("test send was not released")
+
+    monkeypatch.setattr("app.emailer.send_email", blocking_send_email)
+    settings = get_settings()
+
+    def reconcile():
+        return reconcile_signup_provisioning_result(
+            record["id"],
+            slug="lovelace-law",
+            creation_id="creation-1",
+            job_id="job-1",
+            status="succeeded",
+            message="workspace ready",
+            settings=settings,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(reconcile)
+        assert entered_send.wait(timeout=3)
+        second = executor.submit(reconcile)
+        assert second.result(timeout=3) is True
+        release_send.set()
+        assert first.result(timeout=3) is True
+
+    delivered = _stored_request(tmp_path)
+    assert sent == ["ada@example.com"]
+    assert delivered["credential_delivery_status"] == "sent"
+    assert delivered["credential_delivery_attempt_count"] == 1
+
+
+def test_credential_retry_refuses_password_from_reused_workspace_slug(
+    monkeypatch,
+    tmp_path,
+):
+    from app.config import get_settings
+    from app.public_signup_requests import retry_signup_credential_delivery
+
+    client = _client(monkeypatch, tmp_path)
+    assert _signup(client).status_code == 202
+    record = _prepare_provisioned_delivery(
+        tmp_path,
+        delivery_status="failed",
+        delivery_error="temporary SMTP outage",
+        attempt_count=1,
+    )
+    client_path = tmp_path / "clients" / "lovelace-law" / "config" / "client.json"
+    replacement = json.loads(client_path.read_text(encoding="utf-8"))
+    replacement["password"] = "replacement-tenant-secret"
+    client_path.write_text(json.dumps(replacement), encoding="utf-8")
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    sent = []
+    monkeypatch.setattr(
+        "app.emailer.send_email",
+        lambda to_email, subject, body, settings, **kwargs: sent.append(to_email),
+    )
+
+    retried = retry_signup_credential_delivery(record["id"], get_settings())
+
+    assert sent == []
+    assert retried["credential_delivery_status"] == "failed"
+    assert retried["credential_delivery_attempt_count"] == 2
+    assert "generation does not match" in retried["credential_delivery_error"]
+
+
+def test_admin_shows_and_retries_exact_credential_delivery_state(
+    monkeypatch,
+    tmp_path,
+):
+    client = _client(monkeypatch, tmp_path)
+    assert _signup(client).status_code == 202
+    record = _prepare_provisioned_delivery(
+        tmp_path,
+        delivery_status="failed",
+        delivery_error="temporary SMTP outage",
+        attempt_count=1,
+        job_id="",
+    )
+    monkeypatch.setenv("NR3_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("NR3_SMTP_USERNAME", "user")
+    monkeypatch.setenv("NR3_SMTP_PASSWORD", "password")
+    sent = []
+    monkeypatch.setattr(
+        "app.emailer.send_email",
+        lambda to_email, subject, body, settings, **kwargs: sent.append(to_email),
+    )
+    client.post("/login", data={"password": "test-password"})
+
+    listing = client.get("/admin/signups")
+    detail = client.get(f"/admin/signups/{record['id']}")
+    assert listing.status_code == 200
+    assert detail.status_code == 200
+    assert "Credentials" in listing.text
+    assert "<code>failed</code>" in listing.text
+    assert "<code>failed</code>" in detail.text
+    assert "temporary SMTP outage" in detail.text
+    assert "Retry workspace credential email" in detail.text
+
+    retry = client.post(
+        f"/admin/signups/{record['id']}/retry-credentials",
+        follow_redirects=True,
+    )
+    assert retry.status_code == 200
+    assert "Workspace credentials were sent successfully." in retry.text
+    assert "<code>sent</code>" in retry.text
+    assert sent == ["ada@example.com"]
+
+    listing_after_delivery = client.get("/admin/signups")
+    assert "ada@example.com" not in listing_after_delivery.text

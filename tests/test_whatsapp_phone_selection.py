@@ -39,6 +39,9 @@ def _account(
     display_phone,
     *,
     profile_id="profile_lawyer",
+    enabled=True,
+    is_active=True,
+    platform_status="active",
 ):
     return ZernioAccountSummary(
         id=account_id,
@@ -47,9 +50,9 @@ def _account(
         profile_name="Lawyer",
         display_name=display_phone,
         username=display_phone,
-        enabled=True,
-        is_active=True,
-        platform_status="active",
+        enabled=enabled,
+        is_active=is_active,
+        platform_status=platform_status,
         display_phone_number=display_phone,
         phone_number_id=phone_id,
         waba_id=f"waba_{phone_id}",
@@ -98,7 +101,6 @@ def test_whatsapp_phone_numbers_returns_single_phone(monkeypatch, tmp_path):
         name="Lawyer",
         zernio_profile_id="profile_lawyer",
     )
-
     response = _numbers(client)
 
     assert response.status_code == 200
@@ -151,6 +153,48 @@ def test_whatsapp_phone_numbers_returns_multiple_phones(monkeypatch, tmp_path):
     ]
 
 
+def test_whatsapp_phone_numbers_excludes_inactive_accounts(monkeypatch, tmp_path):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    _fake_zernio(
+        monkeypatch,
+        [
+            _account("active", "phone_active", "+599 1"),
+            _account(
+                "disabled",
+                "phone_disabled",
+                "+599 2",
+                enabled=False,
+            ),
+            _account(
+                "inactive",
+                "phone_inactive",
+                "+599 3",
+                is_active=False,
+            ),
+        ],
+    )
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        name="Lawyer",
+        zernio_profile_id="profile_lawyer",
+    )
+
+    response = _numbers(client)
+
+    assert response.status_code == 200
+    assert [item["accountId"] for item in response.json()["phoneNumbers"]] == [
+        "active"
+    ]
+    rejected = _select(
+        client,
+        {"phoneNumberId": "phone_disabled", "accountId": "disabled"},
+    )
+    assert rejected.status_code == 400
+
+
 def test_whatsapp_phone_selection_connects_selected_phone(monkeypatch, tmp_path):
     tenants_root = tmp_path / "tenants"
     _write_tenant(tenants_root)
@@ -163,6 +207,11 @@ def test_whatsapp_phone_selection_connects_selected_phone(monkeypatch, tmp_path)
     )
     client = _client(monkeypatch, tmp_path)
     _login(client)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        name="Lawyer",
+        zernio_profile_id="profile_lawyer",
+    )
     created = channel_connections.create_connection_request(
         tenant_id="lawyer",
         auth_url="https://facebook.com/connect/lawyer",
@@ -196,6 +245,105 @@ def test_whatsapp_phone_selection_connects_selected_phone(monkeypatch, tmp_path)
     assert stored.status == "connected"
     assert stored.zernio_account_id == "account_2"
     assert stored.selected_phone_number_id == "phone_2"
+
+
+def test_whatsapp_phone_selection_blocks_account_owned_by_another_tenant(
+    monkeypatch, tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    _fake_zernio(monkeypatch, [_account("account_1", "phone_1", "+599 1")])
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        name="Lawyer",
+        zernio_profile_id="profile_lawyer",
+    )
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="other-tenant",
+        status="connected",
+        zernio_profile_id="profile_other",
+        zernio_account_id="account_1",
+        zernio_account_verified=True,
+    )
+
+    response = _select(
+        client,
+        {"phoneNumberId": "phone_1", "accountId": "account_1"},
+    )
+
+    assert response.status_code == 409
+    assert "already connected to another tenant" in response.json()["detail"]
+    assert channel_connections.get_tenant_channel_connection("lawyer") is None
+    client_data = json.loads(
+        (tenants_root / "lawyer" / "config" / "client.json").read_text()
+    )
+    assert "channel_account_allowlist" not in client_data
+
+
+def test_phone_selection_cannot_attach_after_tenant_generation_rotates(
+    monkeypatch, tmp_path,
+):
+    from app.delete_operations import (
+        bind_tenant_generation_for_creation,
+        start_delete_operation,
+        update_delete_operation,
+    )
+    from app.provisioning import tenant_creation_lock
+
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        name="Lawyer",
+        zernio_profile_id="profile_lawyer",
+    )
+    from app.channel_connections import current_tenant_generation_id
+
+    old_generation = current_tenant_generation_id("lawyer")
+
+    class RotatingZernioService:
+        def list_accounts(self, *, platform=None):
+            operation = start_delete_operation(
+                slug="lawyer",
+                tenant_generation_id=old_generation,
+                generation_fingerprint="sha256:" + "e" * 64,
+                account_ids=[],
+                profile_ids=["profile_lawyer"],
+            )
+            update_delete_operation(
+                slug="lawyer",
+                operation_id=operation["operation_id"],
+                expected_phases={"preparing"},
+                phase="deleted",
+            )
+            with tenant_creation_lock("lawyer"):
+                bind_tenant_generation_for_creation(
+                    slug="lawyer",
+                    generation_id="replacement-generation",
+                    status="active",
+                )
+            return [_account("stale_account", "stale_phone", "+599 0")]
+
+    monkeypatch.setattr(
+        "app.routes.connect.ZernioService", RotatingZernioService
+    )
+
+    response = _select(
+        client,
+        {"phoneNumberId": "stale_phone", "accountId": "stale_account"},
+    )
+
+    assert response.status_code == 409
+    connection = channel_connections.get_tenant_channel_connection("lawyer")
+    assert connection is None or connection.zernio_account_id != "stale_account"
+    client_data = json.loads(
+        (tenants_root / "lawyer" / "config" / "client.json").read_text()
+    )
+    assert "channel_account_allowlist" not in client_data
 
 
 def test_whatsapp_phone_selection_rejects_invalid_selection(monkeypatch, tmp_path):

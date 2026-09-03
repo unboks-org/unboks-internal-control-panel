@@ -112,7 +112,7 @@ def test_delete_cleans_registry_and_state_files(client_dir, tmp_path, monkeypatc
     _make("ghost", client_dir, "Ghost")
     register_tenant({"slug": "ghost", "name": "Ghost",
                      "status": "inactive"})
-    channel_state.toggle_channel("ghost", "whatsapp")
+    channel_state.toggle_channel("ghost", "email")
     icp_overrides.set_feature_toggle("ghost", "email_inbox", True)
     tenant_notes.add_note("ghost", "Internal note")
 
@@ -150,7 +150,7 @@ def test_reserved_slug_blocks_state_cleanup_too(client_dir, tmp_path, monkeypatc
     register_tenant({"slug": "unboks", "name": "Unboks",
                      "status": "active"})
     icp_overrides.set_feature_toggle("unboks", "email_inbox", True)
-    channel_state.toggle_channel("unboks", "whatsapp")
+    channel_state.toggle_channel("unboks", "email")
     tenant_notes.add_note("unboks", "Protected note")
 
     with pytest.raises(TenantDeleteError, match="reserved"):
@@ -161,3 +161,104 @@ def test_reserved_slug_blocks_state_cleanup_too(client_dir, tmp_path, monkeypatc
     assert json.loads(overrides_path.read_text())["tenants"].get("unboks")
     assert json.loads(channels_path.read_text()).get("unboks")
     assert json.loads(notes_path.read_text())["tenants"].get("unboks")
+
+
+def test_completed_tombstone_blocks_stale_mutations_until_explicit_recreation(
+    monkeypatch, tmp_path,
+):
+    from app import channel_connections, channel_state, icp_overrides, tenant_notes
+    from app.delete_operations import (
+        DeleteOperationConflict,
+        bind_tenant_generation_for_creation,
+        start_delete_operation,
+        update_delete_operation,
+    )
+    from app.provisioning import tenant_creation_lock
+
+    monkeypatch.setenv("NR3_DB_PATH", str(tmp_path / "nr3.db"))
+    monkeypatch.setenv("NR3_CHANNEL_STATE_PATH", str(tmp_path / "channels.json"))
+    monkeypatch.setenv("NR3_ICP_STATE_PATH", str(tmp_path / "overrides.json"))
+    monkeypatch.setenv("NR3_TENANT_NOTES_PATH", str(tmp_path / "notes.json"))
+    generation_a = "generation-old-tenant"
+    generation_b = "generation-new-tenant"
+    with tenant_creation_lock("lawyer"):
+        bind_tenant_generation_for_creation(
+            slug="lawyer", generation_id=generation_a, status="active"
+        )
+    operation = start_delete_operation(
+        slug="lawyer",
+        tenant_generation_id=generation_a,
+        generation_fingerprint="sha256:" + "a" * 64,
+        account_ids=[],
+        profile_ids=[],
+    )
+    update_delete_operation(
+        slug="lawyer",
+        operation_id=operation["operation_id"],
+        expected_phases={"preparing"},
+        phase="deleted",
+    )
+
+    for mutation in (
+        lambda: channel_state.set_channel("lawyer", "email", True),
+        lambda: tenant_notes.add_note("lawyer", "stale note"),
+        lambda: icp_overrides.set_feature_toggle("lawyer", "email_inbox", True),
+    ):
+        with pytest.raises(DeleteOperationConflict):
+            mutation()
+    with pytest.raises(channel_connections.ProviderOwnershipConflict):
+        channel_connections.create_connection_request(tenant_id="lawyer")
+
+    with tenant_creation_lock("lawyer"):
+        bind_tenant_generation_for_creation(
+            slug="lawyer", generation_id=generation_b, status="active"
+        )
+
+    channel_state.set_channel("lawyer", "email", True)
+    tenant_notes.add_note("lawyer", "new note")
+    icp_overrides.set_feature_toggle("lawyer", "email_inbox", True)
+    with pytest.raises(DeleteOperationConflict, match="generation changed"):
+        channel_state.set_channel(
+            "lawyer",
+            "email",
+            False,
+            expected_generation_id=generation_a,
+        )
+
+
+def test_completed_tombstone_rollover_recovers_after_history_write_crash(
+    tmp_path,
+):
+    from app.delete_operations import (
+        start_delete_operation,
+        update_delete_operation,
+    )
+
+    first = start_delete_operation(
+        slug="lawyer",
+        tenant_generation_id="generation-old-tenant",
+        generation_fingerprint="sha256:" + "a" * 64,
+        account_ids=[],
+        profile_ids=[],
+    )
+    completed = update_delete_operation(
+        slug="lawyer",
+        operation_id=first["operation_id"],
+        expected_phases={"preparing"},
+        phase="deleted",
+    )
+    operations_dir = Path(os.environ["NR3_DELETE_OPERATIONS_DIR"])
+    history = operations_dir / "history" / f"lawyer-{first['operation_id']}.json"
+    history.parent.mkdir(parents=True)
+    history.write_text(json.dumps(completed, indent=2), encoding="utf-8")
+
+    replacement = start_delete_operation(
+        slug="lawyer",
+        tenant_generation_id="generation-new-tenant",
+        generation_fingerprint="sha256:" + "b" * 64,
+        account_ids=[],
+        profile_ids=[],
+    )
+
+    assert replacement["operation_id"] != first["operation_id"]
+    assert replacement["generation_fingerprint"] == "sha256:" + "b" * 64

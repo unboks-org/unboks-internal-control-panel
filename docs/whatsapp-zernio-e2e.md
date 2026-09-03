@@ -2,14 +2,19 @@
 
 ## Scope
 
-This checklist verifies the Nr3-only WhatsApp Business authorization flow.
-Nr1 and Nr2 are not part of this feature branch.
+This checklist verifies the WhatsApp Business authorization flow owned by Nr3.
+Nr3's tenant-scoped bridge can read and mutate explicitly supported Nr2
+controls, but this checklist does not deploy or authorize a separate Nr1/Nr2
+service release.
 
-## Rollback Point
+## Per-release rollback point
 
-- VPS rollback directory: `/root/_nr3_rollbacks/whatsapp-zernio-auth-20260522-193520`
-- Git rollback tag: `rollback-before-whatsapp-zernio-auth-20260522-193520`
-- Feature branch: `feature/whatsapp-zernio-client-auth`
+Before every production authorization-flow release, record the exact reviewed
+commit/image and create a fresh protected snapshot of the complete Nr3 data
+tree, worker queue/lifecycle state, relevant tenant runtimes, and effective
+service configuration. Follow the drain, quiesce, coordinated rollout, and
+rollback sequence in [auto-provisioning.md](auto-provisioning.md); never reuse
+an old snapshot name or deploy the app and queue worker independently.
 
 ## Required Environment
 
@@ -53,22 +58,39 @@ The mocked E2E test covers:
 6. Copy the generated link.
 7. Send the link to the client manually in the separate WhatsApp connection email.
 8. Client opens the link in their own browser and approves Meta/Zernio access.
+   Nr3 puts its own one-time correlation nonce in the configured redirect URL;
+   Zernio preserves that existing query parameter when appending its standard
+   `connected`, `profileId`, `accountId`, and `username` result fields. The
+   provider OAuth `state` returned when the link is generated is not expected
+   in Zernio's standard callback and is not used as the Nr3 trust anchor.
+   Generating a replacement link atomically cancels every older in-flight
+   request for that tenant generation. A late or already-running callback for
+   an older link is rejected before it can change the connection or strict
+   account allowlist.
+   The callback does not trust its query-string account ID: Nr3 fetches that
+   account from Zernio and requires an active WhatsApp account whose profile ID
+   exactly matches the tenant's connection request.
 9. Client should land on one of:
    - `/connect/whatsapp/result?status=success`
    - `/connect/whatsapp/result?status=pending-number`
+   - `/connect/whatsapp/result?status=pending-activation`
    - `/connect/whatsapp/result?status=failed`
 10. In Nr3, click `Refresh status`.
 11. If multiple phone numbers appear, select the correct client phone number.
-12. Confirm the card shows `Connected` and the expected phone number.
-13. Open `/admin/settings` and confirm audit entries were recorded.
-14. Confirm the initial tenant welcome email did not include the WhatsApp authorization link.
+12. If strict-allowlist repair is queued, the card remains pending and inbound
+    routing stays blocked. Refresh only after the host worker has completed.
+13. Confirm the card shows `Connected` and the expected phone number only after
+    the strict runtime allowlist contains the same Zernio account ID.
+14. Open `/admin/settings` and confirm audit entries were recorded.
+15. Confirm the initial tenant welcome email did not include the WhatsApp authorization link.
 
 ## Expected API Behavior
 
 - `POST /internal/api/tenants/{tenant}/channels/whatsapp/connect/start`
   returns a client authorization URL.
 - `GET /internal/api/connect/whatsapp/callback`
-  validates callback state and updates stored connection state.
+  validates callback state, fetches the claimed account from Zernio, checks
+  platform/activity/profile ownership, then updates stored connection state.
 - `GET /internal/api/tenants/{tenant}/channels/whatsapp/status`
   returns one safe status object for the UI.
 - `GET /internal/api/tenants/{tenant}/channels/whatsapp/phone-numbers`
@@ -79,7 +101,20 @@ The mocked E2E test covers:
 ## Security Checks
 
 - Zernio API calls are backend-only.
-- Raw callback state is never stored; only its hash is stored.
+- The raw Nr3 callback nonce is never stored; only its hash is stored.
+- Callback state is claimed atomically. Duplicate or concurrent deliveries are
+  read-only and cannot downgrade a completed connection or switch accounts.
+- If the callback's exact account is temporarily unavailable from Zernio, Nr3
+  retains that ID only as an unverified recovery candidate. Authenticated
+  status refresh can promote it only after Zernio returns the exact same active
+  WhatsApp account on the tenant's exact profile; it never selects a different
+  account from that profile for failed-callback recovery.
+- A valid callback state alone cannot authorize an arbitrary account ID or an
+  account owned by another Zernio profile.
+- A tenant connection stays pending (or failed) until strict allowlist
+  persistence succeeds or its exact repair job is safely queued.
+- Unreadable or malformed tenant configuration is never rebuilt from an empty
+  object; the host repair path fails closed instead.
 - Callback audit events do not persist OAuth-like `code` values.
 - API keys and provider credentials are not returned by JSON endpoints.
 - Public result pages do not echo arbitrary query text.
