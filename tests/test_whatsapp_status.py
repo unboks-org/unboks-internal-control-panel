@@ -808,6 +808,65 @@ def test_provider_io_race_cannot_cross_new_authorization_request(
     assert "channel_account_allowlist" not in client_json
 
 
+def test_provider_io_race_cannot_cross_same_request_state_change(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        name="Lawyer",
+    )
+    authorization = channel_connections.create_connection_request(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        state_token="claimed_during_provider_io",
+        status="link_generated",
+    ).request
+
+    class RacingAccountService:
+        def list_accounts(self, *, platform=None):
+            assert channel_connections.claim_connection_request_callback(
+                authorization.id
+            ) is True
+            return [
+                ZernioAccountSummary(
+                    id="profile_first_account",
+                    platform="whatsapp",
+                    profile_id="profile_lawyer",
+                    profile_name="Lawyer",
+                    display_name="First profile account",
+                    username="+1 555 000 0000",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+1 555 000 0000",
+                    phone_number_id="first_phone",
+                    waba_id="first_waba",
+                )
+            ]
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", RacingAccountService)
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "connection_pending"
+    assert channel_connections.get_tenant_channel_connection("lawyer") is None
+    claimed = channel_connections.get_connection_request(authorization.id)
+    assert claimed is not None
+    assert claimed.status == "callback_received"
+    assert claimed.zernio_account_verified is False
+    client_json = json.loads(
+        (tenants_root / "lawyer" / "config" / "client.json").read_text()
+    )
+    assert "channel_account_allowlist" not in client_json
+
+
 def test_queued_allowlist_retry_keeps_exact_verified_account_fence(
     monkeypatch,
     tmp_path,
