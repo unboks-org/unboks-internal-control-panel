@@ -40,7 +40,6 @@ def test_usage_monitor_shows_unknown_when_usage_tracking_missing(client):
         zernio_account_id="account_test",
         phone_number_id="phone_test",
         display_phone_number="+599 9 000 0000",
-        last_request_id="cr_test",
     )
 
     response = client.get("/admin/usage")

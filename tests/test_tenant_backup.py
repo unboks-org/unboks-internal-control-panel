@@ -1,13 +1,21 @@
 import io
 import json
+import threading
 import zipfile
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import channel_connections, channel_state, icp_overrides, tenant_notes
 from app.main import app
-from app.tenant_backup import build_export_package, import_uploaded_package, validate_import_package
+from app.provisioning import AutoProvisionResult
+from app.tenant_backup import (
+    _canonical_docker_compose_text,
+    build_export_package,
+    import_uploaded_package,
+    validate_import_package,
+)
 from app.tenants import register_tenant
 
 
@@ -19,6 +27,8 @@ def _seed(monkeypatch, tmp_path, slug="acme"):
     monkeypatch.setenv("NR3_TENANT_NOTES_PATH", str(tmp_path / "tenant_notes.json"))
     monkeypatch.setenv("NR3_TENANT_EXPORTS_DIR", str(tmp_path / "exports"))
     monkeypatch.setenv("NR3_TENANT_IMPORT_ROLLBACK_DIR", str(tmp_path / "rollbacks"))
+    monkeypatch.setenv("NR3_PROVISION_CLAIMS_PATH", str(tmp_path / "claims.json"))
+    monkeypatch.setenv("NR3_PORT_REGISTRY_PATH", str(tmp_path / "ports.json"))
     tenant_root = tmp_path / "clients" / slug
     config_root = tenant_root / "config"
     data_root = tenant_root / "data" / "knowledge"
@@ -45,7 +55,7 @@ def _seed(monkeypatch, tmp_path, slug="acme"):
         encoding="utf-8",
     )
     (tenant_root / "docker-compose.yml").write_text(
-        f"services:\n  agent:\n    container_name: wtyj-{slug}\n    ports:\n      - \"127.0.0.1:8123:8001\"\n",
+        _canonical_docker_compose_text(slug, 8123),
         encoding="utf-8",
     )
     (data_root / "sot.txt").write_text("runtime knowledge", encoding="utf-8")
@@ -53,7 +63,7 @@ def _seed(monkeypatch, tmp_path, slug="acme"):
     icp_overrides.set_ai_tone(slug, "Warm", notes="Helpful")
     icp_overrides.set_agent_name_override(slug, "Sofia")
     icp_overrides.add_sot_entry(slug, title="Hours", content="Open 9-5", category="hours")
-    channel_state.set_channel(slug, "whatsapp", True)
+    channel_state.set_channel(slug, "email", True)
     tenant_notes.add_note(slug, "Important internal note", priority="important")
     return slug
 
@@ -109,8 +119,25 @@ def test_import_validate_only_changes_nothing(monkeypatch, tmp_path):
 
 
 def test_import_clone_restores_nr3_state_to_new_slug(monkeypatch, tmp_path):
+    from app.port_registry import reserve_tenant_port
+    from app.provisioning import create_tenant_provision_claim
+
     slug = _seed(monkeypatch, tmp_path)
     package = build_export_package(slug)
+    creation_id = "clone-creation-acme"
+    host_port = reserve_tenant_port("acme-clone")
+    assert create_tenant_provision_claim("acme-clone", creation_id) is True
+
+    with pytest.raises(ValueError, match="trusted reserved host port"):
+        import_uploaded_package(
+            package.open("rb"),
+            target_tenant=slug,
+            mode="clone",
+            new_slug="acme-clone",
+            confirmation="IMPORT CLONE",
+            clone_creation_id=creation_id,
+            trusted_clone_host_port=80,
+        )
 
     result = import_uploaded_package(
         package.open("rb"),
@@ -118,6 +145,8 @@ def test_import_clone_restores_nr3_state_to_new_slug(monkeypatch, tmp_path):
         mode="clone",
         new_slug="acme-clone",
         confirmation="IMPORT CLONE",
+        clone_creation_id=creation_id,
+        trusted_clone_host_port=host_port,
     )
 
     assert result["status"] == "imported"
@@ -128,6 +157,7 @@ def test_import_clone_restores_nr3_state_to_new_slug(monkeypatch, tmp_path):
     clone_root = tmp_path / "clients" / "acme-clone"
     clone_client = json.loads((clone_root / "config" / "client.json").read_text(encoding="utf-8"))
     assert clone_client["slug"] == "acme-clone"
+    assert clone_client["creation_id"] == creation_id
     assert clone_client["whatsapp_connect_token"] == ""
     assert clone_client["channel_account_allowlist"] == {}
     assert clone_client["zernio_account_id"] == ""
@@ -143,7 +173,7 @@ def test_import_restore_replaces_existing_nr3_state(monkeypatch, tmp_path):
     old_file = target_root / "data" / "knowledge" / "old.txt"
     old_file.write_text("old runtime data", encoding="utf-8")
     (target_root / "docker-compose.yml").write_text(
-        "services:\n  agent:\n    container_name: wtyj-target\n    ports:\n      - \"127.0.0.1:8999:8001\"\n",
+        _canonical_docker_compose_text("target", 8999),
         encoding="utf-8",
     )
     package = build_export_package(source)
@@ -165,7 +195,7 @@ def test_import_restore_replaces_existing_nr3_state(monkeypatch, tmp_path):
     assert "Hours" in sot_titles
     assert "Old" not in sot_titles
     assert channel_state.read_channels("target")["whatsapp"] is False
-    assert channel_state.read_channels("target")["email"] is False
+    assert channel_state.read_channels("target")["email"] is True
     notes = [note.body for note in tenant_notes.list_notes("target")]
     assert notes == ["Important internal note"]
     restored_client = json.loads((target_root / "config" / "client.json").read_text(encoding="utf-8"))
@@ -278,3 +308,130 @@ def test_workspace_renders_backup_restore_section(monkeypatch, tmp_path):
     assert "Validate / import configuration" not in response.text
     assert "/admin/tenants/unboks/backup/export" in response.text
     assert "/admin/tenants/unboks/backup/import" in response.text
+
+
+def test_stale_restore_form_cannot_overwrite_recreated_tenant(monkeypatch, tmp_path):
+    slug = _seed(monkeypatch, tmp_path, slug="target")
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    from app.channel_connections import current_tenant_generation_id
+    from app.delete_operations import (
+        bind_tenant_generation_for_creation,
+        start_delete_operation,
+        update_delete_operation,
+    )
+    from app.provisioning import tenant_creation_lock
+
+    old_generation = current_tenant_generation_id(slug)
+    operation = start_delete_operation(
+        slug=slug,
+        tenant_generation_id=old_generation,
+        generation_fingerprint="sha256:" + "6" * 64,
+        account_ids=[],
+        profile_ids=[],
+    )
+    update_delete_operation(
+        slug=slug,
+        operation_id=operation["operation_id"],
+        expected_phases={"preparing"},
+        phase="deleted",
+    )
+    with tenant_creation_lock(slug):
+        bind_tenant_generation_for_creation(
+            slug=slug,
+            generation_id="replacement-generation",
+            status="active",
+        )
+
+    side_effects: list[str] = []
+    monkeypatch.setattr(
+        "app.tenant_backup.import_uploaded_package",
+        lambda *_args, **_kwargs: side_effects.append("import"),
+    )
+    monkeypatch.setattr(
+        "app.routes.admin.queue_tenant_host_action",
+        lambda **_kwargs: side_effects.append("queue"),
+    )
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    response = client.post(
+        f"/admin/tenants/{slug}/backup/import",
+        data={
+            "import_mode": "restore",
+            "confirmation": slug,
+            "tenant_generation_id": old_generation,
+        },
+        files={"backup_file": ("backup.unboksbackup", b"stale", "application/zip")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "blocked" in response.headers["location"].lower()
+    assert side_effects == []
+
+
+def test_restore_holds_lifecycle_lease_through_host_queue(monkeypatch, tmp_path):
+    slug = _seed(monkeypatch, tmp_path, slug="target")
+    monkeypatch.setenv("NR3_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setenv("NR3_SESSION_SECRET", "test-secret")
+    from app.channel_connections import current_tenant_generation_id
+    from app.provisioning import tenant_creation_lock
+
+    generation_id = current_tenant_generation_id(slug)
+    contender_acquired = threading.Event()
+    contender_started = threading.Event()
+    contender: threading.Thread | None = None
+
+    def fake_import(*_args, **_kwargs):
+        nonlocal contender
+
+        def contend_for_lifecycle_lock():
+            contender_started.set()
+            with tenant_creation_lock(slug):
+                contender_acquired.set()
+
+        contender = threading.Thread(target=contend_for_lifecycle_lock)
+        contender.start()
+        assert contender_started.wait(timeout=1)
+        assert not contender_acquired.wait(timeout=0.05)
+        return {
+            "status": "imported",
+            "target_tenant": slug,
+            "runtime_restore_package": "",
+            "host_port": None,
+            "channels_require_reconnect": False,
+            "verified_zernio_account_id": "",
+            "creation_id": "",
+            "client_tree_restored": True,
+            "rollback_package": "/safe/rollback.unboksbackup",
+        }
+
+    def fake_queue(**_kwargs):
+        assert not contender_acquired.is_set()
+        return AutoProvisionResult(
+            status="disabled",
+            message="test worker disabled",
+        )
+
+    monkeypatch.setattr("app.tenant_backup.import_uploaded_package", fake_import)
+    monkeypatch.setattr("app.routes.admin.queue_tenant_host_action", fake_queue)
+    client = TestClient(app)
+    client.post("/login", data={"password": "test-password"})
+
+    response = client.post(
+        f"/admin/tenants/{slug}/backup/import",
+        data={
+            "import_mode": "restore",
+            "confirmation": slug,
+            "tenant_generation_id": generation_id,
+        },
+        files={"backup_file": ("backup.unboksbackup", b"valid", "application/zip")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert contender is not None
+    contender.join(timeout=1)
+    assert not contender.is_alive()
+    assert contender_acquired.is_set()

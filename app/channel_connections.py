@@ -15,14 +15,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import sqlite3
+import tempfile
+from functools import wraps
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
+from app.file_lock import exclusive_file_lock
 
 
 CONNECTION_REQUEST_STATUSES = {
@@ -46,10 +50,185 @@ TENANT_CONNECTION_STATUSES = {
 }
 
 
+class ProviderOwnershipConflict(ValueError):
+    """Raised when a provider account/profile is already owned by another tenant."""
+
+
+def _orphan_profiles_path() -> Path:
+    configured = os.getenv("NR3_PROVIDER_ORPHAN_LEDGER_PATH", "").strip()
+    if configured:
+        return Path(configured)
+    delete_dir = os.getenv("NR3_DELETE_OPERATIONS_DIR", "").strip()
+    root = Path(delete_dir) if delete_dir else Path("data/provisioning/delete-operations")
+    return root / "provider-orphan-profiles.json"
+
+
+def _write_orphan_profiles(payload: dict[str, Any]) -> None:
+    path = _orphan_profiles_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            json.dump(payload, handle, indent=2, ensure_ascii=False, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        parent_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except Exception:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _load_orphan_profiles() -> dict[str, Any]:
+    path = _orphan_profiles_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"version": 1, "profiles": []}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise ProviderOwnershipConflict(
+            "Provider orphan cleanup ledger is unreadable; provider mutation was blocked."
+        ) from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != 1
+        or not isinstance(payload.get("profiles"), list)
+    ):
+        raise ProviderOwnershipConflict(
+            "Provider orphan cleanup ledger is malformed; provider mutation was blocked."
+        )
+    return payload
+
+
+def _record_orphan_profile(
+    *, tenant_id: str, generation_id: str, profile_id: str, error: str
+) -> None:
+    path = _orphan_profiles_path()
+    lock = path.with_suffix(path.suffix + ".lock")
+    with exclusive_file_lock(lock):
+        payload = _load_orphan_profiles()
+        profiles = payload["profiles"]
+        now = utc_now()
+        profiles[:] = [
+            item
+            for item in profiles
+            if not (
+                isinstance(item, dict)
+                and item.get("tenant_id") == tenant_id
+                and item.get("profile_id") == profile_id
+            )
+        ]
+        profiles.append({
+            "tenant_id": tenant_id,
+            "tenant_generation_id": generation_id,
+            "profile_id": profile_id,
+            "last_error": str(error)[:500],
+            "created_at": now,
+        })
+        _write_orphan_profiles(payload)
+
+
+def list_tenant_orphan_profile_ids(tenant_id: str) -> list[str]:
+    path = _orphan_profiles_path()
+    with exclusive_file_lock(path.with_suffix(path.suffix + ".lock")):
+        payload = _load_orphan_profiles()
+    return list(dict.fromkeys(
+        str(item.get("profile_id") or "").strip()
+        for item in payload["profiles"]
+        if isinstance(item, dict)
+        and item.get("tenant_id") == tenant_id
+        and str(item.get("profile_id") or "").strip()
+    ))
+
+
+def clear_tenant_orphan_profile_ids(
+    tenant_id: str,
+    profile_ids: list[str] | tuple[str, ...],
+) -> None:
+    targets = {str(item or "").strip() for item in profile_ids if str(item or "").strip()}
+    if not targets:
+        return
+    path = _orphan_profiles_path()
+    with exclusive_file_lock(path.with_suffix(path.suffix + ".lock")):
+        payload = _load_orphan_profiles()
+        profiles = payload["profiles"]
+        kept = [
+            item
+            for item in profiles
+            if not (
+                isinstance(item, dict)
+                and item.get("tenant_id") == tenant_id
+                and str(item.get("profile_id") or "").strip() in targets
+            )
+        ]
+        if len(kept) != len(profiles):
+            payload["profiles"] = kept
+            _write_orphan_profiles(payload)
+
+
+def _require_mutation_generation(
+    tenant_id: str,
+    *,
+    expected_generation_id: str | None = None,
+) -> str:
+    """Resolve the durable tenant generation or reject a stale mutation."""
+    try:
+        from app.delete_operations import require_tenant_mutation_generation
+
+        return require_tenant_mutation_generation(
+            tenant_id,
+            expected_generation_id=expected_generation_id,
+        )
+    except Exception as exc:
+        raise ProviderOwnershipConflict(
+            "The provider mutation no longer belongs to an active tenant "
+            f"generation: {exc}"
+        ) from exc
+
+
+def _serialized_provider_mutation(function):
+    """Hold the shared tenant lifecycle lock across provider-state writes."""
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        tenant_id = str(kwargs.get("tenant_id") or "").strip()
+        if not tenant_id:
+            raise ProviderOwnershipConflict("Tenant id is required.")
+        from app.provisioning import tenant_creation_lock
+
+        with tenant_creation_lock(tenant_id):
+            generation_id = _require_mutation_generation(
+                tenant_id,
+                expected_generation_id=kwargs.get("expected_generation_id"),
+            )
+            kwargs["_lifecycle_generation_id"] = generation_id
+            return function(*args, **kwargs)
+
+    return wrapped
+
+
 @dataclass(frozen=True)
 class ConnectionRequest:
     id: str
     tenant_id: str
+    tenant_generation_id: str | None
     channel: str
     provider: str
     status: str
@@ -59,6 +238,7 @@ class ConnectionRequest:
     auth_url: str | None
     zernio_profile_id: str | None
     zernio_account_id: str | None
+    zernio_account_verified: bool
     selected_phone_number_id: str | None
     display_phone_number: str | None
     callback_payload_json: str | None
@@ -82,6 +262,7 @@ class TenantChannelConnection:
     status: str
     zernio_profile_id: str | None
     zernio_account_id: str | None
+    zernio_account_verified: bool
     phone_number_id: str | None
     display_phone_number: str | None
     waba_id: str | None
@@ -111,6 +292,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS connection_requests (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
+                tenant_generation_id TEXT,
                 channel TEXT NOT NULL DEFAULT 'whatsapp',
                 provider TEXT NOT NULL DEFAULT 'zernio',
                 status TEXT NOT NULL DEFAULT 'pending',
@@ -120,6 +302,7 @@ def init_db() -> None:
                 auth_url TEXT,
                 zernio_profile_id TEXT,
                 zernio_account_id TEXT,
+                zernio_account_verified INTEGER NOT NULL DEFAULT 0,
                 selected_phone_number_id TEXT,
                 display_phone_number TEXT,
                 callback_payload_json TEXT,
@@ -158,6 +341,7 @@ def init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'not_connected',
                 zernio_profile_id TEXT,
                 zernio_account_id TEXT,
+                zernio_account_verified INTEGER NOT NULL DEFAULT 0,
                 phone_number_id TEXT,
                 display_phone_number TEXT,
                 waba_id TEXT,
@@ -180,11 +364,195 @@ def init_db() -> None:
             )
             """
         )
+        _ensure_zernio_verification_columns(conn)
+        _enforce_zernio_owner_constraints(conn)
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_tenant_channel_connections_tenant
             ON tenant_channel_connections (tenant_id, channel, provider)
             """
+        )
+
+
+def _ensure_zernio_verification_columns(conn: sqlite3.Connection) -> None:
+    """Upgrade existing SQLite state without trusting legacy callback IDs."""
+    for table in ("connection_requests", "tenant_channel_connections"):
+        existing = {
+            str(row["name"])
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if "zernio_account_verified" not in existing:
+            conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN "
+                "zernio_account_verified INTEGER NOT NULL DEFAULT 0"
+            )
+        if table == "connection_requests" and "tenant_generation_id" not in existing:
+            conn.execute(
+                "ALTER TABLE connection_requests "
+                "ADD COLUMN tenant_generation_id TEXT"
+            )
+
+
+def _enforce_zernio_owner_constraints(conn: sqlite3.Connection) -> None:
+    """Quarantine legacy ambiguity, then enforce one verified tenant owner."""
+    quarantine_reason = (
+        "Provider ownership is ambiguous; reconnect this tenant before routing."
+    )
+    # Normalize legacy whitespace before duplicate detection and unique-index
+    # creation. Otherwise `acct` and ` acct ` could evade the ownership rule.
+    for table in ("connection_requests", "tenant_channel_connections"):
+        for column in ("zernio_account_id", "zernio_profile_id"):
+            conn.execute(
+                f"""
+                UPDATE {table}
+                SET {column} = NULLIF(TRIM({column}), '')
+                WHERE {column} IS NOT NULL
+                """
+            )
+    conn.execute(
+        """
+        UPDATE tenants
+        SET zernio_profile_id = NULLIF(TRIM(zernio_profile_id), '')
+        WHERE zernio_profile_id IS NOT NULL
+        """
+    )
+    for column in ("zernio_account_id", "zernio_profile_id"):
+        conn.execute(
+            f"""
+            UPDATE tenant_channel_connections
+            SET zernio_account_verified = 0,
+                status = 'failed',
+                last_error = ?
+            WHERE {column} IN (
+                SELECT {column}
+                FROM tenant_channel_connections
+                WHERE zernio_account_verified = 1
+                  AND {column} IS NOT NULL
+                  AND TRIM({column}) <> ''
+                GROUP BY {column}
+                HAVING COUNT(DISTINCT tenant_id) > 1
+            )
+            """,
+            (quarantine_reason,),
+        )
+    conn.execute(
+        """
+        UPDATE tenants
+        SET zernio_profile_id = NULL, updated_at = ?
+        WHERE zernio_profile_id IN (
+            SELECT zernio_profile_id
+            FROM tenants
+            WHERE zernio_profile_id IS NOT NULL
+              AND TRIM(zernio_profile_id) <> ''
+            GROUP BY zernio_profile_id
+            HAVING COUNT(DISTINCT slug) > 1
+        )
+        """,
+        (utc_now(),),
+    )
+    conn.execute(
+        """
+        UPDATE tenant_channel_connections AS connection
+        SET zernio_account_verified = 0,
+            status = 'failed',
+            last_error = ?
+        WHERE connection.zernio_account_verified = 1
+          AND connection.zernio_profile_id IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM tenants AS tenant
+              WHERE tenant.zernio_profile_id = connection.zernio_profile_id
+                AND tenant.slug <> connection.tenant_id
+          )
+        """,
+        (quarantine_reason,),
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_verified_zernio_account_owner
+        ON tenant_channel_connections (provider, channel, zernio_account_id)
+        WHERE zernio_account_verified = 1
+          AND zernio_account_id IS NOT NULL
+          AND TRIM(zernio_account_id) <> ''
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_verified_zernio_profile_owner
+        ON tenant_channel_connections (provider, channel, zernio_profile_id)
+        WHERE zernio_account_verified = 1
+          AND zernio_profile_id IS NOT NULL
+          AND TRIM(zernio_profile_id) <> ''
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_zernio_profile_owner
+        ON tenants (zernio_profile_id)
+        WHERE zernio_profile_id IS NOT NULL
+          AND TRIM(zernio_profile_id) <> ''
+        """
+    )
+
+
+def _assert_provider_owner_available(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    zernio_profile_id: str | None,
+    zernio_account_id: str | None = None,
+) -> None:
+    profile_id = str(zernio_profile_id or "").strip()
+    account_id = str(zernio_account_id or "").strip()
+    if not profile_id:
+        raise ProviderOwnershipConflict(
+            "A provider-verified connection requires a profile id."
+        )
+    if zernio_account_id is not None and not account_id:
+        raise ProviderOwnershipConflict(
+            "A provider-verified connection requires an account id."
+        )
+    if account_id:
+        row = conn.execute(
+            """
+            SELECT tenant_id FROM tenant_channel_connections
+            WHERE provider = 'zernio'
+              AND zernio_account_verified = 1
+              AND zernio_account_id = ?
+              AND tenant_id <> ?
+            LIMIT 1
+            """,
+            (account_id, tenant_id),
+        ).fetchone()
+        if row is not None:
+            raise ProviderOwnershipConflict(
+                "This Zernio account is already verified for another tenant."
+            )
+    row = conn.execute(
+        """
+        SELECT tenant_id FROM tenant_channel_connections
+        WHERE provider = 'zernio'
+          AND zernio_account_verified = 1
+          AND zernio_profile_id = ?
+          AND tenant_id <> ?
+        LIMIT 1
+        """,
+        (profile_id, tenant_id),
+    ).fetchone()
+    if row is not None:
+        raise ProviderOwnershipConflict(
+            "This Zernio profile is already verified for another tenant."
+        )
+    row = conn.execute(
+        """
+        SELECT slug FROM tenants
+        WHERE zernio_profile_id = ? AND slug <> ?
+        LIMIT 1
+        """,
+        (profile_id, tenant_id),
+    ).fetchone()
+    if row is not None:
+        raise ProviderOwnershipConflict(
+            "This Zernio profile is already assigned to another tenant."
         )
 
 
@@ -215,6 +583,7 @@ def _ensure_tenants_table(conn: sqlite3.Connection) -> None:
             conn.execute(statement)
 
 
+@_serialized_provider_mutation
 def create_connection_request(
     *,
     tenant_id: str,
@@ -225,9 +594,15 @@ def create_connection_request(
     channel: str = "whatsapp",
     provider: str = "zernio",
     expires_in_minutes: int = 60,
+    expected_generation_id: str | None = None,
+    _lifecycle_generation_id: str = "",
 ) -> CreatedConnectionRequest:
     if status not in CONNECTION_REQUEST_STATUSES:
         raise ValueError("Invalid connection request status.")
+    if not _lifecycle_generation_id:
+        raise ProviderOwnershipConflict(
+            "Tenant generation was not established for the connection request."
+        )
     init_db()
     now = utc_now()
     request_id = f"cr_{secrets.token_urlsafe(18)}"
@@ -241,6 +616,7 @@ def create_connection_request(
             INSERT INTO connection_requests (
                 id,
                 tenant_id,
+                tenant_generation_id,
                 channel,
                 provider,
                 status,
@@ -252,11 +628,12 @@ def create_connection_request(
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 request_id,
                 tenant_id,
+                _lifecycle_generation_id,
                 channel,
                 provider,
                 status,
@@ -329,6 +706,7 @@ def update_connection_request(
     *,
     status: str,
     zernio_account_id: str | None = None,
+    zernio_account_verified: bool | None = None,
     selected_phone_number_id: str | None = None,
     display_phone_number: str | None = None,
     callback_payload: dict[str, Any] | None = None,
@@ -337,45 +715,121 @@ def update_connection_request(
     if status not in CONNECTION_REQUEST_STATUSES:
         raise ValueError("Invalid connection request status.")
     init_db()
+    initial = get_connection_request(request_id)
+    if initial is None:
+        raise ValueError("Connection request not found.")
     now = utc_now()
     callback_payload_json = (
         json.dumps(callback_payload, sort_keys=True, ensure_ascii=False)
         if callback_payload is not None
         else None
     )
-    with _connect() as conn:
-        conn.execute(
-            """
-            UPDATE connection_requests
-            SET status = ?,
-                zernio_account_id = COALESCE(?, zernio_account_id),
-                selected_phone_number_id = COALESCE(?, selected_phone_number_id),
-                display_phone_number = COALESCE(?, display_phone_number),
-                callback_payload_json = COALESCE(?, callback_payload_json),
-                error_summary = ?,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (
-                status,
-                zernio_account_id,
-                selected_phone_number_id,
-                display_phone_number,
-                callback_payload_json,
-                error_summary,
-                now,
-                request_id,
-            ),
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(initial.tenant_id):
+        generation_id = _require_mutation_generation(
+            initial.tenant_id,
+            expected_generation_id=initial.tenant_generation_id,
         )
-        row = conn.execute(
-            "SELECT * FROM connection_requests WHERE id = ?",
-            (request_id,),
-        ).fetchone()
+        with _connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute(
+                "SELECT tenant_id, tenant_generation_id "
+                "FROM connection_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+            if (
+                current is None
+                or str(current["tenant_id"]) != initial.tenant_id
+                or (
+                    current["tenant_generation_id"]
+                    and str(current["tenant_generation_id"]) != generation_id
+                )
+            ):
+                raise ProviderOwnershipConflict(
+                    "The connection request no longer belongs to this tenant generation."
+                )
+            conn.execute(
+                """
+                UPDATE connection_requests
+                SET status = ?,
+                    tenant_generation_id = COALESCE(tenant_generation_id, ?),
+                    zernio_account_id = COALESCE(?, zernio_account_id),
+                    zernio_account_verified = COALESCE(?, zernio_account_verified),
+                    selected_phone_number_id = COALESCE(?, selected_phone_number_id),
+                    display_phone_number = COALESCE(?, display_phone_number),
+                    callback_payload_json = COALESCE(?, callback_payload_json),
+                    error_summary = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    generation_id,
+                    zernio_account_id,
+                    None if zernio_account_verified is None else int(zernio_account_verified),
+                    selected_phone_number_id,
+                    display_phone_number,
+                    callback_payload_json,
+                    error_summary,
+                    now,
+                    request_id,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM connection_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
     if row is None:
         raise ValueError("Connection request not found.")
     return row_to_connection_request(row)
 
 
+def claim_connection_request_callback(request_id: str) -> bool:
+    """Atomically consume one callback attempt for a non-terminal request.
+
+    Provider callbacks can be delivered more than once or concurrently. Only
+    one request handler may cross the provider-verification and allowlist
+    boundary; later deliveries observe the durable status and remain read-only.
+    ``pending_number`` is claimable because some providers deliver a second
+    callback after the operator chooses a phone number.
+    """
+    init_db()
+    initial = get_connection_request(request_id)
+    if initial is None:
+        return False
+    now = utc_now()
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(initial.tenant_id):
+        generation_id = _require_mutation_generation(
+            initial.tenant_id,
+            expected_generation_id=initial.tenant_generation_id,
+        )
+        with _connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE connection_requests
+                SET status = 'callback_received',
+                    tenant_generation_id = COALESCE(tenant_generation_id, ?),
+                    updated_at = ?
+                WHERE id = ?
+                  AND tenant_id = ?
+                  AND (tenant_generation_id IS NULL OR tenant_generation_id = ?)
+                  AND status IN ('pending', 'link_generated', 'auth_started', 'pending_number')
+                """,
+                (
+                    generation_id,
+                    now,
+                    request_id,
+                    initial.tenant_id,
+                    generation_id,
+                ),
+            )
+    return cursor.rowcount == 1
+
+
+@_serialized_provider_mutation
 def upsert_tenant_channel_connection(
     *,
     tenant_id: str,
@@ -384,6 +838,7 @@ def upsert_tenant_channel_connection(
     status: str,
     zernio_profile_id: str | None = None,
     zernio_account_id: str | None = None,
+    zernio_account_verified: bool = False,
     phone_number_id: str | None = None,
     display_phone_number: str | None = None,
     waba_id: str | None = None,
@@ -391,17 +846,73 @@ def upsert_tenant_channel_connection(
     last_request_id: str | None = None,
     last_error: str | None = None,
     connected_at: str | None = None,
+    expected_generation_id: str | None = None,
+    _lifecycle_generation_id: str = "",
 ) -> TenantChannelConnection:
     if status not in TENANT_CONNECTION_STATUSES:
         raise ValueError("Invalid tenant channel connection status.")
+    normalized_profile_id = (
+        str(zernio_profile_id).strip() if zernio_profile_id is not None else None
+    )
+    normalized_account_id = (
+        str(zernio_account_id).strip() if zernio_account_id is not None else None
+    )
+    if zernio_account_verified and not normalized_account_id:
+        raise ProviderOwnershipConflict(
+            "A provider-verified connection requires an account id."
+        )
+    if not _lifecycle_generation_id:
+        raise ProviderOwnershipConflict(
+            "Tenant generation was not established for the channel connection."
+        )
     init_db()
     now = utc_now()
     metadata_json = json.dumps(metadata or {}, sort_keys=True, ensure_ascii=False)
     if status == "connected" and connected_at is None:
         connected_at = now
     with _connect() as conn:
-        conn.execute(
-            """
+        conn.execute("BEGIN IMMEDIATE")
+        if last_request_id:
+            request_owner = conn.execute(
+                """
+                SELECT tenant_id, tenant_generation_id
+                FROM connection_requests
+                WHERE id = ?
+                """,
+                (last_request_id,),
+            ).fetchone()
+            if (
+                request_owner is None
+                or str(request_owner["tenant_id"]) != tenant_id
+                or (
+                    request_owner["tenant_generation_id"] is not None
+                    and str(request_owner["tenant_generation_id"])
+                    != _lifecycle_generation_id
+                )
+            ):
+                raise ProviderOwnershipConflict(
+                    "The provider authorization request no longer belongs "
+                    "to this tenant generation."
+                )
+            if (
+                request_owner is not None
+                and request_owner["tenant_generation_id"] is None
+            ):
+                conn.execute(
+                    "UPDATE connection_requests SET tenant_generation_id = ? "
+                    "WHERE id = ? AND tenant_generation_id IS NULL",
+                    (_lifecycle_generation_id, last_request_id),
+                )
+        if zernio_account_verified:
+            _assert_provider_owner_available(
+                conn,
+                tenant_id=tenant_id,
+                zernio_profile_id=normalized_profile_id,
+                zernio_account_id=normalized_account_id,
+            )
+        try:
+            conn.execute(
+                """
             INSERT INTO tenant_channel_connections (
                 tenant_id,
                 channel,
@@ -409,6 +920,7 @@ def upsert_tenant_channel_connection(
                 status,
                 zernio_profile_id,
                 zernio_account_id,
+                zernio_account_verified,
                 phone_number_id,
                 display_phone_number,
                 waba_id,
@@ -419,11 +931,12 @@ def upsert_tenant_channel_connection(
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (tenant_id, channel, provider)
             DO UPDATE SET status = excluded.status,
                           zernio_profile_id = excluded.zernio_profile_id,
                           zernio_account_id = excluded.zernio_account_id,
+                          zernio_account_verified = excluded.zernio_account_verified,
                           phone_number_id = excluded.phone_number_id,
                           display_phone_number = excluded.display_phone_number,
                           waba_id = excluded.waba_id,
@@ -432,25 +945,30 @@ def upsert_tenant_channel_connection(
                           last_error = excluded.last_error,
                           connected_at = excluded.connected_at,
                           updated_at = excluded.updated_at
-            """,
-            (
-                tenant_id,
-                channel,
-                provider,
-                status,
-                zernio_profile_id,
-                zernio_account_id,
-                phone_number_id,
-                display_phone_number,
-                waba_id,
-                metadata_json,
-                last_request_id,
-                last_error,
-                connected_at,
-                now,
-                now,
-            ),
-        )
+                """,
+                (
+                    tenant_id,
+                    channel,
+                    provider,
+                    status,
+                    normalized_profile_id,
+                    normalized_account_id,
+                    int(zernio_account_verified),
+                    phone_number_id,
+                    display_phone_number,
+                    waba_id,
+                    metadata_json,
+                    last_request_id,
+                    last_error,
+                    connected_at,
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ProviderOwnershipConflict(
+                "Provider ownership changed while the connection was being saved."
+            ) from exc
         row = conn.execute(
             """
             SELECT * FROM tenant_channel_connections
@@ -490,16 +1008,21 @@ def get_tenant_channel_connection_by_account_id(
         return None
     init_db()
     with _connect() as conn:
-        row = conn.execute(
+        rows = conn.execute(
             """
             SELECT * FROM tenant_channel_connections
-            WHERE zernio_account_id = ? AND channel = ? AND provider = ?
+            WHERE zernio_account_id = ?
+              AND zernio_account_verified = 1
+              AND channel = ?
+              AND provider = ?
             ORDER BY updated_at DESC
-            LIMIT 1
+            LIMIT 2
             """,
             (account_id, channel, provider),
-        ).fetchone()
-    return row_to_tenant_channel_connection(row) if row is not None else None
+        ).fetchall()
+    if len(rows) != 1:
+        return None
+    return row_to_tenant_channel_connection(rows[0])
 
 
 def list_tenant_zernio_ids(tenant_id: str) -> dict[str, list[str]]:
@@ -523,24 +1046,26 @@ def list_tenant_zernio_ids(tenant_id: str) -> dict[str, list[str]]:
     with _connect() as conn:
         for row in conn.execute(
             """
-            SELECT zernio_profile_id, zernio_account_id
+            SELECT zernio_profile_id, zernio_account_id, zernio_account_verified
             FROM tenant_channel_connections
             WHERE tenant_id = ? AND provider = 'zernio'
             """,
             (tenant_id,),
         ).fetchall():
-            add_unique(profile_ids, row["zernio_profile_id"])
-            add_unique(account_ids, row["zernio_account_id"])
+            if bool(row["zernio_account_verified"]):
+                add_unique(profile_ids, row["zernio_profile_id"])
+                add_unique(account_ids, row["zernio_account_id"])
         for row in conn.execute(
             """
-            SELECT zernio_profile_id, zernio_account_id
+            SELECT zernio_profile_id, zernio_account_id, zernio_account_verified
             FROM connection_requests
             WHERE tenant_id = ? AND provider = 'zernio'
             """,
             (tenant_id,),
         ).fetchall():
-            add_unique(profile_ids, row["zernio_profile_id"])
-            add_unique(account_ids, row["zernio_account_id"])
+            if bool(row["zernio_account_verified"]):
+                add_unique(profile_ids, row["zernio_profile_id"])
+                add_unique(account_ids, row["zernio_account_id"])
         row = conn.execute(
             "SELECT zernio_profile_id FROM tenants WHERE slug = ?",
             (tenant_id,),
@@ -548,21 +1073,98 @@ def list_tenant_zernio_ids(tenant_id: str) -> dict[str, list[str]]:
         if row is not None:
             add_unique(profile_ids, row["zernio_profile_id"])
 
+    for profile_id in list_tenant_orphan_profile_ids(tenant_id):
+        add_unique(profile_ids, profile_id)
+
     return {"account_ids": account_ids, "profile_ids": profile_ids}
 
 
-def set_tenant_zernio_profile_id(
+def provider_id_owned_by_other_tenant(
+    *,
+    tenant_id: str,
+    zernio_account_id: str | None = None,
+    zernio_profile_id: str | None = None,
+) -> bool:
+    """Return whether a provider id is currently claimed by another tenant.
+
+    Deletion and other destructive cleanup can encounter historical verified
+    request rows after an account has legitimately moved. Only the current
+    verified connection and profile registry are authoritative ownership
+    claims; callers must not delete provider resources claimed here.
+    """
+    account_id = str(zernio_account_id or "").strip()
+    profile_id = str(zernio_profile_id or "").strip()
+    if not account_id and not profile_id:
+        return False
+    init_db()
+    with _connect() as conn:
+        if account_id:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM tenant_channel_connections
+                WHERE provider = 'zernio'
+                  AND zernio_account_verified = 1
+                  AND TRIM(zernio_account_id) = ?
+                  AND tenant_id <> ?
+                LIMIT 1
+                """,
+                (account_id, tenant_id),
+            ).fetchone()
+            if row is not None:
+                return True
+        if profile_id:
+            connection_owner = conn.execute(
+                """
+                SELECT 1
+                FROM tenant_channel_connections
+                WHERE provider = 'zernio'
+                  AND zernio_account_verified = 1
+                  AND TRIM(zernio_profile_id) = ?
+                  AND tenant_id <> ?
+                LIMIT 1
+                """,
+                (profile_id, tenant_id),
+            ).fetchone()
+            if connection_owner is not None:
+                return True
+            registry_owner = conn.execute(
+                """
+                SELECT 1
+                FROM tenants
+                WHERE TRIM(zernio_profile_id) = ?
+                  AND slug <> ?
+                LIMIT 1
+                """,
+                (profile_id, tenant_id),
+            ).fetchone()
+            if registry_owner is not None:
+                return True
+    return False
+
+
+def _set_tenant_zernio_profile_id_unlocked(
     *,
     tenant_id: str,
     zernio_profile_id: str,
     name: str | None = None,
     status: str = "active",
 ) -> None:
+    normalized_profile_id = str(zernio_profile_id or "").strip()
+    if not normalized_profile_id:
+        raise ProviderOwnershipConflict("A Zernio profile id is required.")
     init_db()
     now = utc_now()
     with _connect() as conn:
-        conn.execute(
-            """
+        conn.execute("BEGIN IMMEDIATE")
+        _assert_provider_owner_available(
+            conn,
+            tenant_id=tenant_id,
+            zernio_profile_id=normalized_profile_id,
+        )
+        try:
+            conn.execute(
+                """
             INSERT INTO tenants (
                 slug,
                 name,
@@ -577,9 +1179,118 @@ def set_tenant_zernio_profile_id(
                           status = excluded.status,
                           zernio_profile_id = excluded.zernio_profile_id,
                           updated_at = excluded.updated_at
-            """,
-            (tenant_id, name, status, zernio_profile_id, now, now),
+                """,
+                (tenant_id, name, status, normalized_profile_id, now, now),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ProviderOwnershipConflict(
+                "Provider profile ownership changed while it was being saved."
+            ) from exc
+
+
+@_serialized_provider_mutation
+def set_tenant_zernio_profile_id(
+    *,
+    tenant_id: str,
+    zernio_profile_id: str,
+    name: str | None = None,
+    status: str = "active",
+    expected_generation_id: str | None = None,
+    _lifecycle_generation_id: str = "",
+) -> None:
+    if not _lifecycle_generation_id:
+        raise ProviderOwnershipConflict(
+            "Tenant generation was not established for the Zernio profile."
         )
+    _set_tenant_zernio_profile_id_unlocked(
+        tenant_id=tenant_id,
+        zernio_profile_id=zernio_profile_id,
+        name=name,
+        status=status,
+    )
+
+
+@_serialized_provider_mutation
+def ensure_tenant_zernio_profile(
+    *,
+    tenant_id: str,
+    create_profile,
+    delete_profile=None,
+    name: str | None = None,
+    status: str = "active",
+    expected_generation_id: str | None = None,
+    _lifecycle_generation_id: str = "",
+) -> tuple[str, bool]:
+    """Create and persist one provider profile inside the lifecycle lease.
+
+    Holding the tenant lock across the external create closes the orphan race:
+    deletion cannot snapshot provider ids between creation and persistence.
+    ``create_profile`` may return either the profile id or an object with ``id``.
+    """
+    if not _lifecycle_generation_id:
+        raise ProviderOwnershipConflict(
+            "Tenant generation was not established for the Zernio profile."
+        )
+    existing = get_tenant_zernio_profile_id(tenant_id)
+    if existing:
+        return existing, False
+    created = create_profile()
+    profile_id = str(getattr(created, "id", created) or "").strip()
+    if not profile_id:
+        raise ProviderOwnershipConflict("Zernio did not return a profile id.")
+    try:
+        _set_tenant_zernio_profile_id_unlocked(
+            tenant_id=tenant_id,
+            zernio_profile_id=profile_id,
+            name=name,
+            status=status,
+        )
+    except Exception as persist_exc:
+        if provider_id_owned_by_other_tenant(
+            tenant_id=tenant_id,
+            zernio_profile_id=profile_id,
+        ):
+            raise ProviderOwnershipConflict(
+                "Zernio returned a profile already owned by another tenant; "
+                "that tenant's profile was not deleted."
+            ) from persist_exc
+        try:
+            if delete_profile is None:
+                raise RuntimeError("No provider cleanup callback was configured.")
+            delete_profile(profile_id)
+        except Exception as cleanup_exc:
+            try:
+                _record_orphan_profile(
+                    tenant_id=tenant_id,
+                    generation_id=_lifecycle_generation_id,
+                    profile_id=profile_id,
+                    error=str(cleanup_exc),
+                )
+            except Exception as ledger_exc:
+                raise ProviderOwnershipConflict(
+                    "Zernio profile persistence and compensating deletion failed; "
+                    "the orphan cleanup ledger could not be written."
+                ) from ledger_exc
+            raise ProviderOwnershipConflict(
+                "Zernio profile persistence failed; compensating deletion also "
+                "failed and the profile was recorded for deletion retry."
+            ) from persist_exc
+        raise ProviderOwnershipConflict(
+            "Zernio profile persistence failed; the newly-created provider "
+            "profile was deleted safely."
+        ) from persist_exc
+    return profile_id, True
+
+
+def current_tenant_generation_id(tenant_id: str) -> str:
+    """Capture the generation identity used to reject a delayed request."""
+    clean_tenant_id = str(tenant_id or "").strip()
+    if not clean_tenant_id:
+        raise ProviderOwnershipConflict("Tenant id is required.")
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(clean_tenant_id):
+        return _require_mutation_generation(clean_tenant_id)
 
 
 def get_tenant_zernio_profile_id(tenant_id: str) -> str | None:
@@ -612,6 +1323,25 @@ def forget_tenant(tenant_id: str) -> None:
         )
 
 
+def tenant_state_exists(tenant_id: str) -> bool:
+    """Return whether any channel/provider row still references a tenant."""
+    init_db()
+    with _connect() as conn:
+        checks = (
+            ("connection_requests", "tenant_id"),
+            ("tenant_channel_connections", "tenant_id"),
+            ("tenants", "slug"),
+        )
+        for table, column in checks:
+            row = conn.execute(
+                f"SELECT 1 FROM {table} WHERE {column} = ? LIMIT 1",
+                (tenant_id,),
+            ).fetchone()
+            if row is not None:
+                return True
+    return False
+
+
 def hash_state_token(state_token: str) -> str:
     return hashlib.sha256(state_token.encode("utf-8")).hexdigest()
 
@@ -624,6 +1354,11 @@ def row_to_connection_request(row: sqlite3.Row) -> ConnectionRequest:
     return ConnectionRequest(
         id=str(row["id"]),
         tenant_id=str(row["tenant_id"]),
+        tenant_generation_id=(
+            str(row["tenant_generation_id"])
+            if row["tenant_generation_id"]
+            else None
+        ),
         channel=str(row["channel"]),
         provider=str(row["provider"]),
         status=str(row["status"]),
@@ -633,6 +1368,7 @@ def row_to_connection_request(row: sqlite3.Row) -> ConnectionRequest:
         auth_url=row["auth_url"],
         zernio_profile_id=row["zernio_profile_id"],
         zernio_account_id=row["zernio_account_id"],
+        zernio_account_verified=bool(row["zernio_account_verified"]),
         selected_phone_number_id=row["selected_phone_number_id"],
         display_phone_number=row["display_phone_number"],
         callback_payload_json=row["callback_payload_json"],
@@ -651,6 +1387,7 @@ def row_to_tenant_channel_connection(row: sqlite3.Row) -> TenantChannelConnectio
         status=str(row["status"]),
         zernio_profile_id=row["zernio_profile_id"],
         zernio_account_id=row["zernio_account_id"],
+        zernio_account_verified=bool(row["zernio_account_verified"]),
         phone_number_id=row["phone_number_id"],
         display_phone_number=row["display_phone_number"],
         waba_id=row["waba_id"],

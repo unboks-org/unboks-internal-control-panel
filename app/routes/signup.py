@@ -9,11 +9,13 @@ from app.emailer import send_email, smtp_is_configured
 from app.public_signup_requests import (
     client_ip_from_headers,
     create_signup_request,
-    mark_provisioned,
+    mark_signup_creation_error,
     mark_verified,
+    reconcile_signup_provisioning_result,
     update_signup_request,
     utc_now,
 )
+from app.provisioning import auto_provision_enabled
 from app.signup_service import create_public_signup_tenant
 from app.tenants import TenantCreateError
 
@@ -729,7 +731,34 @@ def public_signup_verify(token: str):
     except TenantCreateError as exc:
         return HTMLResponse(_signup_error_html(str(exc)), status_code=400)
 
-    if not settings.public_signup_auto_provision_after_verify:
+    signup_id = str(record.get("id") or "")
+    status = str(record.get("status") or "")
+    existing_slug = str(record.get("provisioned_slug") or "")
+    if status == "provisioned" and existing_slug:
+        return RedirectResponse(
+            url=f"https://dashboard.unboks.org/login?workspace={existing_slug}",
+            status_code=303,
+        )
+    if status in {"provisioning_dispatching", "provisioning_pending"}:
+        return HTMLResponse(
+            _signup_info_html(
+                "Workspace activation in progress",
+                "Your workspace is being prepared. Refresh this verification link shortly.",
+            ),
+            status_code=202,
+        )
+    if status in {"failed", "rejected", "archived"}:
+        return HTMLResponse(
+            _signup_error_html(
+                "This signup cannot be activated from the verification link. Please contact Unboks."
+            ),
+            status_code=409,
+        )
+
+    if (
+        not settings.public_signup_auto_provision_after_verify
+        or not auto_provision_enabled()
+    ):
         return HTMLResponse(
             _signup_info_html(
                 "Email confirmed",
@@ -745,6 +774,7 @@ def public_signup_verify(token: str):
             email=str(record.get("email") or ""),
             phone=str(record.get("phone") or ""),
             settings=settings,
+            signup_request_id=signup_id,
         )
     except TenantCreateError as exc:
         return HTMLResponse(_signup_error_html(str(exc)), status_code=400)
@@ -756,5 +786,43 @@ def public_signup_verify(token: str):
             status_code=500,
         )
 
-    mark_provisioned(str(record.get("id") or ""), result.slug, settings)
-    return RedirectResponse(url=result.dashboard_url, status_code=303)
+    provision_status = result.provision_result.status
+    if provision_status == "succeeded":
+        reconciled = reconcile_signup_provisioning_result(
+            signup_id,
+            slug=result.slug,
+            creation_id=result.creation_id,
+            job_id=str(result.provision_result.job_id or ""),
+            status="succeeded",
+            message=result.provision_result.message,
+            settings=settings,
+        )
+        if not reconciled:
+            return HTMLResponse(
+                _signup_error_html(
+                    "Workspace activation finished, but signup state could not be reconciled. "
+                    "Please contact Unboks."
+                ),
+                status_code=500,
+            )
+        return RedirectResponse(url=result.dashboard_url, status_code=303)
+    if provision_status in {"queued", "disabled"}:
+        return HTMLResponse(
+            _signup_info_html(
+                "Workspace activation in progress",
+                "Your workspace is being prepared. Refresh this verification link shortly.",
+            ),
+            status_code=202,
+        )
+
+    mark_signup_creation_error(
+        signup_id,
+        message=result.provision_result.message,
+        settings=settings,
+    )
+    return HTMLResponse(
+        _signup_error_html(
+            "We could not activate the workspace automatically. Unboks has kept your signup for review."
+        ),
+        status_code=500,
+    )

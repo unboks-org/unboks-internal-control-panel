@@ -641,7 +641,8 @@
                       <strong>{{ conflict.title }}</strong>
                     </div>
                     <form method="post" action="/admin/tenants/{{ tenant.id }}/prompt-conflicts/{{ conflict.id }}/reviewed">
-                      <button type="submit" class="text-button">Mark reviewed</button>
+                      <input type="hidden" name="tenant_generation_id" value="{{ tenant_generation_id }}">
+                      <button type="submit" class="text-button" {% if not tenant_generation_id %}disabled{% endif %}>Mark reviewed</button>
                     </form>
                   </div>
                   <p><strong>{{ conflict.source_a }}</strong>: {{ conflict.instruction_a }}</p>
@@ -1270,13 +1271,14 @@
         <h4>Import full tenant backup</h4>
         <p class="muted compact-note">Choose the one exported backup file and import it. Nr3 creates a rollback first, removes this tenant's old data, restores the backup, and rewrites only the target-specific slug/container identity needed to keep this tenant working.</p>
         <form method="post" action="/admin/tenants/{{ tenant.id }}/backup/import" enctype="multipart/form-data" class="agent-inline-form">
+          <input type="hidden" name="tenant_generation_id" value="{{ tenant_generation_id }}">
           <label class="agent-form-field">
             <span>Unboks backup file</span>
             <input type="file" name="backup_file" accept=".unboksbackup,.zip,application/octet-stream,application/zip,application/x-zip-compressed" required>
           </label>
           <input type="hidden" name="import_mode" value="restore">
           <div class="agent-form-actions">
-            <button type="submit" class="button-secondary">Import backup file</button>
+            <button type="submit" class="button-secondary" {% if not tenant_generation_id %}disabled{% endif %}>Import backup file</button>
           </div>
         </form>
       </div>
@@ -1303,15 +1305,17 @@
     {% else %}
       {% if tenant.status == 'active' %}
         <form method="post" action="/admin/tenants/{{ tenant.id }}/suspend" class="danger-form">
+          <input type="hidden" name="tenant_generation_id" value="{{ tenant_generation_id }}">
           <label for="suspend-confirm-{{ tenant.id }}">Type <code>suspend {{ tenant.id }}</code></label>
           <input id="suspend-confirm-{{ tenant.id }}" name="confirmation" type="text" autocomplete="off" placeholder="suspend {{ tenant.id }}">
-          <button type="submit" class="danger-btn">Suspend / cut off tenant</button>
+          <button type="submit" class="danger-btn" {% if not tenant_generation_id %}disabled{% endif %}>Suspend / cut off tenant</button>
         </form>
       {% else %}
         <form method="post" action="/admin/tenants/{{ tenant.id }}/unpause" class="danger-form danger-form-restore">
+          <input type="hidden" name="tenant_generation_id" value="{{ tenant_generation_id }}">
           <label for="unpause-confirm-{{ tenant.id }}">Type <code>unpause {{ tenant.id }}</code></label>
           <input id="unpause-confirm-{{ tenant.id }}" name="confirmation" type="text" autocomplete="off" placeholder="unpause {{ tenant.id }}">
-          <button type="submit" class="button-secondary">Unpause tenant</button>
+          <button type="submit" class="button-secondary" {% if not tenant_generation_id %}disabled{% endif %}>Unpause tenant</button>
         </form>
       {% endif %}
       <div class="danger-delete">
@@ -1326,7 +1330,8 @@
           {% endif %}
         </p>
         <form method="post" action="/admin/tenants/{{ tenant.id }}/password-reset/send" class="danger-form danger-form-restore">
-          <button type="submit" class="button-secondary" {% if not tenant_account.email %}disabled{% endif %}>
+          <input type="hidden" name="tenant_generation_id" value="{{ tenant_generation_id }}">
+          <button type="submit" class="button-secondary" {% if not tenant_account.email or not tenant_generation_id %}disabled{% endif %}>
             Send password reset email
           </button>
         </form>
@@ -1341,14 +1346,15 @@
           It does not retrieve the old password and it does not email the tenant automatically.
         </p>
         <form method="post" action="/admin/tenants/{{ tenant.id }}/password-reset/temp" class="danger-form danger-form-restore">
+          <input type="hidden" name="tenant_generation_id" value="{{ tenant_generation_id }}">
           <label for="temp-password-confirm-{{ tenant.id }}">Type <code>reset password {{ tenant.id }}</code></label>
           <input id="temp-password-confirm-{{ tenant.id }}" name="confirmation" type="text" autocomplete="off" placeholder="reset password {{ tenant.id }}">
-          <button type="submit" class="button-secondary">
+          <button type="submit" class="button-secondary" {% if not tenant_generation_id %}disabled{% endif %}>
             Generate temporary password
           </button>
         </form>
       </div>
-      <div class="danger-delete" data-delete-tenant data-tenant-id="{{ tenant.id }}">
+      <div class="danger-delete" data-delete-tenant data-tenant-id="{{ tenant.id }}" data-tenant-generation-id="{{ tenant_generation_id }}">
         <h4>Delete Tenant (Permanent Wipe)</h4>
         <p>This action is irreversible and will permanently delete the tenant and all its data.</p>
         <ul class="danger-delete-list">
@@ -1361,7 +1367,7 @@
         <p class="muted compact-note">Current tenant slug: <code>{{ tenant.id }}</code></p>
         <label for="delete-slug-{{ tenant.id }}">Type the tenant slug to confirm</label>
         <input id="delete-slug-{{ tenant.id }}" data-delete-slug type="text" autocomplete="off" placeholder="{{ tenant.id }}">
-        <button type="button" class="danger-btn danger-delete-btn" data-delete-open data-delete-ready="false">DELETE TENANT FOREVER</button>
+        <button type="button" class="danger-btn danger-delete-btn" data-delete-open data-delete-ready="false" {% if not tenant_generation_id %}disabled{% endif %}>DELETE TENANT FOREVER</button>
         <p class="muted compact-note" data-delete-feedback></p>
 
         <div class="delete-modal" data-delete-modal hidden role="dialog" aria-modal="true" aria-labelledby="delete-modal-title-{{ tenant.id }}">

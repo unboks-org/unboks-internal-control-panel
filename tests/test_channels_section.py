@@ -59,7 +59,7 @@ def test_channels_default_all_off(client):
 
 def test_toggle_one_channel_then_render_again(client, tmp_path):
     r = client.post(
-        "/admin/tenants/unboks/channels/whatsapp/toggle",
+        "/admin/tenants/unboks/channels/email/toggle",
         follow_redirects=False)
     assert r.status_code == 303
     assert r.headers["location"] == "/admin/tenants/unboks#channels-section"
@@ -68,12 +68,12 @@ def test_toggle_one_channel_then_render_again(client, tmp_path):
     state_path = tmp_path / "ch.json"
     assert state_path.exists()
     data = json.loads(state_path.read_text())
-    assert data["unboks"]["whatsapp"] is True
+    assert data["unboks"]["email"] is True
 
     # Bridge state for Nr2 is written at the same time.
     icp_path = tmp_path / "icp.json"
     bridge = json.loads(icp_path.read_text())
-    toggle = bridge["tenants"]["unboks"]["feature_toggles"]["whatsapp_inbox"]
+    toggle = bridge["tenants"]["unboks"]["feature_toggles"]["email_inbox"]
     assert toggle["value"] is True
     assert toggle["source"] == "icp_override"
 
@@ -139,12 +139,63 @@ def test_toggle_isolates_tenants(client):
     client.post("/admin/tenants/create",
                  data={"name": "Bravo", "slug": "bravo"},
                  follow_redirects=False)
-    client.post("/admin/tenants/alpha/channels/whatsapp/toggle",
+    client.post("/admin/tenants/alpha/channels/email/toggle",
                  follow_redirects=False)
     r_alpha = client.get("/admin/tenants/alpha")
     r_bravo = client.get("/admin/tenants/bravo")
     assert r_alpha.text.count("ios-toggle is-on") == 1
     assert r_bravo.text.count("ios-toggle is-on") == 0
+
+
+def test_channel_mutations_fail_closed_without_overwriting_corrupt_store(
+    client, tmp_path,
+):
+    from app import channel_state
+
+    state_path = tmp_path / "ch.json"
+    original = '{"unboks":{"email":true},"peer":'
+    state_path.write_text(original, encoding="utf-8")
+
+    # Display reads remain safe, but no read/modify/write path may reinterpret
+    # the damaged shared file as an empty store.
+    assert channel_state.read_channels("unboks")["email"] is False
+    with pytest.raises(RuntimeError, match="unreadable"):
+        channel_state.set_channel("unboks", "email", False)
+    assert state_path.read_text(encoding="utf-8") == original
+
+    # Strict tenant deletion cleanup must receive the same failure so it can
+    # retry instead of declaring cleanup complete.
+    with pytest.raises(RuntimeError, match="unreadable"):
+        channel_state.forget_tenant("unboks")
+    assert state_path.read_text(encoding="utf-8") == original
+
+
+def test_channel_mutation_and_cleanup_preserve_other_tenant_state(
+    client, tmp_path,
+):
+    from app import channel_state
+
+    state_path = tmp_path / "ch.json"
+    peer_state = {"facebook": True, "future_channel": False}
+    state_path.write_text(
+        json.dumps(
+            {
+                "unboks": {"email": False},
+                "peer-tenant": peer_state,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    channel_state.set_channel("unboks", "email", True)
+    after_mutation = json.loads(state_path.read_text(encoding="utf-8"))
+    assert after_mutation["unboks"]["email"] is True
+    assert after_mutation["peer-tenant"] == peer_state
+
+    assert channel_state.forget_tenant("unboks") is True
+    assert json.loads(state_path.read_text(encoding="utf-8")) == {
+        "peer-tenant": peer_state,
+    }
 
 
 # --- sidebar slug display ------------------------------------------

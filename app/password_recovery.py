@@ -14,7 +14,12 @@ from app import audit_log
 from app.config import Settings, get_settings
 from app.emailer import send_email, smtp_is_configured
 from app.provisioning import AutoProvisionResult, queue_tenant_host_action
-from app.tenants import get_tenant, tenant_contact_details, validate_slug
+from app.tenants import (
+    get_tenant,
+    tenant_contact_details,
+    tenant_slug_exists_for_creation,
+    validate_slug,
+)
 
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -27,11 +32,13 @@ MAX_EMAIL_REQUESTS_PER_DAY = 3
 class PasswordResetToken:
     id: str
     tenant_id: str
+    tenant_generation_id: str | None
     email: str
     token_hash: str
     created_at: str
     expires_at: str
     used_at: str | None
+    reset_job_id: str | None
 
 
 @dataclass(frozen=True)
@@ -78,16 +85,31 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS password_reset_tokens (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
+                tenant_generation_id TEXT,
                 email TEXT NOT NULL,
                 email_key TEXT NOT NULL,
                 token_hash TEXT NOT NULL UNIQUE,
                 requested_ip TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
-                used_at TEXT
+                used_at TEXT,
+                reset_job_id TEXT
             )
             """
         )
+        existing = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(password_reset_tokens)")
+        }
+        if "tenant_generation_id" not in existing:
+            conn.execute(
+                "ALTER TABLE password_reset_tokens "
+                "ADD COLUMN tenant_generation_id TEXT"
+            )
+        if "reset_job_id" not in existing:
+            conn.execute(
+                "ALTER TABLE password_reset_tokens ADD COLUMN reset_job_id TEXT"
+            )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_hash
@@ -114,11 +136,17 @@ def _row_to_token(row: sqlite3.Row | None) -> PasswordResetToken | None:
     return PasswordResetToken(
         id=str(row["id"]),
         tenant_id=str(row["tenant_id"]),
+        tenant_generation_id=(
+            str(row["tenant_generation_id"])
+            if row["tenant_generation_id"]
+            else None
+        ),
         email=str(row["email"]),
         token_hash=str(row["token_hash"]),
         created_at=str(row["created_at"]),
         expires_at=str(row["expires_at"]),
         used_at=row["used_at"],
+        reset_job_id=(str(row["reset_job_id"]) if row["reset_job_id"] else None),
     )
 
 
@@ -217,32 +245,61 @@ def request_reset(
         )
         return
 
-    raw_token = secrets.token_urlsafe(40)
-    token_hash = _hash_token(raw_token)
-    now = datetime.now(timezone.utc).replace(microsecond=0)
-    expires = now + timedelta(minutes=TOKEN_TTL_MINUTES)
-    reset_id = f"pr_{secrets.token_urlsafe(18)}"
-    init_db()
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO password_reset_tokens (
-                id, tenant_id, email, email_key, token_hash, requested_ip,
-                created_at, expires_at, used_at
+    # Bind the token to the exact tenant generation while holding the same
+    # cross-process lifecycle lease used by delete/recreate.  A token issued to
+    # an old owner can therefore never be replayed against a later tenant that
+    # happens to reuse the slug.
+    from app.delete_operations import require_tenant_mutation_generation
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(safe_tenant):
+        if not tenant_slug_exists_for_creation(safe_tenant) or not _tenant_email_matches(
+            safe_tenant, clean_email
+        ):
+            return
+        try:
+            tenant_generation_id = require_tenant_mutation_generation(safe_tenant)
+        except Exception:
+            audit_log.record_event(
+                tenant_id=safe_tenant,
+                action="password_reset.request_blocked_lifecycle",
+                result="blocked",
+                safe_summary=(
+                    "Password reset request was blocked because the tenant "
+                    "generation could not be proved."
+                ),
+                actor=actor,
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
-            """,
-            (
-                reset_id,
-                safe_tenant,
-                clean_email,
-                _email_key(clean_email),
-                token_hash,
-                ip_address,
-                now.isoformat(),
-                expires.isoformat(),
-            ),
-        )
+            return
+
+        raw_token = secrets.token_urlsafe(40)
+        token_hash = _hash_token(raw_token)
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        expires = now + timedelta(minutes=TOKEN_TTL_MINUTES)
+        reset_id = f"pr_{secrets.token_urlsafe(18)}"
+        init_db()
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO password_reset_tokens (
+                    id, tenant_id, tenant_generation_id, email, email_key,
+                    token_hash, requested_ip, created_at, expires_at, used_at,
+                    reset_job_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                """,
+                (
+                    reset_id,
+                    safe_tenant,
+                    tenant_generation_id,
+                    clean_email,
+                    _email_key(clean_email),
+                    token_hash,
+                    ip_address,
+                    now.isoformat(),
+                    expires.isoformat(),
+                ),
+            )
 
     details = tenant_contact_details(safe_tenant)
     reset_url = f"{settings.base_url}/password/reset/{raw_token}"
@@ -282,7 +339,7 @@ def request_reset(
     )
 
 
-def get_valid_token(raw_token: str) -> PasswordResetToken | None:
+def _get_unconsumed_token(raw_token: str) -> PasswordResetToken | None:
     if not raw_token or len(raw_token) < 20:
         return None
     init_db()
@@ -303,7 +360,40 @@ def get_valid_token(raw_token: str) -> PasswordResetToken | None:
     return token
 
 
+def _token_matches_current_generation(token: PasswordResetToken) -> bool:
+    """Prove a reset token still belongs to the current live tenant owner."""
+    if not token.tenant_generation_id:
+        # Pre-migration tokens were issued without an ownership generation and
+        # cannot safely cross the upgrade boundary.
+        return False
+    from app.delete_operations import require_tenant_mutation_generation
+    from app.provisioning import tenant_creation_lock
+
+    try:
+        with tenant_creation_lock(token.tenant_id):
+            if not tenant_slug_exists_for_creation(token.tenant_id):
+                return False
+            require_tenant_mutation_generation(
+                token.tenant_id,
+                expected_generation_id=token.tenant_generation_id,
+            )
+    except Exception:
+        return False
+    return True
+
+
+def get_valid_token(raw_token: str) -> PasswordResetToken | None:
+    token = _get_unconsumed_token(raw_token)
+    if token is None or not _token_matches_current_generation(token):
+        return None
+    return token
+
+
 def validate_new_password(password: str, confirm: str) -> str:
+    if re.search(r"[\x00-\x1f\x7f]", password) or re.search(
+        r"[\x00-\x1f\x7f]", confirm
+    ):
+        raise ValueError("Password cannot contain control characters or newlines.")
     value = password.strip()
     if value != confirm.strip():
         raise ValueError("Passwords do not match.")
@@ -325,13 +415,42 @@ def validate_new_password(password: str, confirm: str) -> str:
     return value
 
 
-def mark_token_used(token: PasswordResetToken) -> None:
+def _consume_token_for_job(token: PasswordResetToken, job_id: str) -> bool:
+    """Atomically bind one unused generation-scoped token to one host job."""
+    init_db()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE password_reset_tokens
+            SET used_at = ?, reset_job_id = ?
+            WHERE id = ?
+              AND used_at IS NULL
+              AND tenant_generation_id = ?
+            """,
+            (utc_now(), job_id, token.id, token.tenant_generation_id),
+        )
+        return cursor.rowcount == 1
+
+
+def forget_tenant(tenant_id: str) -> None:
+    """Delete all reset credentials belonging to one tenant slug."""
     init_db()
     with _connect() as conn:
         conn.execute(
-            "UPDATE password_reset_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL",
-            (utc_now(), token.id),
+            "DELETE FROM password_reset_tokens WHERE tenant_id = ?",
+            (tenant_id,),
         )
+
+
+def tenant_state_exists(tenant_id: str) -> bool:
+    """Return whether any password-reset credential survives for a tenant."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM password_reset_tokens WHERE tenant_id = ? LIMIT 1",
+            (tenant_id,),
+        ).fetchone()
+    return row is not None
 
 
 def apply_reset(raw_token: str, new_password: str, confirm_password: str) -> ResetApplyResult:
@@ -349,12 +468,61 @@ def apply_reset(raw_token: str, new_password: str, confirm_password: str) -> Res
     except ValueError as exc:
         return ResetApplyResult(False, "validation", str(exc), tenant_id=token.tenant_id)
 
-    result: AutoProvisionResult = queue_tenant_host_action(
-        slug=token.tenant_id,
-        action="reset_dashboard_password",
-        dashboard_url=f"https://dashboard.unboks.org/login?workspace={token.tenant_id}",
-        new_password=clean_password,
+    from app.delete_operations import (
+        read_tenant_generation,
+        require_tenant_mutation_generation,
     )
+    from app.provisioning import tenant_creation_lock
+
+    requested_job_id = f"password-reset-{token.id}"
+    try:
+        with tenant_creation_lock(token.tenant_id):
+            # Re-read and re-prove ownership inside the lifecycle lease. Two
+            # concurrent submissions may both render the form, but only one
+            # can consume this row and publish its generation-bound job.
+            current = _get_unconsumed_token(raw_token)
+            if (
+                current is None
+                or not current.tenant_generation_id
+                or not tenant_slug_exists_for_creation(current.tenant_id)
+            ):
+                raise ValueError("reset token is no longer usable")
+            require_tenant_mutation_generation(
+                current.tenant_id,
+                expected_generation_id=current.tenant_generation_id,
+            )
+            _, generation_fingerprint = read_tenant_generation(current.tenant_id)
+            if not _consume_token_for_job(current, requested_job_id):
+                raise ValueError("reset token was already consumed")
+            result: AutoProvisionResult = queue_tenant_host_action(
+                slug=current.tenant_id,
+                action="reset_dashboard_password",
+                dashboard_url=(
+                    "https://dashboard.unboks.org/login?workspace="
+                    f"{current.tenant_id}"
+                ),
+                new_password=clean_password,
+                requested_job_id=requested_job_id,
+                generation_fingerprint=generation_fingerprint,
+            )
+            token = current
+    except Exception as exc:
+        audit_log.record_event(
+            tenant_id=token.tenant_id,
+            action="password_reset.generation_rejected",
+            result="blocked",
+            safe_summary=(
+                "Password reset was blocked because its tenant generation "
+                "could not be proved or the token was already consumed."
+            ),
+            metadata={"error_type": type(exc).__name__},
+            actor="tenant_user",
+        )
+        return ResetApplyResult(
+            False,
+            "invalid",
+            "This reset link is invalid or expired.",
+        )
     if result.status in {"failed", "disabled"}:
         audit_log.record_event(
             tenant_id=token.tenant_id,
@@ -366,7 +534,6 @@ def apply_reset(raw_token: str, new_password: str, confirm_password: str) -> Res
         )
         return ResetApplyResult(False, result.status, result.message, token.tenant_id, result.job_id)
 
-    mark_token_used(token)
     audit_log.record_event(
         tenant_id=token.tenant_id,
         action="password_reset.completed",

@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from app import audit_log
 from app.main import app
-from app.zernio import ZernioConnectUrl, ZernioProfile
+from app.zernio import ZernioAccountSummary, ZernioConnectUrl, ZernioProfile
 
 
 def _write_tenant(root, slug="lawyer", name="Lawyer"):
@@ -42,6 +42,22 @@ def test_whatsapp_authorization_flow_end_to_end_mocked(monkeypatch, tmp_path):
             return ZernioConnectUrl(
                 auth_url="https://facebook.com/connect/lawyer",
                 state="zernio_state_e2e",
+            )
+
+        def get_account(self, account_id):
+            return ZernioAccountSummary(
+                id=account_id,
+                platform="whatsapp",
+                profile_id="profile_lawyer",
+                profile_name="Lawyer",
+                display_name="Lawyer WhatsApp",
+                username="+599 9 694 5527",
+                enabled=True,
+                is_active=True,
+                platform_status="active",
+                display_phone_number="+599 9 694 5527",
+                phone_number_id="phone_1",
+                waba_id="waba_1",
             )
 
     monkeypatch.setattr("app.routes.connect.ZernioService", FakeZernioService)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import secrets
 import string
+from contextlib import nullcontext
 
 from fastapi import APIRouter, Form, Request, File, UploadFile
 from starlette.responses import FileResponse, HTMLResponse, RedirectResponse, Response
@@ -35,7 +36,9 @@ from app.public_signup_requests import (
     get_signup_request,
     is_archived_signup,
     list_signup_requests,
-    mark_provisioned,
+    mark_signup_creation_error,
+    reconcile_signup_provisioning_result,
+    retry_signup_credential_delivery,
     update_signup_request,
 )
 from app.signup_service import create_public_signup_tenant
@@ -48,7 +51,15 @@ from app.security import (
     set_session_cookie,
     verify_admin_password,
 )
-from app.provisioning import auto_provision_tenant, queue_tenant_host_action
+from app.provisioning import (
+    auto_provision_tenant,
+    clear_tenant_provision_claim,
+    create_tenant_provision_claim,
+    queue_tenant_host_action,
+    tenant_creation_lock,
+    tenant_provision_claim,
+    update_tenant_provision_claim_job,
+)
 from app.nr2_sync import (
     delete_nr2_photo,
     fetch_nr2_photo_image,
@@ -59,7 +70,7 @@ from app.nr2_sync import (
     update_auto_block_settings,
     upload_nr2_photo,
 )
-from app.port_registry import PortRegistryError, reserve_tenant_port
+from app.port_registry import PortRegistryError, release_tenant_port, reserve_tenant_port
 from app.prompt_conflicts import (
     build_prompt_conflict_report,
     dangerous_candidate_conflicts,
@@ -71,6 +82,7 @@ from app.tenants import (
     Tenant,
     TenantCreateError,
     derive_slug_from_name,
+    forget_tenant_state,
     get_tenant,
     get_tenant_client_data,
     list_tenants,
@@ -78,6 +90,8 @@ from app.tenants import (
     sorted_notes,
     tenant_account_details,
     tenant_cost_guardrails,
+    tenant_slug_exists_for_creation,
+    write_private_client_json,
     update_tenant_account_details,
     update_tenant_cost_guardrails,
     update_tenant_status,
@@ -473,8 +487,18 @@ def admin_toggle_channel(
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
     from app import channel_state as _channel_state
-    _channel_state.toggle_channel(tenant_id, channel)
+    try:
+        _channel_state.toggle_channel(tenant_id, channel)
+    except _channel_state.ChannelActivationError as exc:
+        return _workspace_redirect(
+            tenant_id,
+            "channels-section",
+            message=str(exc),
+            level="warn",
+        )
     return RedirectResponse(
         url=f"/admin/tenants/{tenant_id}#channels-section",
         status_code=303,
@@ -1285,6 +1309,8 @@ def admin_toggle_tenant_note_pin(
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
     from app import tenant_notes
     changed = tenant_notes.toggle_pin(tenant_id, note_id)
     return _workspace_redirect(
@@ -1305,6 +1331,8 @@ def admin_mark_tenant_note_follow_up_done(
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
+    if get_tenant(tenant_id) is None:
+        return RedirectResponse(url="/admin/tenants", status_code=303)
     from app import tenant_notes
     changed = tenant_notes.mark_follow_up_done(tenant_id, note_id)
     return _workspace_redirect(
@@ -1389,6 +1417,7 @@ def admin_suspend_tenant(
     request: Request,
     tenant_id: str,
     confirmation: str = Form(default=""),
+    tenant_generation_id: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -1412,28 +1441,54 @@ def admin_suspend_tenant(
             message=f"Type exactly '{expected}' to suspend this tenant.",
             level="warn",
         )
-    from app import channel_state, icp_overrides
-    channel_state.set_all_channels(tenant_id, False)
-    for feature_key in (
-        "agent_replies_enabled",
-        "ai_auto_reply",
-        "learning_from_operator",
-        "tenant_suspended",
-    ):
-        icp_overrides.set_feature_toggle(
+    if not tenant_generation_id.strip():
+        return _workspace_redirect(
             tenant_id,
-            feature_key,
-            feature_key == "tenant_suspended",
+            "danger-section",
+            message="Tenant generation proof is missing. Reload before suspending.",
+            level="warn",
         )
-    result = queue_tenant_host_action(
-        slug=tenant_id,
-        action="suspend_tenant",
-        dashboard_url=f"https://dashboard.unboks.org/login?workspace={tenant_id}",
-    )
+    from app import channel_state, icp_overrides
+    from app.delete_operations import require_tenant_mutation_generation
+
     try:
-        update_tenant_status(tenant_id, "inactive")
+        with tenant_creation_lock(tenant_id):
+            require_tenant_mutation_generation(
+                tenant_id,
+                expected_generation_id=tenant_generation_id,
+            )
+            channel_state.set_all_channels(tenant_id, False)
+            for feature_key in (
+                "agent_replies_enabled",
+                "ai_auto_reply",
+                "learning_from_operator",
+                "tenant_suspended",
+            ):
+                icp_overrides.set_feature_toggle(
+                    tenant_id,
+                    feature_key,
+                    feature_key == "tenant_suspended",
+                )
+            result = queue_tenant_host_action(
+                slug=tenant_id,
+                action="suspend_tenant",
+                dashboard_url=f"https://dashboard.unboks.org/login?workspace={tenant_id}",
+            )
+            try:
+                update_tenant_status(tenant_id, "inactive")
+            except Exception as exc:
+                logger.warning(
+                    "tenant_suspend.status_update_failed slug=%s err=%r",
+                    tenant_id,
+                    exc,
+                )
     except Exception as exc:
-        logger.warning("tenant_suspend.status_update_failed slug=%s err=%r", tenant_id, exc)
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message=f"Suspend was blocked by the tenant lifecycle state: {exc}",
+            level="warn",
+        )
     if result.status == "succeeded":
         message = "Tenant is inactive: channels and AI disabled, container stopped."
         level = "ok"
@@ -1462,6 +1517,7 @@ def admin_unpause_tenant(
     request: Request,
     tenant_id: str,
     confirmation: str = Form(default=""),
+    tenant_generation_id: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -1485,42 +1541,74 @@ def admin_unpause_tenant(
             message=f"Type exactly '{expected}' to unpause this tenant.",
             level="warn",
         )
-    from app import channel_state, icp_overrides
-    channel_state.set_all_channels(tenant_id, True)
-    for feature_key in (
-        "agent_replies_enabled",
-        "ai_auto_reply",
-        "learning_from_operator",
-        "tenant_suspended",
-    ):
-        icp_overrides.set_feature_toggle(
+    if not tenant_generation_id.strip():
+        return _workspace_redirect(
             tenant_id,
-            feature_key,
-            feature_key != "tenant_suspended",
+            "danger-section",
+            message="Tenant generation proof is missing. Reload before unpausing.",
+            level="warn",
         )
-    result = queue_tenant_host_action(
-        slug=tenant_id,
-        action="unpause_tenant",
-        dashboard_url=f"https://dashboard.unboks.org/login?workspace={tenant_id}",
-    )
+    from app import channel_state, icp_overrides
+    from app.delete_operations import require_tenant_mutation_generation
+
     try:
-        update_tenant_status(tenant_id, "active")
+        with tenant_creation_lock(tenant_id):
+            require_tenant_mutation_generation(
+                tenant_id,
+                expected_generation_id=tenant_generation_id,
+            )
+            # Starting a container is not evidence that any external channel or
+            # AI automation is safe. Restore each integration only after its own
+            # health and ownership checks pass.
+            channel_state.set_all_channels(tenant_id, False)
+            for feature_key in (
+                "agent_replies_enabled",
+                "ai_auto_reply",
+                "learning_from_operator",
+            ):
+                icp_overrides.set_feature_toggle(tenant_id, feature_key, False)
+            result = queue_tenant_host_action(
+                slug=tenant_id,
+                action="unpause_tenant",
+                dashboard_url=f"https://dashboard.unboks.org/login?workspace={tenant_id}",
+            )
+            if result.status == "succeeded":
+                icp_overrides.set_feature_toggle(
+                    tenant_id, "tenant_suspended", False
+                )
+                try:
+                    update_tenant_status(tenant_id, "active")
+                except Exception as exc:
+                    logger.warning(
+                        "tenant_unpause.status_update_failed slug=%s err=%r",
+                        tenant_id,
+                        exc,
+                    )
+                message = (
+                    "Tenant runtime started. Channels and AI remain off until their "
+                    "individual safety checks pass."
+                )
+                level = "ok"
+            elif result.status in {"queued", "disabled"}:
+                icp_overrides.set_feature_toggle(
+                    tenant_id, "tenant_suspended", True
+                )
+                message = (
+                    "Tenant remains suspended while the host container start is "
+                    f"{result.status}: {result.message}"
+                )
+                level = "warn"
+            else:
+                icp_overrides.set_feature_toggle(
+                    tenant_id, "tenant_suspended", True
+                )
+                message = (
+                    "Tenant remains suspended because the host container start failed: "
+                    f"{result.message}"
+                )
+                level = "warn"
     except Exception as exc:
-        logger.warning("tenant_unpause.status_update_failed slug=%s err=%r", tenant_id, exc)
-    if result.status == "succeeded":
-        message = "Tenant is active again: channels and AI restored, container started."
-        level = "ok"
-    elif result.status in {"queued", "disabled"}:
-        message = (
-            "Tenant bridge overrides were set active. Host container start is "
-            f"{result.status}: {result.message}"
-        )
-        level = "warn"
-    else:
-        message = (
-            "Tenant bridge overrides were set active, but host container start "
-            f"failed: {result.message}"
-        )
+        message = f"Unpause was blocked by the tenant lifecycle state: {exc}"
         level = "warn"
     return _workspace_redirect(
         tenant_id,
@@ -1534,6 +1622,7 @@ def admin_unpause_tenant(
 def admin_send_tenant_password_reset(
     request: Request,
     tenant_id: str,
+    tenant_generation_id: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -1543,25 +1632,49 @@ def admin_send_tenant_password_reset(
     if tenant is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
 
+    from app.delete_operations import require_tenant_mutation_generation
     from app.password_recovery import request_reset
+    from app.provisioning import tenant_creation_lock
     from app.tenants import tenant_contact_details
 
-    contact = tenant_contact_details(tenant_id)
-    email = contact.get("email", "")
-    if not email:
+    if not tenant_generation_id.strip():
         return _workspace_redirect(
             tenant_id,
             "danger-section",
-            message="No tenant contact email is configured.",
+            message="Reload the workspace before requesting a password reset.",
             level="warn",
         )
-    request_reset(
-        tenant_id=tenant_id,
-        email=email,
-        ip_address=request.client.host if request.client else "internal_admin",
-        settings=settings,
-        actor="internal_admin",
-    )
+    try:
+        with tenant_creation_lock(tenant_id):
+            require_tenant_mutation_generation(
+                tenant_id,
+                expected_generation_id=tenant_generation_id,
+            )
+            contact = tenant_contact_details(tenant_id)
+            email = contact.get("email", "")
+            if not email:
+                return _workspace_redirect(
+                    tenant_id,
+                    "danger-section",
+                    message="No tenant contact email is configured.",
+                    level="warn",
+                )
+            request_reset(
+                tenant_id=tenant_id,
+                email=email,
+                ip_address=(
+                    request.client.host if request.client else "internal_admin"
+                ),
+                settings=settings,
+                actor="internal_admin",
+            )
+    except Exception as exc:
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message=f"Password reset was blocked by the tenant lifecycle state: {exc}",
+            level="warn",
+        )
     return _workspace_redirect(
         tenant_id,
         "danger-section",
@@ -1575,6 +1688,7 @@ def admin_generate_tenant_temporary_password(
     request: Request,
     tenant_id: str,
     confirmation: str = Form(default=""),
+    tenant_generation_id: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -1599,13 +1713,42 @@ def admin_generate_tenant_temporary_password(
             level="warn",
         )
 
-    temporary_password = _generate_temporary_dashboard_password()
-    result = queue_tenant_host_action(
-        slug=tenant_id,
-        action="reset_dashboard_password",
-        dashboard_url=f"https://dashboard.unboks.org/login?workspace={tenant_id}",
-        new_password=temporary_password,
-    )
+    if not tenant_generation_id.strip():
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message="Reload the workspace before generating a temporary password.",
+            level="warn",
+        )
+    try:
+        from app.delete_operations import (
+            read_tenant_generation,
+            require_tenant_mutation_generation,
+        )
+
+        with tenant_creation_lock(tenant_id):
+            require_tenant_mutation_generation(
+                tenant_id,
+                expected_generation_id=tenant_generation_id,
+            )
+            _, generation_fingerprint = read_tenant_generation(tenant_id)
+            temporary_password = _generate_temporary_dashboard_password()
+            result = queue_tenant_host_action(
+                slug=tenant_id,
+                action="reset_dashboard_password",
+                dashboard_url=(
+                    "https://dashboard.unboks.org/login?workspace=" f"{tenant_id}"
+                ),
+                new_password=temporary_password,
+                generation_fingerprint=generation_fingerprint,
+            )
+    except Exception as exc:
+        return _workspace_redirect(
+            tenant_id,
+            "danger-section",
+            message=f"Temporary password reset was blocked: {exc}",
+            level="warn",
+        )
     if result.status in {"failed", "disabled"}:
         audit_log.record_event(
             tenant_id=tenant_id,
@@ -1676,11 +1819,37 @@ def admin_tenant_import_existing(
     normalized_status = (status or "active").strip().lower()
     if normalized_status not in ("active", "inactive"):
         normalized_status = "inactive"
-    register_tenant({
-        "slug": safe_slug,
-        "name": display_name,
-        "status": normalized_status,
-    })
+    import_generation_id = f"import-{secrets.token_urlsafe(18)}"
+    try:
+        from app.delete_operations import (
+            activate_tenant_generation,
+            bind_tenant_generation_for_creation,
+        )
+
+        with tenant_creation_lock(safe_slug):
+            bind_tenant_generation_for_creation(
+                slug=safe_slug,
+                generation_id=import_generation_id,
+            )
+            register_tenant({
+                "slug": safe_slug,
+                "name": display_name,
+                "status": normalized_status,
+            })
+            activate_tenant_generation(
+                slug=safe_slug,
+                generation_id=import_generation_id,
+            )
+    except Exception as exc:
+        return _create_error_response(
+            request,
+            f"Could not bind the imported tenant lifecycle safely: {exc}",
+            form_echo={
+                "existing_slug": slug,
+                "existing_name": name,
+                "existing_status": status,
+            },
+        )
     logger.info("tenant_import.registry_written slug=%s", safe_slug)
     return RedirectResponse(url=f"/admin/tenants/{safe_slug}", status_code=303)
 
@@ -1761,6 +1930,27 @@ async def admin_tenant_create_submit(
             candidate_slug, exc)
         return _create_error_response(request, str(exc), form_echo=locals())
 
+    # Fast rejection before entering the cross-process lifecycle lock.
+    from app.tenants import _DEFAULT_TENANTS_CLIENT_DIR
+    root = (os.environ.get("NR3_TENANTS_CLIENT_DIR")
+            or _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    existing_dir = os.path.join(root, safe_slug) if root else ""
+    if safe_slug in RESERVED_SLUGS:
+        return _create_error_response(
+            request,
+            f"Tenant slug {safe_slug!r} is reserved and cannot be created.",
+            form_echo=locals(),
+        )
+    if get_tenant(safe_slug) is not None or tenant_provision_claim(safe_slug) or (
+        existing_dir and os.path.exists(existing_dir)
+    ):
+        logger.warning("tenant_create.duplicate_slug slug=%s", safe_slug)
+        return _create_error_response(
+            request,
+            f"A tenant for slug {safe_slug!r} already exists.",
+            form_echo=locals(),
+        )
+
     # Initial sign-in token (operator dashboard login). URL-safe so
     # it pastes cleanly into an email body without escaping.
     initial_token = secrets.token_urlsafe(12)
@@ -1775,13 +1965,37 @@ async def admin_tenant_create_submit(
     ).isoformat()
     dashboard_url = f"https://dashboard.unboks.org/login?workspace={safe_slug}"
 
-    try:
-        host_port = reserve_tenant_port(safe_slug)
-    except PortRegistryError as exc:
-        logger.warning(
-            "tenant_create.invalid reason=port_allocation_failed slug=%s err=%s",
-            safe_slug, exc)
-        return _create_error_response(request, str(exc), form_echo=locals())
+    creation_id = secrets.token_urlsafe(18)
+    with tenant_creation_lock(safe_slug):
+        # Recheck under the per-slug lock so double submits cannot both claim
+        # the same tenant between the optimistic check and port reservation.
+        if tenant_slug_exists_for_creation(safe_slug) or tenant_provision_claim(safe_slug):
+            logger.warning("tenant_create.duplicate_slug slug=%s", safe_slug)
+            return _create_error_response(
+                request,
+                f"A tenant for slug {safe_slug!r} already exists.",
+                form_echo=locals(),
+            )
+        try:
+            host_port = reserve_tenant_port(safe_slug)
+        except PortRegistryError as exc:
+            logger.warning(
+                "tenant_create.invalid reason=port_allocation_failed slug=%s err=%s",
+                safe_slug, exc)
+            return _create_error_response(request, str(exc), form_echo=locals())
+        try:
+            if not create_tenant_provision_claim(safe_slug, creation_id):
+                raise RuntimeError("Tenant creation is already in progress.")
+        except Exception as exc:
+            release_tenant_port(safe_slug)
+            logger.error(
+                "tenant_create.claim_failed slug=%s err=%r", safe_slug, exc
+            )
+            return _create_error_response(
+                request,
+                "Could not claim the tenant creation safely; nothing was provisioned.",
+                form_echo=locals(),
+            )
 
     # Manual-Mode client.json payload. Flat shape per J3-BE-50, plus
     # the new access_key field.
@@ -1795,6 +2009,11 @@ async def admin_tenant_create_submit(
         "status": "active" if status.strip().lower() == "active" else "inactive",
         "created_at": created_at,
         "host_port": host_port,
+        "channel_account_allowlist": {
+            "mode": "strict",
+            "zernio_accounts": [],
+            "notes": "No provider account is authorized until Nr3 verifies and selects it.",
+        },
     }
     if contact_person.strip():
         client_data["contact_person"] = contact_person.strip()
@@ -1811,6 +2030,34 @@ async def admin_tenant_create_submit(
         "tenant_create.client_json_built slug=%s fields=%d",
         safe_slug, len(client_data))
 
+    from app.icp_overrides import initialize_new_tenant_fail_closed
+    try:
+        from app.delete_operations import bind_tenant_generation_for_creation
+
+        with tenant_creation_lock(safe_slug):
+            claim = tenant_provision_claim(safe_slug)
+            if not claim or claim.get("creation_id") != creation_id:
+                raise RuntimeError("Tenant creation ownership changed.")
+            bind_tenant_generation_for_creation(
+                slug=safe_slug,
+                generation_id=creation_id,
+            )
+        initialize_new_tenant_fail_closed(safe_slug)
+    except Exception as exc:
+        with tenant_creation_lock(safe_slug):
+            if clear_tenant_provision_claim(safe_slug, creation_id):
+                forget_tenant_state(safe_slug)
+        logger.error(
+            "tenant_create.fail_closed_state_failed slug=%s err=%r",
+            safe_slug,
+            exc,
+        )
+        return _create_error_response(
+            request,
+            "Could not initialize the tenant in a paused state; nothing was provisioned.",
+            form_echo=locals(),
+        )
+
     # Persist the flat client.json under NR3_TENANTS_CLIENT_DIR so the
     # sidebar's list_tenants() picks the new tenant up on the next
     # render. The downloaded JSON the operator places on the VPS is
@@ -1823,9 +2070,6 @@ async def admin_tenant_create_submit(
     # if it doesn't exist yet -- silently-skipping when the dir is
     # missing was the J3 sidebar-list bug ("only 1 tenant" on a fresh
     # Replit deploy where /opt/wtyj/clients can't be created).
-    from app.tenants import _DEFAULT_TENANTS_CLIENT_DIR
-    root = (os.environ.get("NR3_TENANTS_CLIENT_DIR")
-            or _DEFAULT_TENANTS_CLIENT_DIR).strip()
     skip_prewrite_for_worker = (
         os.environ.get("NR3_AUTO_PROVISION", "").strip().lower()
         in {"1", "true", "yes", "on"}
@@ -1845,6 +2089,9 @@ async def admin_tenant_create_submit(
             logger.warning(
                 "tenant_create.duplicate_slug slug=%s path=%s",
                 safe_slug, tenant_dir)
+            with tenant_creation_lock(safe_slug):
+                if clear_tenant_provision_claim(safe_slug, creation_id):
+                    forget_tenant_state(safe_slug)
             return _create_error_response(
                 request,
                 f"A tenant folder for slug {safe_slug!r} already exists. "
@@ -1853,8 +2100,7 @@ async def admin_tenant_create_submit(
         try:
             os.makedirs(os.path.join(tenant_dir, "config"))
             os.makedirs(os.path.join(tenant_dir, "data"))
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(client_data, f, indent=2, ensure_ascii=False)
+            write_private_client_json(config_path, client_data)
             logger.info(
                 "tenant_create.disk_written slug=%s path=%s", safe_slug, config_path)
         except OSError as exc:
@@ -1874,53 +2120,11 @@ async def admin_tenant_create_submit(
             exc,
         )
 
-    # Welcome-email step. send_welcome is the checkbox value; we
-    # also need a contact_email to send anywhere.
+    # Welcome is evaluated only after the provisioning outcome is known.
     welcome_status = "unchecked"
     welcome_error = ""
     wants_welcome = bool(send_welcome.strip())
     contact_email_clean = contact_email.strip()
-    if wants_welcome and not contact_email_clean:
-        welcome_status = "skipped_no_email"
-        logger.warning(
-            "tenant_create.welcome_skipped slug=%s reason=no_contact_email",
-            safe_slug)
-    elif wants_welcome:
-        from app.emailer import (build_tenant_welcome_email, send_email,
-                                  smtp_is_configured)
-        if not smtp_is_configured(settings):
-            welcome_status = "no_smtp"
-            logger.warning(
-                "tenant_create.welcome_skipped slug=%s reason=smtp_not_configured",
-                safe_slug)
-        else:
-            draft = build_tenant_welcome_email(
-                tenant_name=name,
-                dashboard_url=dashboard_url,
-                username=safe_slug,
-                initial_token=initial_token,
-            )
-            try:
-                send_email(
-                    contact_email_clean,
-                    draft.subject,
-                    draft.body,
-                    settings,
-                )
-                welcome_status = "sent"
-                logger.info(
-                    "tenant_create.welcome_sent slug=%s to=%s",
-                    safe_slug, contact_email_clean)
-            except Exception as exc:
-                welcome_status = "failed"
-                welcome_error = str(exc)
-                logger.warning(
-                    "tenant_create.welcome_failed slug=%s exc=%r",
-                    safe_slug, exc)
-
-    logger.info(
-        "tenant_create.success slug=%s welcome=%s",
-        safe_slug, welcome_status)
 
     # ===== Provisioning artifacts the operator pastes on the VPS =====
     client_json_text = json.dumps(client_data, indent=2, ensure_ascii=False)
@@ -1984,6 +2188,9 @@ async def admin_tenant_create_submit(
         f"    proxy_set_header X-Real-IP $remote_addr;\n"
         f"    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
         f"    proxy_set_header X-Forwarded-Proto $scheme;\n"
+        f"    proxy_hide_header X-Unboks-Tenant;\n"
+        f'    add_header X-Unboks-Tenant "{safe_slug}" always;\n'
+        f'    add_header Access-Control-Expose-Headers "X-Unboks-Tenant" always;\n'
         f"}}\n"
     )
 
@@ -2021,6 +2228,7 @@ async def admin_tenant_create_submit(
         f"# Paste this entire block into the VPS terminal as root.\n"
         f"# It creates/updates tenant {safe_slug} without opening editors.\n"
         f"set -e\n"
+        f"umask 077\n"
         f"\n"
         f"SLUG={safe_slug}\n"
         f"TENANT_DIR=/root/clients/{safe_slug}\n"
@@ -2075,6 +2283,7 @@ async def admin_tenant_create_submit(
         f"LATE_API_KEY=${{LATE_API_KEY}}\n"
         f"ZERNIO_WEBHOOK_SECRET=${{ZERNIO_WEBHOOK_SECRET}}\n"
         f"UNBOKS_PLATFORM_ENV\n"
+        f"chmod 600 \"$TENANT_DIR/config/client.json\" \"$TENANT_DIR/config/platform.env\"\n"
         f"\n"
         f"cat > \"$TENANT_DIR/docker-compose.yml\" <<'UNBOKS_DOCKER_COMPOSE'\n"
         f"{docker_compose_text.rstrip()}\n"
@@ -2111,19 +2320,126 @@ async def admin_tenant_create_submit(
         f"echo \"Tenant-scoped ICP bridge token loaded from $BRIDGE_TOKEN_FILE. No manual token paste was needed.\"\n"
     )
 
-    provision_result = auto_provision_tenant(
-        slug=safe_slug,
-        host_port=host_port,
-        client_data=client_data,
-        docker_compose_text=docker_compose_text,
-        managed_nginx_block_text=managed_nginx_block_text,
-        dashboard_url=dashboard_url,
-    )
+    try:
+        provision_result = auto_provision_tenant(
+            slug=safe_slug,
+            host_port=host_port,
+            client_data=client_data,
+            docker_compose_text=docker_compose_text,
+            managed_nginx_block_text=managed_nginx_block_text,
+            dashboard_url=dashboard_url,
+            creation_id=creation_id,
+        )
+    except Exception:
+        with tenant_creation_lock(safe_slug):
+            if clear_tenant_provision_claim(safe_slug, creation_id):
+                forget_tenant_state(safe_slug)
+        raise
     logger.info(
         "tenant_create.auto_provision slug=%s status=%s job_id=%s",
         safe_slug,
         provision_result.status,
         provision_result.job_id,
+    )
+    if provision_result.status not in {
+        "succeeded",
+        "failed",
+        "queued",
+        "disabled",
+    }:
+        provision_result = AutoProvisionResult(
+            status="queued",
+            message=(
+                "Provisioning returned an unknown state; tenant ownership was "
+                "retained for safe operator reconciliation."
+            ),
+            job_id=provision_result.job_id,
+            details=provision_result.details,
+            dashboard_url=provision_result.dashboard_url,
+            health_url=provision_result.health_url,
+        )
+    with tenant_creation_lock(safe_slug):
+        if (
+            provision_result.status == "failed"
+            and getattr(provision_result, "safe_to_release", False) is True
+        ):
+            # The host worker rolls back files/container/nginx. Only the
+            # matching creator may remove this slug's local lifecycle state,
+            # and only after the worker positively proves rollback completed.
+            if clear_tenant_provision_claim(safe_slug, creation_id):
+                forget_tenant_state(safe_slug)
+        elif provision_result.status == "queued":
+            update_tenant_provision_claim_job(
+                safe_slug, creation_id, provision_result.job_id
+            )
+        elif provision_result.status in {"succeeded", "disabled"}:
+            from app.delete_operations import activate_tenant_generation
+
+            activate_tenant_generation(
+                slug=safe_slug,
+                generation_id=creation_id,
+            )
+            clear_tenant_provision_claim(safe_slug, creation_id)
+
+    if provision_result.status == "succeeded":
+        if wants_welcome and not contact_email_clean:
+            welcome_status = "skipped_no_email"
+            logger.warning(
+                "tenant_create.welcome_skipped slug=%s reason=no_contact_email",
+                safe_slug,
+            )
+        elif wants_welcome:
+            from app.emailer import (
+                build_tenant_welcome_email,
+                send_email,
+                smtp_is_configured,
+            )
+            if not smtp_is_configured(settings):
+                welcome_status = "no_smtp"
+                logger.warning(
+                    "tenant_create.welcome_skipped slug=%s reason=smtp_not_configured",
+                    safe_slug,
+                )
+            else:
+                draft = build_tenant_welcome_email(
+                    tenant_name=name,
+                    dashboard_url=dashboard_url,
+                    username=safe_slug,
+                    initial_token=initial_token,
+                )
+                try:
+                    send_email(
+                        contact_email_clean,
+                        draft.subject,
+                        draft.body,
+                        settings,
+                    )
+                    welcome_status = "sent"
+                    logger.info(
+                        "tenant_create.welcome_sent slug=%s to=%s",
+                        safe_slug,
+                        contact_email_clean,
+                    )
+                except Exception as exc:
+                    welcome_status = "failed"
+                    welcome_error = str(exc)
+                    logger.warning(
+                        "tenant_create.welcome_failed slug=%s exc=%r",
+                        safe_slug,
+                        exc,
+                    )
+    elif wants_welcome:
+        welcome_status = "provisioning_pending"
+        welcome_error = (
+            "Automatic email was not scheduled. Complete and verify "
+            "provisioning, then use the manual credential handoff shown on "
+            "this page."
+        )
+
+    logger.info(
+        "tenant_create.success slug=%s welcome=%s",
+        safe_slug,
+        welcome_status,
     )
 
     return templates.TemplateResponse(
@@ -2217,6 +2533,12 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
     auto_block_sync = fetch_auto_block_settings(tenant.id)
     account_details = tenant_account_details(tenant.id)
     whatsapp_policy = whatsapp_billing_policy(tenant.id)
+    try:
+        from app.channel_connections import current_tenant_generation_id
+
+        tenant_generation_id = current_tenant_generation_id(tenant.id)
+    except Exception:
+        tenant_generation_id = ""
     return templates.TemplateResponse(
         request,
         "admin_tenant_workspace.html",
@@ -2246,6 +2568,7 @@ def admin_tenant_workspace(request: Request, tenant_id: str) -> Response:
             "auto_block_sync": auto_block_sync,
             "auto_block_settings": auto_block_sync.settings,
             "whatsapp_billing_policy": whatsapp_policy,
+            "tenant_generation_id": tenant_generation_id,
         },
     )
 
@@ -2470,6 +2793,7 @@ def admin_mark_prompt_conflict_reviewed(
     request: Request,
     tenant_id: str,
     conflict_id: str,
+    tenant_generation_id: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -2478,7 +2802,43 @@ def admin_mark_prompt_conflict_reviewed(
     tenant = get_tenant(tenant_id)
     if tenant is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
-    mark_reviewed(tenant.id, conflict_id)
+    if not tenant_generation_id.strip():
+        return _workspace_redirect(
+            tenant.id,
+            "prompt-conflicts-section",
+            message="Tenant generation proof is missing. Reload before marking reviewed.",
+            level="warn",
+        )
+    from app.delete_operations import (
+        DeleteOperationError,
+        require_tenant_mutation_generation,
+    )
+    from app.provisioning import tenant_creation_lock
+
+    try:
+        with tenant_creation_lock(tenant.id):
+            require_tenant_mutation_generation(
+                tenant.id,
+                expected_generation_id=tenant_generation_id,
+            )
+            mark_reviewed(
+                tenant.id,
+                conflict_id,
+                expected_generation_id=tenant_generation_id,
+            )
+    except (DeleteOperationError, RuntimeError, OSError, ValueError) as exc:
+        logger.warning(
+            "prompt_conflict_review_blocked tenant=%s conflict=%s error=%s",
+            tenant.id,
+            conflict_id,
+            str(exc)[:160],
+        )
+        return _workspace_redirect(
+            tenant.id,
+            "prompt-conflicts-section",
+            message="Tenant generation changed. Stale review was blocked; reload and retry.",
+            level="warn",
+        )
     return RedirectResponse(
         url=(
             f"/admin/tenants/{tenant.id}"
@@ -2531,6 +2891,7 @@ def admin_import_tenant_backup(
     import_mode: str = Form(default="restore"),
     new_slug: str = Form(default=""),
     confirmation: str = Form(default=""),
+    tenant_generation_id: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
     redirect = require_admin(request, settings)
@@ -2538,17 +2899,146 @@ def admin_import_tenant_backup(
         return redirect
     if get_tenant(tenant_id) is None:
         return RedirectResponse(url="/admin/tenants", status_code=303)
-    from app.tenant_backup import import_uploaded_package
-    try:
+    from app.tenant_backup import (
+        discard_unqueued_clone_runtime,
+        import_uploaded_package,
+    )
+    from app.delete_operations import (
+        DeleteOperationError,
+        require_tenant_mutation_generation,
+    )
+    selected_mode = import_mode or "restore"
+    clone_target = ""
+    clone_creation_id = ""
+    clone_host_port: int | None = None
+    restore_generation_id = ""
+    if selected_mode == "restore":
+        if not tenant_generation_id.strip():
+            return _workspace_redirect(
+                tenant_id,
+                "backup-section",
+                message="Tenant generation proof is missing. Reload before restoring.",
+                level="warn",
+            )
+        restore_generation_id = tenant_generation_id.strip()
+    if selected_mode == "clone":
+        try:
+            clone_target = validate_slug(new_slug)
+        except ValueError as exc:
+            return _workspace_redirect(
+                tenant_id,
+                "backup-section",
+                message=str(exc),
+                level="warn",
+            )
+        clone_creation_id = secrets.token_urlsafe(18)
+        with tenant_creation_lock(clone_target):
+            if (
+                tenant_slug_exists_for_creation(clone_target)
+                or tenant_provision_claim(clone_target)
+            ):
+                return _workspace_redirect(
+                    tenant_id,
+                    "backup-section",
+                    message=f"A tenant for slug {clone_target!r} already exists.",
+                    level="warn",
+                )
+            try:
+                clone_host_port = reserve_tenant_port(clone_target)
+                if not create_tenant_provision_claim(
+                    clone_target,
+                    clone_creation_id,
+                ):
+                    raise RuntimeError("Clone creation is already in progress.")
+                from app.delete_operations import bind_tenant_generation_for_creation
+
+                bind_tenant_generation_for_creation(
+                    slug=clone_target,
+                    generation_id=clone_creation_id,
+                )
+            except Exception as exc:
+                clear_tenant_provision_claim(clone_target, clone_creation_id)
+                release_tenant_port(clone_target)
+                return _workspace_redirect(
+                    tenant_id,
+                    "backup-section",
+                    message=f"Could not reserve the clone safely: {exc}",
+                    level="warn",
+                )
+
+    def rollback_unqueued_clone() -> None:
+        if not clone_target or not clone_creation_id:
+            return
+        with tenant_creation_lock(clone_target):
+            if clear_tenant_provision_claim(
+                clone_target,
+                clone_creation_id,
+            ):
+                discard_unqueued_clone_runtime(clone_target)
+                forget_tenant_state(clone_target)
+
+    def import_and_dispatch():
         result = import_uploaded_package(
             backup_file.file,
             target_tenant=tenant_id,
-            mode=import_mode or "restore",
+            mode=selected_mode,
             new_slug=new_slug,
             confirmation=confirmation or tenant_id,
+            clone_creation_id=clone_creation_id,
+            trusted_clone_host_port=clone_host_port,
+            expected_generation_id=restore_generation_id or None,
         )
+        if result["status"] == "validated":
+            return result, None
+
+        target = result["target_tenant"]
+        runtime_package = str(result.get("runtime_restore_package") or "")
+        runtime_host_port = result.get("host_port")
+        if runtime_package and not runtime_host_port:
+            # Host restores always bind the canonical compose to the target's
+            # stable registry reservation; archive metadata is never authoritative.
+            runtime_host_port = reserve_tenant_port(target)
+        restart = queue_tenant_host_action(
+            slug=target,
+            action="restore_tenant_runtime" if runtime_package else "restart_tenant",
+            dashboard_url=f"https://dashboard.unboks.org/{target}",
+            backup_package_path=runtime_package,
+            preserve_provider_connection=not bool(result.get("channels_require_reconnect")),
+            zernio_account_id=str(
+                result.get("verified_zernio_account_id") or ""
+            ),
+            host_port=runtime_host_port or 0,
+            creation_id=str(result.get("creation_id") or ""),
+        )
+        return result, restart
+
+    try:
+        lifecycle_lease = (
+            tenant_creation_lock(tenant_id)
+            if selected_mode == "restore"
+            else nullcontext()
+        )
+        with lifecycle_lease:
+            if selected_mode == "restore":
+                require_tenant_mutation_generation(
+                    tenant_id,
+                    expected_generation_id=restore_generation_id,
+                )
+            result, restart = import_and_dispatch()
     except ValueError as exc:
+        rollback_unqueued_clone()
         return _workspace_redirect(tenant_id, "backup-section", message=str(exc), level="warn")
+    except DeleteOperationError as exc:
+        rollback_unqueued_clone()
+        return _workspace_redirect(
+            tenant_id,
+            "backup-section",
+            message=f"Restore was blocked by the tenant lifecycle state: {exc}",
+            level="warn",
+        )
+    except Exception:
+        rollback_unqueued_clone()
+        raise
 
     if result["status"] == "validated":
         summary = result["summary"]
@@ -2560,14 +3050,30 @@ def admin_import_tenant_backup(
         return _workspace_redirect(tenant_id, "backup-section", message=msg)
 
     target = result["target_tenant"]
-    runtime_package = str(result.get("runtime_restore_package") or "")
-    restart = queue_tenant_host_action(
-        slug=target,
-        action="restore_tenant_runtime" if runtime_package else "restart_tenant",
-        dashboard_url=f"https://dashboard.unboks.org/{target}",
-        backup_package_path=runtime_package,
-        preserve_provider_connection=not bool(result.get("channels_require_reconnect")),
-    )
+    assert restart is not None
+    if clone_creation_id:
+        with tenant_creation_lock(target):
+            if restart.status == "queued":
+                update_tenant_provision_claim_job(
+                    target,
+                    clone_creation_id,
+                    restart.job_id,
+                )
+            elif restart.status == "failed":
+                if restart.safe_to_release is True:
+                    if clear_tenant_provision_claim(target, clone_creation_id):
+                        forget_tenant_state(target)
+            elif restart.status == "succeeded" or (
+                restart.status == "disabled"
+                and bool(result.get("client_tree_restored"))
+            ):
+                from app.delete_operations import activate_tenant_generation
+
+                activate_tenant_generation(
+                    slug=target,
+                    generation_id=clone_creation_id,
+                )
+                clear_tenant_provision_claim(target, clone_creation_id)
     restart_note = (
         " Runtime was restored and container was recreated."
         if restart.status == "succeeded"
@@ -2625,6 +3131,65 @@ def admin_public_signup_detail(request: Request, signup_id: str) -> Response:
     )
 
 
+@router.post(
+    "/admin/signups/{signup_id}/retry-credentials",
+    response_class=HTMLResponse,
+)
+def admin_public_signup_retry_credentials(
+    request: Request,
+    signup_id: str,
+) -> Response:
+    settings = get_settings()
+    redirect = require_admin(request, settings)
+    if redirect:
+        return redirect
+    try:
+        signup = retry_signup_credential_delivery(signup_id, settings)
+    except TenantCreateError as exc:
+        return _signup_detail_redirect(signup_id, error=str(exc))
+
+    delivery_status = str(
+        signup.get("credential_delivery_status") or "unknown"
+    )
+    if delivery_status == "sent":
+        audit_result = "ok"
+        audit_summary = "Workspace credential email sent."
+    elif delivery_status == "sending":
+        audit_result = "pending"
+        audit_summary = "Workspace credential delivery is already in progress."
+    else:
+        audit_result = "failed"
+        audit_summary = "Workspace credential delivery retry did not send."
+    audit_log.record_event(
+        action="public_signup.credentials_retry",
+        tenant_id=str(signup.get("provisioned_slug") or "") or None,
+        result=audit_result,
+        safe_summary=audit_summary,
+        metadata={
+            "signup_id": signup_id,
+            "delivery_status": delivery_status,
+            "attempt_count": signup.get("credential_delivery_attempt_count") or 0,
+        },
+    )
+    if delivery_status == "sent":
+        return _signup_detail_redirect(
+            signup_id,
+            notice="Workspace credentials were sent successfully.",
+        )
+    if delivery_status == "sending":
+        return _signup_detail_redirect(
+            signup_id,
+            notice="Workspace credential delivery is already in progress.",
+        )
+    return _signup_detail_redirect(
+        signup_id,
+        error=(
+            str(signup.get("credential_delivery_error") or "").strip()
+            or f"Workspace credential delivery status: {delivery_status}."
+        ),
+    )
+
+
 @router.post("/admin/signups/{signup_id}/approve", response_class=HTMLResponse)
 def admin_public_signup_approve(
     request: Request,
@@ -2639,6 +3204,13 @@ def admin_public_signup_approve(
         update_signup_request(
             signup_id,
             settings,
+            allowed_current_statuses={
+                "verification_pending",
+                "verified_pending_review",
+                "info_requested",
+                "info_request_failed",
+                "failed",
+            },
             status="approved",
             review_status="approved",
             reviewed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -2665,33 +3237,46 @@ def admin_public_signup_approve_send_onboarding(
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
+    result = None
+    signup: dict = {}
     try:
         signup = get_signup_request(signup_id, settings)
-        if signup.get("archived_at") or signup.get("status") in {
-            "archived",
-            "rejected",
-            "provisioned",
-        }:
-            return _signup_detail_redirect(
-                signup_id,
-                error="This signup is not available for onboarding.",
-            )
         if signup.get("status") == "onboarding_link_sent":
             return _signup_detail_redirect(
                 signup_id,
                 generated_link=str(signup.get("onboarding_link") or ""),
                 notice="Onboarding link was already sent for this signup.",
             )
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # Claim the email side effect before creating/rotating a token or
+        # sending mail. Reject and duplicate-send requests cannot win while
+        # this transient state owns delivery.
+        signup = update_signup_request(
+            signup_id,
+            settings,
+            allowed_current_statuses={
+                "verification_pending",
+                "verified_pending_review",
+                "info_requested",
+                "info_request_failed",
+                "approved",
+                "onboarding_link_generated",
+                "failed",
+            },
+            status="onboarding_email_sending",
+            review_status="approval_email_sending",
+            reviewed_at=now,
+            review_note=review_note.strip(),
+            onboarding_email_error="",
+        )
         lead = _ensure_onboarding_lead_for_signup(signup, settings)
         result = prepare_or_send_onboarding_email(lead.id)
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         update_signup_request(
             signup_id,
             settings,
+            allowed_current_statuses={"onboarding_email_sending"},
             status="onboarding_link_sent" if result.sent else "failed",
             review_status="approved" if result.sent else "approval_email_failed",
-            reviewed_at=now,
-            review_note=review_note.strip(),
             onboarding_lead_id=lead.id,
             onboarding_link_generated_at=now,
             onboarding_link=result.draft.onboarding_link,
@@ -2709,7 +3294,29 @@ def admin_public_signup_approve_send_onboarding(
             metadata={"signup_id": signup_id, "lead_id": lead.id},
         )
     except (TenantCreateError, LeadValidationError, LeadNotFoundError) as exc:
+        _fail_signup_side_effect(
+            signup_id,
+            settings,
+            expected_status="onboarding_email_sending",
+            error_field="onboarding_email_error",
+            message=str(exc),
+        )
         return _signup_detail_redirect(signup_id, error=str(exc))
+    except Exception as exc:
+        logger.exception("public_signup.approve_send_failed signup_id=%s", signup_id)
+        _fail_signup_side_effect(
+            signup_id,
+            settings,
+            expected_status="onboarding_email_sending",
+            error_field="onboarding_email_error",
+            message="Onboarding delivery failed unexpectedly.",
+        )
+        return _signup_detail_redirect(
+            signup_id,
+            error="Onboarding delivery failed unexpectedly; no retry was sent automatically.",
+        )
+    if result is None:
+        return _signup_detail_redirect(signup_id, error="Onboarding email was not sent.")
     if not result.sent:
         return _signup_detail_redirect(
             signup_id,
@@ -2740,6 +3347,15 @@ def admin_public_signup_reject(
         update_signup_request(
             signup_id,
             settings,
+            allowed_current_statuses={
+                "verification_pending",
+                "verified_pending_review",
+                "info_requested",
+                "info_request_failed",
+                "approved",
+                "onboarding_link_generated",
+                "failed",
+            },
             status="archived",
             review_status="rejected",
             reviewed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -2763,23 +3379,28 @@ def admin_public_signup_request_info(request: Request, signup_id: str) -> Respon
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
+    result = None
+    signup: dict = {}
     try:
-        signup = get_signup_request(signup_id, settings)
-        if signup.get("archived_at") or signup.get("status") in {
-            "approved",
-            "onboarding_link_generated",
-            "onboarding_link_sent",
-            "provisioned",
-        }:
-            return _signup_detail_redirect(
-                signup_id,
-                error="Information requests are only available before approval.",
-            )
+        signup = update_signup_request(
+            signup_id,
+            settings,
+            allowed_current_statuses={
+                "verification_pending",
+                "verified_pending_review",
+                "info_requested",
+                "info_request_failed",
+                "failed",
+            },
+            status="info_request_sending",
+            info_request_error="",
+        )
         lead = _ensure_onboarding_lead_for_signup(signup, settings)
         result = prepare_or_send_onboarding_email(lead.id)
         update_signup_request(
             signup_id,
             settings,
+            allowed_current_statuses={"info_request_sending"},
             onboarding_lead_id=lead.id,
             info_request_sent_at=(
                 datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -2800,7 +3421,29 @@ def admin_public_signup_request_info(request: Request, signup_id: str) -> Respon
             metadata={"signup_id": signup_id, "lead_id": lead.id},
         )
     except (TenantCreateError, LeadValidationError, LeadNotFoundError) as exc:
+        _fail_signup_side_effect(
+            signup_id,
+            settings,
+            expected_status="info_request_sending",
+            error_field="info_request_error",
+            message=str(exc),
+        )
         return _signup_detail_redirect(signup_id, error=str(exc))
+    except Exception:
+        logger.exception("public_signup.info_request_failed signup_id=%s", signup_id)
+        _fail_signup_side_effect(
+            signup_id,
+            settings,
+            expected_status="info_request_sending",
+            error_field="info_request_error",
+            message="Information request delivery failed unexpectedly.",
+        )
+        return _signup_detail_redirect(
+            signup_id,
+            error="Information request delivery failed unexpectedly.",
+        )
+    if result is None:
+        return _signup_detail_redirect(signup_id, error="Information request was not sent.")
     if not result.sent:
         return _signup_detail_redirect(
             signup_id,
@@ -2820,23 +3463,34 @@ def admin_public_signup_generate_link(request: Request, signup_id: str) -> Respo
         return redirect
     try:
         signup = get_signup_request(signup_id, settings)
-        if signup.get("status") not in {
-            "approved",
-            "onboarding_link_generated",
-            "onboarding_link_sent",
-            "failed",
-        }:
+        if signup.get("status") in {"onboarding_link_generated", "onboarding_link_sent"}:
+            stored_link = str(signup.get("onboarding_link") or "")
+            if stored_link:
+                return _signup_detail_redirect(
+                    signup_id,
+                    notice="Onboarding link is already available.",
+                    generated_link=stored_link,
+                )
+        if signup.get("status") not in {"approved", "failed"}:
             return _signup_detail_redirect(
                 signup_id,
                 error="Approve this signup before generating an onboarding link.",
             )
+        signup = update_signup_request(
+            signup_id,
+            settings,
+            allowed_current_statuses={"approved", "failed"},
+            status="onboarding_link_generating",
+        )
         lead = _ensure_onboarding_lead_for_signup(signup, settings)
         lead, raw_token = create_or_refresh_token(lead.id)
         link = build_onboarding_link(raw_token, settings)
         update_signup_request(
             signup_id,
             settings,
+            allowed_current_statuses={"onboarding_link_generating"},
             onboarding_lead_id=lead.id,
+            onboarding_link=link,
             onboarding_link_generated_at=datetime.now(timezone.utc).isoformat(
                 timespec="seconds"
             ),
@@ -2849,7 +3503,27 @@ def admin_public_signup_generate_link(request: Request, signup_id: str) -> Respo
             metadata={"signup_id": signup_id, "lead_id": lead.id},
         )
     except (TenantCreateError, LeadValidationError, LeadNotFoundError) as exc:
+        _fail_signup_side_effect(
+            signup_id,
+            settings,
+            expected_status="onboarding_link_generating",
+            error_field="onboarding_email_error",
+            message=str(exc),
+        )
         return _signup_detail_redirect(signup_id, error=str(exc))
+    except Exception:
+        logger.exception("public_signup.generate_link_failed signup_id=%s", signup_id)
+        _fail_signup_side_effect(
+            signup_id,
+            settings,
+            expected_status="onboarding_link_generating",
+            error_field="onboarding_email_error",
+            message="Onboarding link generation failed unexpectedly.",
+        )
+        return _signup_detail_redirect(
+            signup_id,
+            error="Onboarding link generation failed unexpectedly.",
+        )
     return _signup_detail_redirect(
         signup_id,
         notice="Onboarding link generated.",
@@ -2863,24 +3537,35 @@ def admin_public_signup_send_onboarding(request: Request, signup_id: str) -> Res
     redirect = require_admin(request, settings)
     if redirect:
         return redirect
+    result = None
+    signup: dict = {}
     try:
         signup = get_signup_request(signup_id, settings)
-        if signup.get("status") not in {
-            "approved",
-            "onboarding_link_generated",
-            "onboarding_link_sent",
-            "failed",
-        }:
+        if signup.get("status") == "onboarding_link_sent":
             return _signup_detail_redirect(
                 signup_id,
-                error="Approve this signup before sending an onboarding link.",
+                notice="Onboarding link was already sent for this signup.",
+                generated_link=str(signup.get("onboarding_link") or ""),
             )
+        signup = update_signup_request(
+            signup_id,
+            settings,
+            allowed_current_statuses={
+                "approved",
+                "onboarding_link_generated",
+                "failed",
+            },
+            status="onboarding_email_sending",
+            onboarding_email_error="",
+        )
         lead = _ensure_onboarding_lead_for_signup(signup, settings)
         result = prepare_or_send_onboarding_email(lead.id)
         update_signup_request(
             signup_id,
             settings,
+            allowed_current_statuses={"onboarding_email_sending"},
             onboarding_lead_id=lead.id,
+            onboarding_link=result.draft.onboarding_link,
             onboarding_email_sent_at=(
                 result.draft and datetime.now(timezone.utc).isoformat(timespec="seconds")
                 if result.sent
@@ -2900,7 +3585,29 @@ def admin_public_signup_send_onboarding(request: Request, signup_id: str) -> Res
             metadata={"signup_id": signup_id, "lead_id": lead.id},
         )
     except (TenantCreateError, LeadValidationError, LeadNotFoundError) as exc:
+        _fail_signup_side_effect(
+            signup_id,
+            settings,
+            expected_status="onboarding_email_sending",
+            error_field="onboarding_email_error",
+            message=str(exc),
+        )
         return _signup_detail_redirect(signup_id, error=str(exc))
+    except Exception:
+        logger.exception("public_signup.send_onboarding_failed signup_id=%s", signup_id)
+        _fail_signup_side_effect(
+            signup_id,
+            settings,
+            expected_status="onboarding_email_sending",
+            error_field="onboarding_email_error",
+            message="Onboarding delivery failed unexpectedly.",
+        )
+        return _signup_detail_redirect(
+            signup_id,
+            error="Onboarding delivery failed unexpectedly; no retry was sent automatically.",
+        )
+    if result is None:
+        return _signup_detail_redirect(signup_id, error="Onboarding email was not sent.")
     if not result.sent:
         return _signup_detail_redirect(
             signup_id,
@@ -2937,17 +3644,32 @@ def admin_public_signup_create_workspace(request: Request, signup_id: str) -> Re
             email=str(signup.get("email") or ""),
             phone=str(signup.get("phone") or ""),
             settings=settings,
+            signup_request_id=signup_id,
         )
-        if result.provision_result.status not in {"succeeded", "disabled"}:
+        if result.provision_result.status in {"queued", "disabled"}:
+            audit_log.record_event(
+                action="public_signup.workspace_create_pending",
+                result="pending",
+                safe_summary="Workspace creation from public signup is still running.",
+                metadata={
+                    "signup_id": signup_id,
+                    "slug": result.slug,
+                    "job_id": result.provision_result.job_id,
+                },
+            )
+            return _signup_detail_redirect(
+                signup_id,
+                notice="Workspace provisioning is in progress; a duplicate was not created.",
+            )
+        if result.provision_result.status != "succeeded":
             message = (
                 f"Workspace provisioning did not complete: "
                 f"{result.provision_result.message}"
             )
-            update_signup_request(
+            mark_signup_creation_error(
                 signup_id,
-                settings,
-                status="failed",
-                workspace_error=message,
+                message=message,
+                settings=settings,
             )
             audit_log.record_event(
                 action="public_signup.workspace_create_failed",
@@ -2961,7 +3683,18 @@ def admin_public_signup_create_workspace(request: Request, signup_id: str) -> Re
                 },
             )
             return _signup_detail_redirect(signup_id, error=message)
-        mark_provisioned(signup_id, result.slug, settings)
+        if not reconcile_signup_provisioning_result(
+            signup_id,
+            slug=result.slug,
+            creation_id=result.creation_id,
+            job_id=str(result.provision_result.job_id or ""),
+            status="succeeded",
+            message=result.provision_result.message,
+            settings=settings,
+        ):
+            raise TenantCreateError(
+                "Workspace finished, but the signup ownership record did not match."
+            )
         audit_log.record_event(
             action="public_signup.workspace_created",
             tenant_id=result.slug,
@@ -2970,11 +3703,10 @@ def admin_public_signup_create_workspace(request: Request, signup_id: str) -> Re
             metadata={"signup_id": signup_id, "slug": result.slug},
         )
     except TenantCreateError as exc:
-        update_signup_request(
+        mark_signup_creation_error(
             signup_id,
-            settings,
-            status="failed",
-            workspace_error=str(exc),
+            message=str(exc),
+            settings=settings,
         )
         audit_log.record_event(
             action="public_signup.workspace_create_failed",
@@ -2984,11 +3716,10 @@ def admin_public_signup_create_workspace(request: Request, signup_id: str) -> Re
         )
         return _signup_detail_redirect(signup_id, error=str(exc))
     except Exception as exc:
-        update_signup_request(
+        mark_signup_creation_error(
             signup_id,
-            settings,
-            status="failed",
-            workspace_error="Workspace creation failed.",
+            message="Workspace creation failed.",
+            settings=settings,
         )
         audit_log.record_event(
             action="public_signup.workspace_create_failed",
@@ -3285,6 +4016,29 @@ def _signup_detail_redirect(
         params.append(f"generated_link={quote_plus(generated_link)}")
     suffix = "?" + "&".join(params) if params else ""
     return RedirectResponse(url=f"/admin/signups/{signup_id}{suffix}", status_code=303)
+
+
+def _fail_signup_side_effect(
+    signup_id: str,
+    settings,
+    *,
+    expected_status: str,
+    error_field: str,
+    message: str,
+) -> None:
+    """Best-effort terminal transition for a claimed outbound side effect."""
+    try:
+        update_signup_request(
+            signup_id,
+            settings,
+            allowed_current_statuses={expected_status},
+            status="failed",
+            **{error_field: message[:300] or "Operation failed."},
+        )
+    except TenantCreateError:
+        # A different terminal state won the compare-and-set. Never overwrite
+        # it while reporting the original request failure.
+        return
 
 
 def _ensure_onboarding_lead_for_signup(signup: dict, settings) -> object:

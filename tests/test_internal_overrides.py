@@ -1,3 +1,7 @@
+import json
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -95,10 +99,277 @@ def test_internal_overrides_reports_empty_available_envelope(client):
     assert body["response_timing"] is None
 
 
+def test_new_tenant_initialization_resets_orphan_true_values_and_preserves_peers(
+    tmp_path,
+):
+    from app import icp_overrides
+
+    state_path = tmp_path / "icp.json"
+    state_path.write_text(
+        json.dumps({
+            "tenants": {
+                "new-tenant": {
+                    "feature_toggles": {
+                        "ai_auto_reply": {"value": True, "updated_by": "orphan"},
+                    },
+                },
+                "ali": {
+                    "feature_toggles": {
+                        "ai_auto_reply": {"value": True, "updated_by": "operator"},
+                    },
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    icp_overrides.initialize_new_tenant_fail_closed("new-tenant")
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))["tenants"]
+    assert state["new-tenant"]["feature_toggles"]["ai_auto_reply"]["value"] is False
+    assert state["new-tenant"]["feature_toggles"]["whatsapp_inbox"]["value"] is False
+    assert state["new-tenant"]["feature_toggles"]["facebook_dms"]["value"] is False
+    assert state["ali"]["feature_toggles"]["ai_auto_reply"] == {
+        "value": True,
+        "updated_by": "operator",
+    }
+
+
+def test_icp_state_mutations_serialize_complete_read_modify_write(monkeypatch):
+    from app import icp_overrides
+
+    original_load = icp_overrides._load_all
+    counter_lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def slow_load():
+        nonlocal active, max_active
+        with counter_lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.03)
+        try:
+            return original_load()
+        finally:
+            with counter_lock:
+                active -= 1
+
+    monkeypatch.setattr(icp_overrides, "_load_all", slow_load)
+    first = threading.Thread(
+        target=icp_overrides.set_feature_toggle,
+        args=("ali", "ai_auto_reply", True),
+    )
+    second = threading.Thread(
+        target=icp_overrides.set_feature_toggle,
+        args=("mermaid", "ai_auto_reply", False),
+    )
+    first.start()
+    second.start()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert max_active == 1
+    assert icp_overrides.feature_toggles_for_tenant("ali")["ai_auto_reply"]["value"] is True
+    assert icp_overrides.feature_toggles_for_tenant("mermaid")["ai_auto_reply"]["value"] is False
+
+
+def test_corrupt_icp_state_fails_closed_without_overwrite(tmp_path):
+    from app import icp_overrides
+
+    state_path = tmp_path / "icp.json"
+    state_path.write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="state is unreadable"):
+        icp_overrides.set_feature_toggle("mermaid", "ai_auto_reply", False)
+
+    assert state_path.read_text(encoding="utf-8") == "{broken"
+
+
+def test_nr2_can_pause_and_start_only_its_own_ai_auto_reply(client):
+    paused = client.put(
+        "/internal/tenants/unboks/feature-toggles/ai_auto_reply",
+        headers=_bridge_headers(),
+        json={"value": False},
+    )
+    assert paused.status_code == 200
+    assert paused.json()["tenant_id"] == "unboks"
+    assert paused.json()["feature_toggle"]["value"] is False
+    assert paused.json()["feature_toggle"]["updated_by"] == "nr2-dashboard"
+
+    started = client.put(
+        "/internal/tenants/unboks/feature-toggles/ai_auto_reply",
+        headers=_bridge_headers(),
+        json={"value": True},
+    )
+    assert started.status_code == 200
+    assert started.json()["feature_toggle"]["value"] is True
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected_status"),
+    [
+        ({"X-Tenant-Identity": "unboks"}, 401),
+        (
+            {
+                "Authorization": "Bearer wrong",
+                "X-Tenant-Identity": "unboks",
+            },
+            401,
+        ),
+        (_bridge_headers("pepe"), 403),
+    ],
+)
+def test_feature_toggle_write_rejects_missing_wrong_or_cross_tenant_auth(
+    client, headers, expected_status,
+):
+    response = client.put(
+        "/internal/tenants/unboks/feature-toggles/ai_auto_reply",
+        headers=headers,
+        json={"value": False},
+    )
+    assert response.status_code == expected_status
+
+
+def test_feature_toggle_write_rejects_unknown_key_and_non_boolean(client):
+    unknown = client.put(
+        "/internal/tenants/unboks/feature-toggles/whatsapp_inbox",
+        headers=_bridge_headers(),
+        json={"value": False},
+    )
+    invalid = client.put(
+        "/internal/tenants/unboks/feature-toggles/ai_auto_reply",
+        headers=_bridge_headers(),
+        json={"value": "false"},
+    )
+
+    assert unknown.status_code == 404
+    assert invalid.status_code == 422
+
+
+def test_feature_toggle_write_rejects_unknown_tenant_without_writing_state(
+    client, tmp_path,
+):
+    token_dir = tmp_path / "bridge_tokens"
+    (token_dir / "missing").write_text(
+        "tenant-missing-token-at-least-32-bytes-long", encoding="utf-8"
+    )
+
+    response = client.put(
+        "/internal/tenants/missing/feature-toggles/ai_auto_reply",
+        headers={
+            "Authorization": "Bearer tenant-missing-token-at-least-32-bytes-long",
+            "X-Tenant-Identity": "missing",
+        },
+        json={"value": False},
+    )
+
+    assert response.status_code == 404
+    assert not (tmp_path / "icp.json").exists()
+
+
+def test_bridge_auth_and_mutation_cannot_cross_tenant_generation(
+    client, monkeypatch, tmp_path
+):
+    from app import icp_overrides
+    from app.delete_operations import (
+        bind_tenant_generation_for_creation,
+        require_tenant_mutation_generation,
+        retire_tenant_generation,
+    )
+    from app.provisioning import tenant_creation_lock
+
+    tenant_dir = tmp_path / "tenants" / "race" / "config"
+    tenant_dir.mkdir(parents=True)
+    (tenant_dir / "client.json").write_text(
+        json.dumps({"slug": "race", "name": "Generation A", "status": "active"}),
+        encoding="utf-8",
+    )
+    token_path = tmp_path / "bridge_tokens" / "race"
+    old_token = "tenant-race-token-generation-a-000000"
+    new_token = "tenant-race-token-generation-b-000000"
+    token_path.write_text(old_token, encoding="utf-8")
+    with tenant_creation_lock("race"):
+        require_tenant_mutation_generation("race")
+
+    from app.routes import internal as internal_routes
+
+    original_auth = internal_routes._require_internal_bridge
+    authenticated = threading.Event()
+    release_request = threading.Event()
+    replacement_done = threading.Event()
+
+    def paused_auth(*args, **kwargs):
+        original_auth(*args, **kwargs)
+        authenticated.set()
+        assert release_request.wait(timeout=3)
+
+    monkeypatch.setattr(
+        internal_routes,
+        "_require_internal_bridge",
+        paused_auth,
+    )
+    response_box = {}
+
+    def send_old_request():
+        response_box["response"] = client.put(
+            "/internal/tenants/race/feature-toggles/ai_auto_reply",
+            headers={
+                "Authorization": f"Bearer {old_token}",
+                "X-Tenant-Identity": "race",
+            },
+            json={"value": True},
+        )
+
+    def replace_generation():
+        with tenant_creation_lock("race"):
+            # This cleanup represents the local-state part of permanent delete.
+            # It must wait for the authenticated generation-A request to finish.
+            icp_overrides.forget_tenant("race")
+            retire_tenant_generation(slug="race")
+            bind_tenant_generation_for_creation(
+                slug="race",
+                generation_id="replacement-generation-internal-0001",
+                status="active",
+            )
+            token_path.write_text(new_token, encoding="utf-8")
+        replacement_done.set()
+
+    request_thread = threading.Thread(target=send_old_request)
+    replacement_thread = threading.Thread(target=replace_generation)
+    request_thread.start()
+    assert authenticated.wait(timeout=3)
+    replacement_thread.start()
+    time.sleep(0.05)
+    assert replacement_done.is_set() is False
+
+    release_request.set()
+    request_thread.join(timeout=3)
+    replacement_thread.join(timeout=3)
+
+    assert request_thread.is_alive() is False
+    assert replacement_thread.is_alive() is False
+    assert response_box["response"].status_code == 200
+    assert icp_overrides.feature_toggles_for_tenant("race") == {}
+
+    stale_retry = client.put(
+        "/internal/tenants/race/feature-toggles/ai_auto_reply",
+        headers={
+            "Authorization": f"Bearer {old_token}",
+            "X-Tenant-Identity": "race",
+        },
+        json={"value": True},
+    )
+    assert stale_retry.status_code == 401
+    assert icp_overrides.feature_toggles_for_tenant("race") == {}
+
+
 def test_channel_toggle_is_visible_to_nr2_bridge(client):
     client.post("/login", data={"password": "test-password"})
     r = client.post(
-        "/admin/tenants/unboks/channels/whatsapp/toggle",
+        "/admin/tenants/unboks/channels/email/toggle",
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -109,10 +380,10 @@ def test_channel_toggle_is_visible_to_nr2_bridge(client):
     )
     assert bridge.status_code == 200
     toggles = bridge.json()["feature_toggles"]
-    assert toggles["whatsapp_inbox"]["value"] is True
-    assert toggles["whatsapp_inbox"]["source"] == "icp_override"
-    assert toggles["whatsapp_inbox"]["wired"] is True
-    assert "whatsapp" not in toggles
+    assert toggles["email_inbox"]["value"] is True
+    assert toggles["email_inbox"]["source"] == "icp_override"
+    assert toggles["email_inbox"]["wired"] is True
+    assert "email" not in toggles
 
 
 def test_channel_toggle_off_reflects_false_to_nr2_bridge(client):
@@ -346,7 +617,6 @@ def test_whatsapp_connection_is_visible_to_nr2_bridge(client):
         zernio_account_id="account_unboks",
         phone_number_id="phone_unboks",
         display_phone_number="+599 9 688 1585",
-        last_request_id="cr_unboks",
     )
 
     bridge = client.get(

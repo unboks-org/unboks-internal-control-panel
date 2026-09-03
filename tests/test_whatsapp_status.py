@@ -117,7 +117,7 @@ def test_whatsapp_status_returns_pending(monkeypatch, tmp_path):
         status="pending",
         zernio_profile_id="profile_lawyer",
         zernio_account_id="account_1",
-        last_request_id="cr_pending",
+        zernio_account_verified=True,
     )
 
     response = _status(client)
@@ -143,10 +143,10 @@ def test_whatsapp_status_returns_connected(monkeypatch, tmp_path):
         status="connected",
         zernio_profile_id="profile_lawyer",
         zernio_account_id="account_1",
+        zernio_account_verified=True,
         phone_number_id="phone_1",
         display_phone_number="+599 9 694 5527",
         waba_id="waba_1",
-        last_request_id="cr_connected",
     )
 
     response = _status(client)
@@ -174,10 +174,10 @@ def test_whatsapp_status_requires_allowlist_for_healthy_connected(monkeypatch, t
         status="connected",
         zernio_profile_id="profile_lawyer",
         zernio_account_id="account_1",
+        zernio_account_verified=True,
         phone_number_id="phone_1",
         display_phone_number="+599 9 694 5527",
         waba_id="waba_1",
-        last_request_id="cr_connected",
     )
 
     response = _status(client)
@@ -201,10 +201,10 @@ def test_repair_whatsapp_allowlist_from_verified_connection(monkeypatch, tmp_pat
         status="connected",
         zernio_profile_id="profile_lawyer",
         zernio_account_id="account_1",
+        zernio_account_verified=True,
         phone_number_id="phone_1",
         display_phone_number="+599 9 694 5527",
         waba_id="waba_1",
-        last_request_id="cr_connected",
     )
 
     response = client.post(
@@ -224,6 +224,84 @@ def test_repair_whatsapp_allowlist_from_verified_connection(monkeypatch, tmp_pat
     assert client_json["channel_account_allowlist"]["zernio_accounts"] == ["account_1"]
 
 
+def test_allowlist_update_never_overwrites_malformed_tenant_config(
+    monkeypatch, tmp_path,
+):
+    from app.tenants import update_tenant_channel_account_allowlist
+
+    client_path = tmp_path / "tenants" / "lawyer" / "config" / "client.json"
+    client_path.parent.mkdir(parents=True)
+    client_path.write_text("{malformed", encoding="utf-8")
+    monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
+
+    assert update_tenant_channel_account_allowlist(
+        "lawyer", zernio_account_id="account_1", note="verified"
+    ) is False
+    assert client_path.read_text(encoding="utf-8") == "{malformed"
+
+
+def test_allowlist_update_accepts_already_strict_readonly_mapping(
+    monkeypatch, tmp_path,
+):
+    from app.tenants import update_tenant_channel_account_allowlist
+
+    client_path = tmp_path / "tenants" / "lawyer" / "config" / "client.json"
+    client_path.parent.mkdir(parents=True)
+    client_path.write_text(
+        json.dumps({
+            "slug": "lawyer",
+            "password": "do-not-rewrite",
+            "channel_account_allowlist": {
+                "mode": "strict",
+                "zernio_accounts": ["account_1"],
+            },
+        }),
+        encoding="utf-8",
+    )
+    client_path.chmod(0o400)
+    monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
+
+    assert update_tenant_channel_account_allowlist(
+        "lawyer", zernio_account_id="account_1", note="verified"
+    ) is True
+    assert json.loads(client_path.read_text())["password"] == "do-not-rewrite"
+
+
+def test_allowlist_update_replaces_inherited_accounts_with_exact_verified_owner(
+    monkeypatch, tmp_path,
+):
+    from app.tenants import update_tenant_channel_account_allowlist
+
+    client_path = tmp_path / "tenants" / "lawyer" / "config" / "client.json"
+    client_path.parent.mkdir(parents=True)
+    client_path.write_text(
+        json.dumps({
+            "slug": "lawyer",
+            "password": "keep-this-secret",
+            "channel_account_allowlist": {
+                "mode": "permissive",
+                "zernio_accounts": ["attacker_account", "account_1"],
+                "notes": "client-controlled legacy mapping",
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(tmp_path / "tenants"))
+
+    assert update_tenant_channel_account_allowlist(
+        "lawyer",
+        zernio_account_id="account_1",
+        note="provider-verified owner",
+    ) is True
+    repaired = json.loads(client_path.read_text(encoding="utf-8"))
+    assert repaired["password"] == "keep-this-secret"
+    assert repaired["channel_account_allowlist"] == {
+        "mode": "strict",
+        "zernio_accounts": ["account_1"],
+        "notes": "provider-verified owner",
+    }
+
+
 def test_repair_whatsapp_allowlist_queues_host_action_when_client_root_readonly(
     monkeypatch,
     tmp_path,
@@ -237,10 +315,10 @@ def test_repair_whatsapp_allowlist_queues_host_action_when_client_root_readonly(
         status="connected",
         zernio_profile_id="profile_lawyer",
         zernio_account_id="account_1",
+        zernio_account_verified=True,
         phone_number_id="phone_1",
         display_phone_number="+599 9 694 5527",
         waba_id="waba_1",
-        last_request_id="cr_connected",
     )
     seen = {}
 
@@ -276,7 +354,6 @@ def test_whatsapp_status_returns_failed(monkeypatch, tmp_path):
         status="failed",
         zernio_profile_id="profile_lawyer",
         zernio_account_id="account_1",
-        last_request_id="cr_failed",
         last_error="Client denied authorization.",
     )
 
@@ -348,3 +425,87 @@ def test_whatsapp_status_reconciles_connected_zernio_account(monkeypatch, tmp_pa
         "zernio_accounts": ["account_1"],
         "notes": "Nr3 WhatsApp connection: strict Zernio account allowlist for +599 9 694 5527.",
     }
+
+
+def test_status_reconcile_cannot_attach_provider_data_after_generation_rotates(
+    monkeypatch, tmp_path,
+):
+    from app.delete_operations import (
+        bind_tenant_generation_for_creation,
+        start_delete_operation,
+        update_delete_operation,
+    )
+    from app.provisioning import tenant_creation_lock
+
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        name="Lawyer",
+    )
+    request_row = channel_connections.create_connection_request(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        state_token="state_old_generation",
+        status="link_generated",
+    ).request
+    old_generation = request_row.tenant_generation_id
+
+    class RotatingZernioService:
+        def list_accounts(self, *, platform=None):
+            operation = start_delete_operation(
+                slug="lawyer",
+                tenant_generation_id=old_generation,
+                generation_fingerprint="sha256:" + "d" * 64,
+                account_ids=[],
+                profile_ids=["profile_lawyer"],
+            )
+            update_delete_operation(
+                slug="lawyer",
+                operation_id=operation["operation_id"],
+                expected_phases={"preparing"},
+                phase="deleted",
+            )
+            with tenant_creation_lock("lawyer"):
+                bind_tenant_generation_for_creation(
+                    slug="lawyer",
+                    generation_id="replacement-generation",
+                    status="active",
+                )
+            return [
+                ZernioAccountSummary(
+                    id="stale_account",
+                    platform="whatsapp",
+                    profile_id="profile_lawyer",
+                    profile_name="Lawyer",
+                    display_name="Old Lawyer WhatsApp",
+                    username="+599 9 000 0000",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+599 9 000 0000",
+                    phone_number_id="stale_phone",
+                    waba_id="stale_waba",
+                )
+            ]
+
+    monkeypatch.setattr(
+        "app.routes.connect.ZernioService", RotatingZernioService
+    )
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    assert response.json()["connected"] is False
+    assert channel_connections.get_connection_request(request_row.id).status == (
+        "link_generated"
+    )
+    connection = channel_connections.get_tenant_channel_connection("lawyer")
+    assert connection is None or connection.zernio_account_id != "stale_account"
+    client_data = json.loads(
+        (tenants_root / "lawyer" / "config" / "client.json").read_text()
+    )
+    assert "channel_account_allowlist" not in client_data

@@ -3480,6 +3480,27 @@ button.button-disabled,
   gap: 8px;
 }
 
+@media (max-width: 760px) {
+  .whatsapp-policy-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .whatsapp-billing-copy {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .whatsapp-billing-copy .status-chip {
+    align-self: flex-start;
+  }
+
+  .whatsapp-policy-meta {
+    grid-template-columns: 1fr;
+  }
+}
+
 .checkbox-line {
   align-items: flex-start;
   color: var(--color-text);

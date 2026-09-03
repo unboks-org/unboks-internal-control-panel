@@ -49,9 +49,9 @@ def test_sidebar_shows_connected_whatsapp_badge(client, tmp_path):
         status="connected",
         zernio_profile_id="profile_roberto",
         zernio_account_id="account_roberto",
+        zernio_account_verified=True,
         phone_number_id="phone_roberto",
         display_phone_number="+599 9 123 4567",
-        last_request_id="cr_roberto",
     )
 
     response = client.get("/admin/tenants/roberto")
@@ -120,9 +120,9 @@ def test_connected_whatsapp_without_allowlist_shows_critical(client):
         status="connected",
         zernio_profile_id="profile_lawyer",
         zernio_account_id="account_lawyer",
+        zernio_account_verified=True,
         phone_number_id="phone_lawyer",
         display_phone_number="+599 9 765 4321",
-        last_request_id="cr_lawyer",
     )
 
     response = client.get("/admin/tenants/lawyer")
@@ -158,9 +158,9 @@ def test_connected_whatsapp_rejects_non_strict_allowlists(
         status="connected",
         zernio_profile_id="profile_lawyer",
         zernio_account_id="account_lawyer",
+        zernio_account_verified=True,
         phone_number_id="phone_lawyer",
         display_phone_number="+599 9 765 4321",
-        last_request_id="cr_lawyer",
     )
 
     response = client.get("/admin/tenants/lawyer")

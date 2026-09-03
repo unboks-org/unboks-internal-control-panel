@@ -13,8 +13,14 @@ import logging
 import os
 import secrets
 import tempfile
+from contextlib import contextmanager
+from collections.abc import Iterator
 from datetime import datetime, timezone
+from functools import wraps
+from pathlib import Path
 from typing import Any
+
+from app.file_lock import exclusive_file_lock
 
 
 logger = logging.getLogger(__name__)
@@ -31,6 +37,12 @@ CHANNEL_FEATURE_KEYS: dict[str, str] = {
     "x": "x_dms",
 }
 
+NEW_TENANT_FAIL_CLOSED_TOGGLES: dict[str, bool] = {
+    "ai_auto_reply": False,
+    "whatsapp_inbox": False,
+    "facebook_dms": False,
+}
+
 
 def _state_path() -> str:
     return os.environ.get("NR3_ICP_STATE_PATH", "data/icp_overrides.json").strip()
@@ -45,13 +57,17 @@ def _load_all() -> dict[str, Any]:
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+    except FileNotFoundError:
         return {"tenants": {}}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeError(f"ICP override state is unreadable: {path}") from exc
     if not isinstance(data, dict):
-        return {"tenants": {}}
+        raise RuntimeError(f"ICP override state is malformed: {path}")
     tenants = data.get("tenants")
-    if not isinstance(tenants, dict):
+    if tenants is None:
         data["tenants"] = {}
+    elif not isinstance(tenants, dict):
+        raise RuntimeError(f"ICP override tenant state is malformed: {path}")
     return data
 
 
@@ -63,13 +79,31 @@ def _save_all(data: dict[str, Any]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
+        parent_fd = os.open(parent, os.O_RDONLY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
     except OSError:
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
+
+
+@contextmanager
+def _locked_state() -> Iterator[dict[str, Any]]:
+    """Serialize the complete state-file read/modify/write transaction."""
+    state_path = Path(_state_path())
+    lock_path = state_path.with_name(f"{state_path.name}.lock")
+    with exclusive_file_lock(lock_path):
+        data = _load_all()
+        yield data
+        _save_all(data)
 
 
 def _tenant_state(data: dict[str, Any], tenant_id: str) -> dict[str, Any]:
@@ -79,6 +113,24 @@ def _tenant_state(data: dict[str, Any], tenant_id: str) -> dict[str, Any]:
         state = {}
         tenants[tenant_id] = state
     return state
+
+
+def _serialized_tenant_mutation(function):
+    """Fence every public override write with the tenant generation lease."""
+    @wraps(function)
+    def wrapped(tenant_id: str, *args, **kwargs):
+        from app.delete_operations import require_tenant_mutation_generation
+        from app.provisioning import tenant_creation_lock
+
+        expected_generation_id = kwargs.pop("expected_generation_id", None)
+        with tenant_creation_lock(tenant_id):
+            require_tenant_mutation_generation(
+                tenant_id,
+                expected_generation_id=expected_generation_id,
+            )
+            return function(tenant_id, *args, **kwargs)
+
+    return wrapped
 
 
 def _clean_text(value: Any) -> str:
@@ -156,6 +208,7 @@ def _normalize_sot_entry(raw: Any) -> dict[str, Any] | None:
     }
 
 
+@_serialized_tenant_mutation
 def set_feature_toggle(
     tenant_id: str,
     feature_key: str,
@@ -164,17 +217,16 @@ def set_feature_toggle(
     updated_by: str = "nr3-admin",
 ) -> None:
     """Persist one feature toggle override for one tenant."""
-    data = _load_all()
-    tenant_state = _tenant_state(data, tenant_id)
-    toggles = tenant_state.setdefault("feature_toggles", {})
-    toggles[feature_key] = {
-        "value": bool(value),
-        "source": "icp_override",
-        "wired": True,
-        "updated_at": _now(),
-        "updated_by": updated_by,
-    }
-    _save_all(data)
+    with _locked_state() as data:
+        tenant_state = _tenant_state(data, tenant_id)
+        toggles = tenant_state.setdefault("feature_toggles", {})
+        toggles[feature_key] = {
+            "value": bool(value),
+            "source": "icp_override",
+            "wired": True,
+            "updated_at": _now(),
+            "updated_by": updated_by,
+        }
     logger.info(
         "icp_overrides.set_feature tenant=%s key=%s value=%s",
         tenant_id,
@@ -183,6 +235,32 @@ def set_feature_toggle(
     )
 
 
+@_serialized_tenant_mutation
+def initialize_new_tenant_fail_closed(
+    tenant_id: str,
+    *,
+    updated_by: str = "tenant-provisioner",
+) -> None:
+    """Force safe defaults for a newly owned slug before it can start."""
+    with _locked_state() as data:
+        tenant_state = _tenant_state(data, tenant_id)
+        toggles = tenant_state.get("feature_toggles")
+        if not isinstance(toggles, dict):
+            toggles = {}
+            tenant_state["feature_toggles"] = toggles
+        updated_at = _now()
+        for feature_key, value in NEW_TENANT_FAIL_CLOSED_TOGGLES.items():
+            toggles[feature_key] = {
+                "value": value,
+                "source": "icp_override",
+                "wired": True,
+                "updated_at": updated_at,
+                "updated_by": updated_by,
+            }
+    logger.info("icp_overrides.initialized_fail_closed tenant=%s", tenant_id)
+
+
+@_serialized_tenant_mutation
 def set_channel_visibility(
     tenant_id: str,
     channel_key: str,
@@ -206,6 +284,36 @@ def set_channel_visibility(
     )
 
 
+@_serialized_tenant_mutation
+def set_channel_visibility_batch(
+    tenant_id: str,
+    values: dict[str, bool],
+    *,
+    updated_by: str = "nr3-admin",
+) -> None:
+    """Atomically persist several channel visibility overrides."""
+    normalized = {
+        feature_key: bool(values[channel_key])
+        for channel_key, feature_key in CHANNEL_FEATURE_KEYS.items()
+        if channel_key in values
+    }
+    with _locked_state() as data:
+        tenant_state = _tenant_state(data, tenant_id)
+        toggles = tenant_state.setdefault("feature_toggles", {})
+        if not isinstance(toggles, dict):
+            toggles = {}
+            tenant_state["feature_toggles"] = toggles
+        updated_at = _now()
+        for feature_key, value in normalized.items():
+            toggles[feature_key] = {
+                "value": value,
+                "source": "icp_override",
+                "wired": True,
+                "updated_at": updated_at,
+                "updated_by": updated_by,
+            }
+
+
 def forget_tenant(tenant_id: str) -> bool:
     """Drop every override row for ``tenant_id``.
 
@@ -213,16 +321,16 @@ def forget_tenant(tenant_id: str) -> bool:
     flow so a deleted tenant does not leave ghost feature-toggle entries
     that resurface in Nr2 via /internal/tenants/.../overrides.
     """
-    data = _load_all()
-    tenants = data.get("tenants") if isinstance(data, dict) else None
-    if not isinstance(tenants, dict) or tenant_id not in tenants:
-        return False
-    tenants.pop(tenant_id, None)
-    _save_all(data)
+    with _locked_state() as data:
+        tenants = data.get("tenants") if isinstance(data, dict) else None
+        if not isinstance(tenants, dict) or tenant_id not in tenants:
+            return False
+        tenants.pop(tenant_id, None)
     logger.info("icp_overrides.forget_tenant tenant=%s", tenant_id)
     return True
 
 
+@_serialized_tenant_mutation
 def set_ai_tone(
     tenant_id: str,
     tone: str,
@@ -231,22 +339,21 @@ def set_ai_tone(
     updated_by: str = "nr3-admin",
 ) -> None:
     """Set or clear the ICP tone/personality override for one tenant."""
-    data = _load_all()
-    tenant_state = _tenant_state(data, tenant_id)
-    settings = tenant_state.setdefault("ai_agent_settings", {})
     clean_tone = _clean_text(tone)
-    if clean_tone:
-        settings["tone"] = {
-            "tone": clean_tone,
-            "notes": _clean_text(notes),
-            "source": "icp_override",
-            "updated_at": _now(),
-            "updated_by": updated_by,
-        }
-    else:
-        settings["tone"] = None
-    settings.setdefault("escalation_rules", None)
-    _save_all(data)
+    with _locked_state() as data:
+        tenant_state = _tenant_state(data, tenant_id)
+        settings = tenant_state.setdefault("ai_agent_settings", {})
+        if clean_tone:
+            settings["tone"] = {
+                "tone": clean_tone,
+                "notes": _clean_text(notes),
+                "source": "icp_override",
+                "updated_at": _now(),
+                "updated_by": updated_by,
+            }
+        else:
+            settings["tone"] = None
+        settings.setdefault("escalation_rules", None)
     logger.info(
         "icp_overrides.set_ai_tone tenant=%s present=%s",
         tenant_id,
@@ -254,6 +361,7 @@ def set_ai_tone(
     )
 
 
+@_serialized_tenant_mutation
 def set_escalation_rules(
     tenant_id: str,
     *,
@@ -266,29 +374,28 @@ def set_escalation_rules(
     A non-empty textarea enables that escalation type. Empty text disables
     it. When both are empty, the whole override is cleared.
     """
-    data = _load_all()
-    tenant_state = _tenant_state(data, tenant_id)
-    settings = tenant_state.setdefault("ai_agent_settings", {})
     soft = _clean_text(soft_when)
     hard = _clean_text(hard_when)
-    if soft or hard:
-        settings["escalation_rules"] = {
-            "soft_escalation": {
-                "enabled": bool(soft),
-                "when": soft,
-            },
-            "hard_escalation": {
-                "enabled": bool(hard),
-                "when": hard,
-            },
-            "source": "icp_override",
-            "updated_at": _now(),
-            "updated_by": updated_by,
-        }
-    else:
-        settings["escalation_rules"] = None
-    settings.setdefault("tone", None)
-    _save_all(data)
+    with _locked_state() as data:
+        tenant_state = _tenant_state(data, tenant_id)
+        settings = tenant_state.setdefault("ai_agent_settings", {})
+        if soft or hard:
+            settings["escalation_rules"] = {
+                "soft_escalation": {
+                    "enabled": bool(soft),
+                    "when": soft,
+                },
+                "hard_escalation": {
+                    "enabled": bool(hard),
+                    "when": hard,
+                },
+                "source": "icp_override",
+                "updated_at": _now(),
+                "updated_by": updated_by,
+            }
+        else:
+            settings["escalation_rules"] = None
+        settings.setdefault("tone", None)
     logger.info(
         "icp_overrides.set_escalation_rules tenant=%s present=%s",
         tenant_id,
@@ -296,6 +403,7 @@ def set_escalation_rules(
     )
 
 
+@_serialized_tenant_mutation
 def set_agent_name_override(
     tenant_id: str,
     name: str,
@@ -303,22 +411,21 @@ def set_agent_name_override(
     updated_by: str = "nr3-admin",
 ) -> None:
     """Set or clear the admin AI Agent name override for one tenant."""
-    data = _load_all()
-    tenant_state = _tenant_state(data, tenant_id)
-    settings = tenant_state.setdefault("ai_agent_settings", {})
     clean_name = _clean_text(name)
-    if clean_name:
-        settings["agent_name"] = {
-            "name": clean_name,
-            "source": "icp_override",
-            "updated_at": _now(),
-            "updated_by": updated_by,
-        }
-    else:
-        settings["agent_name"] = None
-    settings.setdefault("tone", None)
-    settings.setdefault("escalation_rules", None)
-    _save_all(data)
+    with _locked_state() as data:
+        tenant_state = _tenant_state(data, tenant_id)
+        settings = tenant_state.setdefault("ai_agent_settings", {})
+        if clean_name:
+            settings["agent_name"] = {
+                "name": clean_name,
+                "source": "icp_override",
+                "updated_at": _now(),
+                "updated_by": updated_by,
+            }
+        else:
+            settings["agent_name"] = None
+        settings.setdefault("tone", None)
+        settings.setdefault("escalation_rules", None)
     logger.info(
         "icp_overrides.set_agent_name tenant=%s present=%s",
         tenant_id,
@@ -374,6 +481,7 @@ def _normalize_response_timing(raw: Any) -> dict[str, Any] | None:
     }
 
 
+@_serialized_tenant_mutation
 def set_response_timing_override(
     tenant_id: str,
     *,
@@ -389,28 +497,27 @@ def set_response_timing_override(
     updated_by: str = "nr3-admin",
 ) -> None:
     """Set or clear the admin response timing override for one tenant."""
-    data = _load_all()
-    tenant_state = _tenant_state(data, tenant_id)
-    if clear:
-        tenant_state["response_timing"] = None
-    else:
-        settings = _normalize_response_timing({
-            "message_batching_enabled": enabled,
-            "mode": mode,
-            "preset": preset,
-            "delay_seconds": delay_seconds,
-            "max_wait_seconds": max_wait_seconds,
-            "custom_delay_seconds": custom_delay_seconds,
-            "random_min_seconds": random_min_seconds,
-            "random_max_seconds": random_max_seconds,
-        })
-        tenant_state["response_timing"] = {
-            "settings": settings,
-            "source": "icp_override",
-            "updated_at": _now(),
-            "updated_by": updated_by,
-        }
-    _save_all(data)
+    with _locked_state() as data:
+        tenant_state = _tenant_state(data, tenant_id)
+        if clear:
+            tenant_state["response_timing"] = None
+        else:
+            settings = _normalize_response_timing({
+                "message_batching_enabled": enabled,
+                "mode": mode,
+                "preset": preset,
+                "delay_seconds": delay_seconds,
+                "max_wait_seconds": max_wait_seconds,
+                "custom_delay_seconds": custom_delay_seconds,
+                "random_min_seconds": random_min_seconds,
+                "random_max_seconds": random_max_seconds,
+            })
+            tenant_state["response_timing"] = {
+                "settings": settings,
+                "source": "icp_override",
+                "updated_at": _now(),
+                "updated_by": updated_by,
+            }
     logger.info(
         "icp_overrides.set_response_timing tenant=%s present=%s",
         tenant_id,
@@ -479,6 +586,7 @@ def sot_entries_for_tenant(tenant_id: str) -> list[dict[str, Any]]:
     return entries
 
 
+@_serialized_tenant_mutation
 def add_sot_entry(
     tenant_id: str,
     *,
@@ -505,23 +613,24 @@ def add_sot_entry(
         "updated_at": _now(),
         "updated_by": updated_by,
     }
-    data = _load_all()
-    tenant_state = _tenant_state(data, tenant_id)
-    entries = tenant_state.setdefault("sot_entries", [])
-    if not isinstance(entries, list):
-        entries = []
-        tenant_state["sot_entries"] = entries
-    if clean_id:
-        entries = [
-            existing for existing in entries
-            if _clean_text(existing.get("id")) != clean_id
-        ]
-    entries.insert(0, entry)
-    _save_all(data)
+    with _locked_state() as data:
+        tenant_state = _tenant_state(data, tenant_id)
+        entries = tenant_state.setdefault("sot_entries", [])
+        if not isinstance(entries, list):
+            entries = []
+            tenant_state["sot_entries"] = entries
+        if clean_id:
+            entries = [
+                existing for existing in entries
+                if _clean_text(existing.get("id")) != clean_id
+            ]
+            tenant_state["sot_entries"] = entries
+        entries.insert(0, entry)
     logger.info("icp_overrides.add_sot_entry tenant=%s title=%r", tenant_id, clean_title)
     return entry
 
 
+@_serialized_tenant_mutation
 def update_sot_entry(
     tenant_id: str,
     entry_id: str,
@@ -542,50 +651,49 @@ def update_sot_entry(
     if not clean_content:
         raise ValueError("SOT content is required.")
 
-    data = _load_all()
-    tenants = data.get("tenants") if isinstance(data, dict) else {}
-    tenant_state = tenants.get(tenant_id) if isinstance(tenants, dict) else {}
-    if not isinstance(tenant_state, dict):
-        return None
-    entries = tenant_state.get("sot_entries")
-    if not isinstance(entries, list):
-        return None
+    with _locked_state() as data:
+        tenants = data.get("tenants") if isinstance(data, dict) else {}
+        tenant_state = tenants.get(tenant_id) if isinstance(tenants, dict) else {}
+        if not isinstance(tenant_state, dict):
+            return None
+        entries = tenant_state.get("sot_entries")
+        if not isinstance(entries, list):
+            return None
 
-    for index, existing in enumerate(entries):
-        if _clean_text(existing.get("id")) != clean_id:
-            continue
-        updated = {
-            **existing,
-            "id": clean_id,
-            "title": clean_title,
-            "content": clean_content,
-            "category": _clean_text(category) or "general",
-            "source": existing.get("source") or "icp_override",
-            "updated_at": _now(),
-            "updated_by": updated_by,
-        }
-        entries[index] = updated
-        _save_all(data)
-        logger.info("icp_overrides.update_sot_entry tenant=%s entry=%s", tenant_id, clean_id)
-        return _normalize_sot_entry(updated)
+        for index, existing in enumerate(entries):
+            if _clean_text(existing.get("id")) != clean_id:
+                continue
+            updated = {
+                **existing,
+                "id": clean_id,
+                "title": clean_title,
+                "content": clean_content,
+                "category": _clean_text(category) or "general",
+                "source": existing.get("source") or "icp_override",
+                "updated_at": _now(),
+                "updated_by": updated_by,
+            }
+            entries[index] = updated
+            logger.info("icp_overrides.update_sot_entry tenant=%s entry=%s", tenant_id, clean_id)
+            return _normalize_sot_entry(updated)
     return None
 
 
+@_serialized_tenant_mutation
 def delete_sot_entry(tenant_id: str, entry_id: str) -> bool:
-    data = _load_all()
-    tenants = data.get("tenants") if isinstance(data, dict) else {}
-    tenant_state = tenants.get(tenant_id) if isinstance(tenants, dict) else {}
-    if not isinstance(tenant_state, dict):
-        return False
-    entries = tenant_state.get("sot_entries")
-    if not isinstance(entries, list):
-        return False
     target = _clean_text(entry_id)
-    kept = [entry for entry in entries if _clean_text(entry.get("id")) != target]
-    if len(kept) == len(entries):
-        return False
-    tenant_state["sot_entries"] = kept
-    _save_all(data)
+    with _locked_state() as data:
+        tenants = data.get("tenants") if isinstance(data, dict) else {}
+        tenant_state = tenants.get(tenant_id) if isinstance(tenants, dict) else {}
+        if not isinstance(tenant_state, dict):
+            return False
+        entries = tenant_state.get("sot_entries")
+        if not isinstance(entries, list):
+            return False
+        kept = [entry for entry in entries if _clean_text(entry.get("id")) != target]
+        if len(kept) == len(entries):
+            return False
+        tenant_state["sot_entries"] = kept
     logger.info("icp_overrides.delete_sot_entry tenant=%s entry=%s", tenant_id, target)
     return True
 

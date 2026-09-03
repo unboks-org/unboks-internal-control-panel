@@ -1,6 +1,12 @@
+import json
+import threading
+
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
+from app import nr2_sync
+from app.delete_operations import DeleteOperationConflict
 from app.main import app
 from app.nr2_sync import Nr2KnowledgeSync
 from app.nr2_sync import (
@@ -11,6 +17,51 @@ from app.nr2_sync import (
     update_nr2_info_update,
     upload_nr2_photo,
 )
+
+
+def _invoke_nr2_outbound_mutation(
+    operation: str,
+    *,
+    tenant_id: str,
+    client: httpx.Client,
+    expected_generation_id: str | None = None,
+):
+    common = {
+        "client": client,
+        "expected_generation_id": expected_generation_id,
+    }
+    if operation == "info_update":
+        return update_nr2_info_update(
+            tenant_id,
+            "42",
+            type_="general",
+            text="The Monday departure is confirmed.",
+            **common,
+        )
+    if operation == "photo_upload":
+        return upload_nr2_photo(
+            tenant_id,
+            filename="klein-curacao.jpg",
+            content_type="image/jpeg",
+            content=b"JPEGDATA",
+            **common,
+        )
+    if operation == "photo_delete":
+        return delete_nr2_photo(tenant_id, "7", **common)
+    if operation == "auto_block":
+        return nr2_sync.update_auto_block_settings(
+            tenant_id,
+            {"enabled": True},
+            **common,
+        )
+    if operation == "product_settings":
+        return update_nr2_product_settings(
+            tenant_id,
+            delivery_cost_amount="7",
+            delivery_cost_currency="XCG",
+            **common,
+        )
+    raise AssertionError(f"Unknown test operation: {operation}")
 
 
 def test_nr2_sync_missing_credentials(monkeypatch):
@@ -387,6 +438,122 @@ def test_delete_nr2_photo_deletes_from_tenant_photo_library(monkeypatch):
     assert seen["deleted"] == "/api/wibrandt/dashboard/api/photos/7"
 
 
+@pytest.mark.parametrize(
+    "operation",
+    (
+        "info_update",
+        "photo_upload",
+        "photo_delete",
+        "auto_block",
+        "product_settings",
+    ),
+)
+def test_nr2_outbound_mutators_reject_stale_generation_before_credentials_or_http(
+    monkeypatch,
+    operation,
+):
+    tenant_id = f"mermaid-{operation.replace('_', '-')}"
+    current_generation = nr2_sync._capture_tenant_generation(tenant_id)
+    assert current_generation != "stale-generation"
+
+    monkeypatch.setattr(
+        "app.nr2_sync.get_tenant_client_data",
+        lambda tenant: (_ for _ in ()).throw(
+            AssertionError("stale mutation must not read replacement credentials")
+        ),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(
+            f"stale mutation must not make an Nr2 request: {request.method} {request.url}"
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(DeleteOperationConflict, match="generation changed"):
+        _invoke_nr2_outbound_mutation(
+            operation,
+            tenant_id=tenant_id,
+            client=client,
+            expected_generation_id="stale-generation",
+        )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    (
+        "info_update",
+        "photo_upload",
+        "photo_delete",
+        "auto_block",
+        "product_settings",
+    ),
+)
+def test_nr2_outbound_mutators_hold_lifecycle_lease_through_credentials_and_http(
+    monkeypatch,
+    operation,
+):
+    from app.provisioning import tenant_creation_lock
+
+    tenant_id = f"tracy-{operation.replace('_', '-')}"
+    current_generation = nr2_sync._capture_tenant_generation(tenant_id)
+    contender_attempting = threading.Event()
+    contender_acquired = threading.Event()
+
+    def contend_for_lifecycle_lease() -> None:
+        contender_attempting.set()
+        with tenant_creation_lock(tenant_id):
+            contender_acquired.set()
+
+    contender: threading.Thread | None = None
+
+    def credentials(tenant: str) -> dict[str, str]:
+        nonlocal contender
+        assert tenant == tenant_id
+        contender = threading.Thread(target=contend_for_lifecycle_lease)
+        contender.start()
+        assert contender_attempting.wait(1)
+        assert not contender_acquired.wait(0.05)
+        return {"password": "generation-bound-password"}
+
+    monkeypatch.setattr("app.nr2_sync.get_tenant_client_data", credentials)
+    mutation_requests: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/login"):
+            assert request.content == b'{"password":"generation-bound-password"}'
+            return httpx.Response(200, json={"token": "safe-token"})
+        assert contender_attempting.is_set()
+        assert not contender_acquired.is_set()
+        assert request.headers["authorization"] == "Bearer safe-token"
+        mutation_requests.append((request.method, request.url.path))
+        if request.url.path.endswith("/settings/product-settings"):
+            return httpx.Response(
+                200,
+                json={
+                    "delivery_cost_amount": 7,
+                    "delivery_cost_currency": "XCG",
+                },
+            )
+        if request.url.path.endswith("/photos/upload"):
+            return httpx.Response(200, json={"photo": {"id": 7}})
+        return httpx.Response(200, json={"enabled": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = _invoke_nr2_outbound_mutation(
+        operation,
+        tenant_id=tenant_id,
+        client=client,
+        expected_generation_id=current_generation,
+    )
+
+    assert result.ok is True
+    assert len(mutation_requests) == 1
+    assert contender is not None
+    contender.join(timeout=2)
+    assert not contender.is_alive()
+    assert contender_acquired.is_set()
+
+
 def test_nr2_sync_returns_fresh_cache_without_hitting_runtime(monkeypatch, tmp_path):
     cache = tmp_path / "nr2_cache.json"
     cache.write_text(
@@ -416,6 +583,87 @@ def test_nr2_sync_returns_fresh_cache_without_hitting_runtime(monkeypatch, tmp_p
 
     assert sync.cached is True
     assert sync.sot_blocks[0]["title"] == "Cached SOT"
+
+
+def test_nr2_cache_forget_tenant_removes_exact_slug_and_preserves_others(
+    monkeypatch,
+    tmp_path,
+):
+    cache = tmp_path / "nr2_cache.json"
+    cache.write_text(
+        json.dumps(
+            {
+                "mermaid": {"status": "ok", "sot_blocks": [{"title": "Trip"}]},
+                "mermaid-demo": {"status": "ok", "sot_blocks": [{"title": "Demo"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NR3_NR2_KNOWLEDGE_CACHE_PATH", str(cache))
+
+    assert nr2_sync.tenant_state_exists("mermaid") is True
+    assert nr2_sync.forget_tenant("mermaid") is True
+    assert nr2_sync.tenant_state_exists("mermaid") is False
+    assert nr2_sync.forget_tenant("mermaid") is False
+
+    remaining = json.loads(cache.read_text(encoding="utf-8"))
+    assert remaining == {
+        "mermaid-demo": {"status": "ok", "sot_blocks": [{"title": "Demo"}]}
+    }
+
+
+def test_nr2_cache_cleanup_and_absence_checks_fail_closed_on_malformed_store(
+    monkeypatch,
+    tmp_path,
+):
+    cache = tmp_path / "nr2_cache.json"
+    cache.write_text("{broken", encoding="utf-8")
+    monkeypatch.setenv("NR3_NR2_KNOWLEDGE_CACHE_PATH", str(cache))
+
+    with pytest.raises(RuntimeError, match="unreadable"):
+        nr2_sync.tenant_state_exists("mermaid")
+    with pytest.raises(RuntimeError, match="unreadable"):
+        nr2_sync.forget_tenant("mermaid")
+
+    assert cache.read_text(encoding="utf-8") == "{broken"
+
+
+def test_nr2_cache_absence_check_fails_closed_on_unreadable_store(
+    monkeypatch,
+    tmp_path,
+):
+    cache = tmp_path / "nr2_cache.json"
+    cache.mkdir()
+    monkeypatch.setenv("NR3_NR2_KNOWLEDGE_CACHE_PATH", str(cache))
+
+    with pytest.raises(RuntimeError, match="unreadable"):
+        nr2_sync.tenant_state_exists("mermaid")
+
+
+def test_nr2_cache_write_rejects_stale_tenant_generation(monkeypatch, tmp_path):
+    cache = tmp_path / "nr2_cache.json"
+    monkeypatch.setenv("NR3_NR2_KNOWLEDGE_CACHE_PATH", str(cache))
+    current = Nr2KnowledgeSync(
+        status="ok",
+        fetched_at="2026-09-02T12:00:00+00:00",
+        sot_blocks=({"title": "Current generation"},),
+    )
+    stale = Nr2KnowledgeSync(
+        status="ok",
+        fetched_at="2026-09-02T12:01:00+00:00",
+        sot_blocks=({"title": "Stale generation"},),
+    )
+    nr2_sync._write_tenant_cache("mermaid", current)
+    before = cache.read_text(encoding="utf-8")
+
+    with pytest.raises(DeleteOperationConflict, match="generation changed"):
+        nr2_sync._write_tenant_cache(
+            "mermaid",
+            stale,
+            expected_generation_id="stale-generation",
+        )
+
+    assert cache.read_text(encoding="utf-8") == before
 
 
 def test_nr2_sync_refresh_bypasses_cache(monkeypatch, tmp_path):

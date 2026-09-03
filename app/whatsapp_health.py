@@ -169,6 +169,35 @@ def build_whatsapp_health(tenant_id: str) -> WhatsAppHealth:
         else channel_connections.get_tenant_zernio_profile_id(tenant_id)
     )
 
+    if (
+        connection
+        and connection.status == "connected"
+        and not connection.zernio_account_verified
+    ):
+        return WhatsAppHealth(
+            status="needs_reconnect_unverified_account",
+            label="Needs reconnect: account ownership unverified",
+            connected=False,
+            provider_connected=False,
+            badge_class="tenant-wa-critical",
+            chip_class="status-error",
+            visible=True,
+            phone=phone,
+            phone_number_id=None,
+            provider_account_id=None,
+            zernio_profile_id=profile_id,
+            connected_at=connection.connected_at,
+            updated_at=connection.updated_at,
+            last_error="Legacy provider account ownership must be verified again.",
+            allowlist=allowlist,
+            repair_available=False,
+            action_label="Generate new WhatsApp connection link",
+            summary=(
+                "The stored account predates provider-verification tracking. "
+                "Reconnect WhatsApp before routing or allowlist repair."
+            ),
+        )
+
     if connection and connection.status == "connected":
         if allowlist.ok:
             return WhatsAppHealth(

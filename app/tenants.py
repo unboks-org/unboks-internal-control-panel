@@ -6,6 +6,7 @@ import re
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Optional
 
@@ -211,13 +212,89 @@ def _save_registry(data: dict) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
+        parent_fd = os.open(parent, os.O_RDONLY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
     except OSError:
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
+
+
+def write_private_text(path: str | Path, content: str) -> None:
+    """Atomically write a sensitive tenant file with owner-only permissions."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fd = -1
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+        parent_fd = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except Exception:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def write_private_client_json(
+    path: str | Path,
+    payload: dict,
+    *,
+    sort_keys: bool = False,
+) -> None:
+    """Atomically write a tenant client.json with owner-only permissions."""
+    content = json.dumps(
+        payload,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=sort_keys,
+    ) + "\n"
+    write_private_text(path, content)
+
+
+def _serialized_slug_mutation(function):
+    """Fence registry/runtime metadata writes with the tenant generation."""
+    @wraps(function)
+    def wrapped(slug: str, *args, **kwargs):
+        from app.delete_operations import require_tenant_mutation_generation
+        from app.provisioning import tenant_creation_lock
+
+        expected_generation_id = kwargs.pop("expected_generation_id", None)
+        safe_slug = validate_slug(slug)
+        with tenant_creation_lock(safe_slug):
+            require_tenant_mutation_generation(
+                safe_slug,
+                expected_generation_id=expected_generation_id,
+            )
+            return function(safe_slug, *args, **kwargs)
+
+    return wrapped
 
 
 def register_tenant(client_data: dict) -> None:
@@ -239,26 +316,32 @@ def register_tenant(client_data: dict) -> None:
     path = _registry_path()
     if not path:
         return
-    with exclusive_file_lock(Path(path).with_suffix(Path(path).suffix + ".lock")):
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
-            data = {"tenants": {}}
-        if not isinstance(data, dict):
-            data = {"tenants": {}}
-        tenants = data.setdefault("tenants", {})
-        if not isinstance(tenants, dict):
-            tenants = {}
-            data["tenants"] = tenants
-        tenants[tenant.id] = {
-            "slug": tenant.id,
-            "name": tenant.name,
-            "status": tenant.status,
-        }
-        _save_registry(data)
+    from app.delete_operations import require_tenant_mutation_generation
+    from app.provisioning import tenant_creation_lock
+
+    with tenant_creation_lock(tenant.id):
+        require_tenant_mutation_generation(tenant.id)
+        with exclusive_file_lock(Path(path).with_suffix(Path(path).suffix + ".lock")):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                data = {"tenants": {}}
+            if not isinstance(data, dict):
+                data = {"tenants": {}}
+            tenants = data.setdefault("tenants", {})
+            if not isinstance(tenants, dict):
+                tenants = {}
+                data["tenants"] = tenants
+            tenants[tenant.id] = {
+                "slug": tenant.id,
+                "name": tenant.name,
+                "status": tenant.status,
+            }
+            _save_registry(data)
 
 
+@_serialized_slug_mutation
 def update_tenant_status(slug: str, status: str) -> bool:
     """Best-effort status update for the ICP-visible tenant row.
 
@@ -286,13 +369,10 @@ def update_tenant_status(slug: str, status: str) -> bool:
                     business = data.get("business")
                     if isinstance(business, dict) and business:
                         business["status"] = normalized
-                    client_path.write_text(
-                        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-                        encoding="utf-8",
-                    )
+                    write_private_client_json(client_path, data)
                     changed = True
 
-    existing = get_tenant(safe_slug)
+    existing = _get_tenant_without_reconcile(safe_slug)
     register_tenant({
         "slug": safe_slug,
         "name": existing.name if existing else safe_slug,
@@ -356,6 +436,122 @@ def forget_tenant_state(slug: str) -> None:
         channel_connections.forget_tenant(slug)
     except Exception:  # pragma: no cover -- defensive
         pass
+    try:
+        from app import password_recovery
+        password_recovery.forget_tenant(slug)
+    except Exception:  # pragma: no cover -- defensive
+        pass
+    try:
+        from app import nr2_sync, prompt_conflicts
+        nr2_sync.forget_tenant(slug)
+        prompt_conflicts.forget_tenant(slug)
+    except Exception:  # pragma: no cover -- defensive
+        pass
+    try:
+        from app.delete_operations import retire_tenant_generation
+        retire_tenant_generation(slug=slug)
+    except Exception:  # pragma: no cover -- defensive
+        pass
+
+
+def _verify_json_tenant_absent(
+    path: Path,
+    slug: str,
+    *,
+    tenants_key: str | None,
+) -> None:
+    if not path.exists():
+        return
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeError(f"Tenant state is unreadable after cleanup: {path}") from exc
+    if not isinstance(raw, dict):
+        raise RuntimeError(f"Tenant state is malformed after cleanup: {path}")
+    rows = raw.get(tenants_key) if tenants_key else raw
+    if rows is None and tenants_key:
+        rows = {}
+    if not isinstance(rows, dict):
+        raise RuntimeError(f"Tenant state is malformed after cleanup: {path}")
+    if slug in rows:
+        raise RuntimeError(f"Tenant {slug} remains in local state: {path}")
+
+
+def forget_tenant_state_strict(slug: str) -> None:
+    """Idempotently remove and then prove every local tenant state row absent.
+
+    Permanent deletion must not open a slug for reuse while stale provider,
+    port, toggle, registry, or note state remains. Unlike the legacy best-effort
+    helper, this function propagates write/read failures so the durable delete
+    ledger stays active and a later reconciliation can safely retry.
+    """
+    safe_slug = validate_slug(slug)
+    from app import (
+        channel_connections,
+        channel_state,
+        icp_overrides,
+        nr2_sync,
+        password_recovery,
+        prompt_conflicts,
+        tenant_notes,
+    )
+    from app.port_registry import read_port_registry, release_tenant_port
+
+    unregister_tenant(safe_slug)
+    release_tenant_port(safe_slug)
+    channel_state.forget_tenant(safe_slug)
+    icp_overrides.forget_tenant(safe_slug)
+    tenant_notes.forget_tenant(safe_slug)
+    channel_connections.forget_tenant(safe_slug)
+    password_recovery.forget_tenant(safe_slug)
+    nr2_sync.forget_tenant(safe_slug)
+    prompt_conflicts.forget_tenant(safe_slug)
+
+    registry_value = _registry_path()
+    if registry_value:
+        _verify_json_tenant_absent(
+            Path(registry_value), safe_slug, tenants_key="tenants"
+        )
+    port_registry = read_port_registry()
+    if safe_slug in port_registry:
+        raise RuntimeError(
+            f"Tenant {safe_slug} remains in the local port registry."
+        )
+    _verify_json_tenant_absent(
+        Path(os.getenv("NR3_CHANNEL_STATE_PATH", "data/channel_state.json")),
+        safe_slug,
+        tenants_key=None,
+    )
+    _verify_json_tenant_absent(
+        Path(os.getenv("NR3_ICP_STATE_PATH", "data/icp_overrides.json")),
+        safe_slug,
+        tenants_key="tenants",
+    )
+    _verify_json_tenant_absent(
+        Path(os.getenv("NR3_TENANT_NOTES_PATH", "data/tenant_notes.json")),
+        safe_slug,
+        tenants_key="tenants",
+    )
+    if channel_connections.tenant_state_exists(safe_slug):
+        raise RuntimeError(
+            f"Tenant {safe_slug} remains in the channel connection database."
+        )
+    if channel_connections.list_tenant_orphan_profile_ids(safe_slug):
+        raise RuntimeError(
+            f"Tenant {safe_slug} retains provider profiles awaiting cleanup."
+        )
+    if password_recovery.tenant_state_exists(safe_slug):
+        raise RuntimeError(
+            f"Tenant {safe_slug} retains password-recovery credentials."
+        )
+    if nr2_sync.tenant_state_exists(safe_slug):
+        raise RuntimeError(
+            f"Tenant {safe_slug} remains in the active Nr2 knowledge cache."
+        )
+    if prompt_conflicts.tenant_state_exists(safe_slug):
+        raise RuntimeError(
+            f"Tenant {safe_slug} retains active prompt-conflict review state."
+        )
 
 
 def list_tenants() -> tuple[Tenant, ...]:
@@ -389,6 +585,22 @@ def list_tenants() -> tuple[Tenant, ...]:
 
 def get_tenant(tenant_id: str) -> Optional[Tenant]:
     for tenant in list_tenants():
+        if tenant.id == tenant_id:
+            return tenant
+    return None
+
+
+def _get_tenant_without_reconcile(tenant_id: str) -> Optional[Tenant]:
+    """Read one tenant without acquiring locks for unrelated tenants."""
+    data = get_tenant_client_data(tenant_id)
+    if data:
+        tenant = _tenant_from_source(data, tenant_id)
+        if tenant is not None and tenant.id == tenant_id:
+            return tenant
+    for tenant in _load_tenants_from_registry():
+        if tenant.id == tenant_id:
+            return tenant
+    for tenant in _TENANTS:
         if tenant.id == tenant_id:
             return tenant
     return None
@@ -496,6 +708,7 @@ def whatsapp_billing_policy(tenant_id: str) -> dict[str, object]:
     }
 
 
+@_serialized_slug_mutation
 def update_whatsapp_billing_policy(
     tenant_id: str,
     *,
@@ -530,10 +743,7 @@ def update_whatsapp_billing_policy(
             data = {}
         data["slug"] = safe_slug
         data["whatsapp_billing_policy"] = policy
-        client_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        write_private_client_json(client_path, data, sort_keys=True)
     return whatsapp_billing_policy(safe_slug)
 
 
@@ -568,6 +778,7 @@ def tenant_cost_guardrails(tenant_id: str) -> dict[str, object]:
     }
 
 
+@_serialized_slug_mutation
 def update_tenant_cost_guardrails(
     tenant_id: str,
     *,
@@ -611,13 +822,11 @@ def update_tenant_cost_guardrails(
             data = {}
         data["slug"] = safe_slug
         data["tenant_cost_guardrails"] = guardrails
-        client_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        write_private_client_json(client_path, data, sort_keys=True)
     return tenant_cost_guardrails(safe_slug)
 
 
+@_serialized_slug_mutation
 def update_tenant_account_details(
     tenant_id: str,
     *,
@@ -676,12 +885,9 @@ def update_tenant_account_details(
                     business["website"] = clean["website"]
                     business["address"] = clean["address"]
                     business["logo_url"] = clean["logo_url"]
-                client_path.write_text(
-                    json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-                    encoding="utf-8",
-                )
+                write_private_client_json(client_path, data)
 
-    existing = get_tenant(safe_slug)
+    existing = _get_tenant_without_reconcile(safe_slug)
     status = existing.status if existing else "active"
     register_tenant({
         "slug": safe_slug,
@@ -690,6 +896,7 @@ def update_tenant_account_details(
     })
 
 
+@_serialized_slug_mutation
 def update_tenant_channel_account_allowlist(
     tenant_id: str,
     *,
@@ -719,27 +926,34 @@ def update_tenant_channel_account_allowlist(
             try:
                 data = json.loads(client_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
-                data = {}
+                return False
             if not isinstance(data, dict):
-                data = {}
+                return False
             existing = data.get("channel_account_allowlist")
-            accounts: list[str] = []
             if isinstance(existing, dict):
                 raw_accounts = existing.get("zernio_accounts")
-                if isinstance(raw_accounts, list):
-                    accounts = [str(item).strip() for item in raw_accounts if str(item).strip()]
-            if account_id not in accounts:
-                accounts.append(account_id)
+                accounts = (
+                    [str(item).strip() for item in raw_accounts if str(item).strip()]
+                    if isinstance(raw_accounts, list)
+                    else []
+                )
+                if (
+                    str(existing.get("mode") or "").strip().lower() == "strict"
+                    and accounts == [account_id]
+                ):
+                    # A read-only mount is still enough to prove that a prior
+                    # host-worker repair completed; no rewrite is necessary.
+                    return True
             data["channel_account_allowlist"] = {
                 "mode": "strict",
-                "zernio_accounts": accounts,
+                # This function is called only after Nr3 has re-fetched and
+                # verified the selected provider account. Never promote
+                # inherited/client-writable ids into the strict allowlist.
+                "zernio_accounts": [account_id],
                 "notes": note.strip()
                 or "Strict account allowlist maintained by Nr3 WhatsApp connection state.",
             }
-            client_path.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
+            write_private_client_json(client_path, data, sort_keys=True)
     except OSError:
         return False
     return True
@@ -778,6 +992,26 @@ def validate_slug(slug: str) -> str:
             "Slug must be 2-50 chars, lowercase letters / digits / - / _, "
             "starting with a letter.")
     return s
+
+
+def tenant_slug_exists_for_creation(slug: str) -> bool:
+    """Check create-time slug ownership without result-reconciliation side effects."""
+    safe_slug = validate_slug(slug)
+    if safe_slug in RESERVED_SLUGS:
+        return True
+    try:
+        from app.delete_operations import delete_operation_blocks_lifecycle
+
+        if delete_operation_blocks_lifecycle(safe_slug):
+            return True
+    except Exception:
+        # A missing/unreadable lifecycle ledger can hide an in-flight delete;
+        # creation must fail closed rather than reuse that slug.
+        return True
+    if any(tenant.id == safe_slug for tenant in _load_tenants_from_registry()):
+        return True
+    root = os.getenv("NR3_TENANTS_CLIENT_DIR", _DEFAULT_TENANTS_CLIENT_DIR).strip()
+    return bool(root and os.path.exists(os.path.join(root, safe_slug)))
 
 
 def derive_slug_from_name(name: str) -> str:
@@ -825,8 +1059,7 @@ def create_tenant_directory(slug: str, business: dict,
     payload = {"business": dict(business)}
     payload["business"]["slug"] = safe_slug
     config_path = os.path.join(tenant_root, "config", "client.json")
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
+    write_private_client_json(config_path, payload)
     return tenant_root
 
 
