@@ -672,7 +672,8 @@ def tenant_account_details(tenant_id: str) -> dict[str, str]:
         "name": first_text("name", "business_name", fallback=tenant.name if tenant else tenant_id),
         "contact_person": first_text("contact_person", "contact_name", "owner_name"),
         "email": first_text("email", "contact_email", "owner_email"),
-        "phone": first_text("whatsapp", "phone", "telephone"),
+        "phone": first_text("phone", "telephone"),
+        "whatsapp": first_text("whatsapp"),
         "website": first_text("website", "url"),
         "address": first_text("address", "location"),
         "logo_url": first_text("logo_url", "logo", "logoUrl"),
@@ -834,6 +835,7 @@ def update_tenant_account_details(
     contact_person: str = "",
     email: str = "",
     phone: str = "",
+    whatsapp: Optional[str] = None,
     website: str = "",
     address: str = "",
     logo_url: str = "",
@@ -849,6 +851,10 @@ def update_tenant_account_details(
         "contact_person": (contact_person or "").strip(),
         "email": (email or "").strip(),
         "phone": (phone or "").strip(),
+        # ``None`` is the compatibility sentinel for backups created before
+        # public phone and WhatsApp were modeled independently. It preserves
+        # the restored runtime value; an explicit empty string still clears it.
+        "whatsapp": None if whatsapp is None else (whatsapp or "").strip(),
         "website": (website or "").strip(),
         "address": (address or "").strip(),
         "logo_url": (logo_url or "").strip(),
@@ -869,8 +875,9 @@ def update_tenant_account_details(
                 data["name"] = clean["name"]
                 data["contact_person"] = clean["contact_person"]
                 data["email"] = clean["email"]
-                data["whatsapp"] = clean["phone"]
                 data["phone"] = clean["phone"]
+                if clean["whatsapp"] is not None:
+                    data["whatsapp"] = clean["whatsapp"]
                 data["website"] = clean["website"]
                 data["address"] = clean["address"]
                 data["logo_url"] = clean["logo_url"]
@@ -880,8 +887,9 @@ def update_tenant_account_details(
                     business["name"] = clean["name"]
                     business["contact_person"] = clean["contact_person"]
                     business["email"] = clean["email"]
-                    business["whatsapp"] = clean["phone"]
                     business["phone"] = clean["phone"]
+                    if clean["whatsapp"] is not None:
+                        business["whatsapp"] = clean["whatsapp"]
                     business["website"] = clean["website"]
                     business["address"] = clean["address"]
                     business["logo_url"] = clean["logo_url"]

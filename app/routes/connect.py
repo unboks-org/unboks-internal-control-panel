@@ -5,6 +5,7 @@ import json
 import logging
 import hashlib
 import hmac
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -103,8 +104,11 @@ def _require_operator_json(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Admin authentication required.")
 
 
-def _whatsapp_callback_url() -> str:
-    return build_whatsapp_callback_url(get_settings())
+def _whatsapp_callback_url(*, correlation_token: str | None = None) -> str:
+    return build_whatsapp_callback_url(
+        get_settings(),
+        correlation_token=correlation_token,
+    )
 
 
 def _result_redirect(status: str, *, tenant_id: str | None = None) -> RedirectResponse:
@@ -263,8 +267,36 @@ def _upsert_connected_account(
     *,
     request_id: str | None = None,
     callback_payload: dict[str, str] | None = None,
+    require_current_request: bool = False,
+    enforce_latest_request: bool = False,
+    expected_latest_request_id: str | None = None,
     expected_generation_id: str | None = None,
 ) -> tuple[channel_connections.TenantChannelConnection, AutoProvisionResult]:
+    if require_current_request or enforce_latest_request:
+        current_request = (
+            channel_connections.get_connection_request(request_id)
+            if request_id
+            else None
+        )
+        latest_request = channel_connections.get_latest_connection_request_for_tenant(
+            tenant_id
+        )
+        required_latest_id = (
+            request_id if require_current_request else expected_latest_request_id
+        )
+        if (
+            (latest_request.id if latest_request else None) != required_latest_id
+            or (
+                require_current_request
+                and (
+                    current_request is None
+                    or current_request.status != "callback_received"
+                )
+            )
+        ):
+            raise channel_connections.ProviderOwnershipConflict(
+                "The provider authorization request was superseded by a newer link."
+            )
     metadata: dict[str, object] = {
         "zernio": {
             "displayName": account.display_name,
@@ -335,11 +367,12 @@ def _record_unverified_connection_attempt(
     *,
     status: str,
     zernio_profile_id: str | None,
+    zernio_account_id: str | None = None,
     request_id: str,
     callback_payload: dict[str, str],
     last_error: str | None,
     expected_generation_id: str | None = None,
-) -> channel_connections.TenantChannelConnection:
+) -> channel_connections.TenantChannelConnection | None:
     """Record request state without replacing any provider-verified account."""
     with tenant_creation_lock(tenant_id):
         generation_id = require_tenant_mutation_generation(
@@ -347,12 +380,23 @@ def _record_unverified_connection_attempt(
             expected_generation_id=expected_generation_id,
         )
         existing = channel_connections.get_tenant_channel_connection(tenant_id)
+        latest = channel_connections.get_latest_connection_request_for_tenant(
+            tenant_id
+        )
+        if latest is None or latest.id != request_id:
+            logger.info(
+                "whatsapp_connect_superseded_request_unchanged tenant=%s request=%s",
+                tenant_id,
+                request_id,
+            )
+            return existing
         if existing is not None and existing.zernio_account_verified:
             return existing
         return channel_connections.upsert_tenant_channel_connection(
             tenant_id=tenant_id,
             status=status,
             zernio_profile_id=zernio_profile_id,
+            zernio_account_id=zernio_account_id,
             zernio_account_verified=False,
             metadata={"callback": callback_payload},
             last_request_id=request_id,
@@ -365,6 +409,10 @@ def _sync_whatsapp_connection_from_zernio(
     tenant_id: str,
     *,
     expected_generation_id: str | None = None,
+    expected_account_id: str | None = None,
+    expected_request_id: str | None = None,
+    enforce_expected_request: bool = False,
+    attach_latest_request: bool = True,
 ) -> channel_connections.TenantChannelConnection | None:
     """Reconcile Nr3 state from Zernio when the browser callback was missed."""
     try:
@@ -381,16 +429,28 @@ def _sync_whatsapp_connection_from_zernio(
         accounts = ZernioService().list_accounts(platform="whatsapp")
     except (ZernioNotConfigured, ZernioAPIError):
         return None
+    expected_account_id = str(expected_account_id or "").strip() or None
     for account in accounts:
-        if account.profile_id == zernio_profile_id and _account_is_connected(account):
+        if (
+            account.profile_id == zernio_profile_id
+            and _account_is_connected(account)
+            and (expected_account_id is None or account.id == expected_account_id)
+        ):
             latest = channel_connections.get_latest_connection_request_for_tenant(
                 tenant_id
             )
+            if enforce_expected_request and (
+                (latest.id if latest else None) != expected_request_id
+            ):
+                return None
+            request_to_update = latest if attach_latest_request else None
             try:
                 connection, allowlist_result = _upsert_connected_account(
                     tenant_id,
                     account,
-                    request_id=latest.id if latest else None,
+                    request_id=request_to_update.id if request_to_update else None,
+                    enforce_latest_request=True,
+                    expected_latest_request_id=(latest.id if latest else None),
                     expected_generation_id=expected_generation_id,
                 )
             except channel_connections.ProviderOwnershipConflict as exc:
@@ -401,14 +461,25 @@ def _sync_whatsapp_connection_from_zernio(
                     str(exc)[:160],
                 )
                 return None
-            if latest and latest.status not in {
-                "connected",
-                "failed",
-                "expired",
-                "cancelled",
-            }:
+            exact_failed_request_can_recover = bool(
+                request_to_update
+                and request_to_update.status == "failed"
+                and expected_account_id
+                and not request_to_update.zernio_account_verified
+                and request_to_update.zernio_account_id == account.id
+                and request_to_update.zernio_profile_id == zernio_profile_id
+            )
+            if request_to_update and (
+                request_to_update.status not in {
+                    "connected",
+                    "failed",
+                    "expired",
+                    "cancelled",
+                }
+                or exact_failed_request_can_recover
+            ):
                 channel_connections.update_connection_request(
-                    latest.id,
+                    request_to_update.id,
                     status=(
                         "connected"
                         if allowlist_result.status == "succeeded"
@@ -466,19 +537,24 @@ def _create_whatsapp_authorization(
         delete_profile=getattr(service, "delete_profile", None),
     )
 
+    # Zernio's standard redirect contract appends connection details but does
+    # not echo the OAuth ``state`` returned by GET /connect/{platform}. Carry
+    # an Nr3-owned nonce in the redirect URL instead. Zernio preserves an
+    # existing query string when it appends its result parameters.
+    correlation_token = secrets.token_urlsafe(48)
     connect_url = service.get_connect_url(
         platform="whatsapp",
         profile_id=zernio_profile_id,
-        redirect_url=_whatsapp_callback_url(),
+        redirect_url=_whatsapp_callback_url(
+            correlation_token=correlation_token,
+        ),
     )
-    if not connect_url.state:
-        raise ZernioAPIError(502, "Zernio did not return a callback state.")
 
     created = channel_connections.create_connection_request(
         tenant_id=tenant.id,
         auth_url=connect_url.auth_url,
         zernio_profile_id=zernio_profile_id,
-        state_token=connect_url.state,
+        state_token=correlation_token,
         status="link_generated",
         expected_generation_id=expected_generation_id,
     )
@@ -649,10 +725,66 @@ def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     connection = channel_connections.get_tenant_channel_connection(tenant.id)
-    if connection is None or connection.status in {"pending", "not_connected"}:
+    unverified_account_can_reconcile = bool(
+        connection
+        and not connection.zernio_account_verified
+        and connection.zernio_account_id
+    )
+    expected_recovery_request_id: str | None = None
+    attach_recovery_request = True
+    superseded_unverified_candidate = False
+    if unverified_account_can_reconcile and connection:
+        latest_request = (
+            channel_connections.get_latest_connection_request_for_tenant(tenant.id)
+        )
+        expected_recovery_request_id = connection.last_request_id
+        if connection.last_request_id and (
+            (latest_request.id if latest_request else None)
+            == connection.last_request_id
+        ):
+            pass
+        elif (
+            connection.status == "connected"
+            and not connection.last_request_id
+            and (
+                latest_request is None
+                or latest_request.status in {
+                    "connected",
+                    "failed",
+                    "expired",
+                    "cancelled",
+                }
+                or _is_expired(latest_request)
+            )
+        ):
+            # Some pre-generation connections have no request correlation and
+            # an old, already-expired link row. Revalidate only the exact stored
+            # account/profile and leave that historical request untouched.
+            expected_recovery_request_id = (
+                latest_request.id if latest_request else None
+            )
+            attach_recovery_request = False
+        else:
+            # A newly generated link supersedes any exact-account recovery
+            # candidate left by an older failed/legacy request.
+            unverified_account_can_reconcile = False
+            superseded_unverified_candidate = True
+    if not superseded_unverified_candidate and (
+        connection is None
+        or connection.status in {"pending", "not_connected"}
+        or unverified_account_can_reconcile
+    ):
         connection = _sync_whatsapp_connection_from_zernio(
             tenant.id,
             expected_generation_id=expected_generation_id,
+            expected_account_id=(
+                connection.zernio_account_id
+                if unverified_account_can_reconcile and connection
+                else None
+            ),
+            expected_request_id=expected_recovery_request_id,
+            enforce_expected_request=unverified_account_can_reconcile,
+            attach_latest_request=attach_recovery_request,
         ) or connection
     return whatsapp_health_to_api(build_whatsapp_health(tenant.id), tenant.id)
 
@@ -1007,9 +1139,18 @@ def whatsapp_connection_callback(request: Request):
     """Receive the public Zernio redirect and update Nr3 connection state.
 
     This endpoint is intentionally unauthenticated because the browser returns
-    here from Meta/Zernio. The random callback state is the trust anchor.
+    here from Meta/Zernio. Nr3's random redirect nonce is the trust anchor.
     """
-    state_token = _first_query_value(request, "state", "connect_token")
+    # ``nr3_token`` is the only value generated by Nr3 for the standard
+    # redirect. Keep the older provider fields as a compatibility path for
+    # authorization links issued before this fix, but never prefer them over
+    # the Nr3-owned correlation token.
+    state_token = _first_query_value(
+        request,
+        "nr3_token",
+        "state",
+        "connect_token",
+    )
     if not state_token:
         logger.warning("whatsapp_connect_callback_missing_state")
         return _result_redirect("failed")
@@ -1160,6 +1301,8 @@ def whatsapp_connection_callback(request: Request):
         channel_connections.update_connection_request(
             connection_request.id,
             status="pending_number",
+            zernio_account_id=zernio_account_id,
+            zernio_account_verified=False,
             callback_payload=callback_payload,
             error_summary=None,
         )
@@ -1167,6 +1310,7 @@ def whatsapp_connection_callback(request: Request):
             tenant_id,
             status="pending",
             zernio_profile_id=connection_request.zernio_profile_id,
+            zernio_account_id=zernio_account_id,
             request_id=connection_request.id,
             callback_payload=callback_payload,
             expected_generation_id=connection_request.tenant_generation_id,
@@ -1212,6 +1356,8 @@ def whatsapp_connection_callback(request: Request):
         channel_connections.update_connection_request(
             connection_request.id,
             status="failed",
+            zernio_account_id=zernio_account_id,
+            zernio_account_verified=False,
             callback_payload=callback_payload,
             error_summary=error_summary,
         )
@@ -1219,6 +1365,7 @@ def whatsapp_connection_callback(request: Request):
             tenant_id,
             status="failed",
             zernio_profile_id=connection_request.zernio_profile_id,
+            zernio_account_id=zernio_account_id,
             request_id=connection_request.id,
             callback_payload=callback_payload,
             expected_generation_id=connection_request.tenant_generation_id,
@@ -1248,9 +1395,35 @@ def whatsapp_connection_callback(request: Request):
             zernio_account,
             request_id=connection_request.id,
             callback_payload=callback_payload,
+            require_current_request=True,
             expected_generation_id=connection_request.tenant_generation_id,
         )
     except channel_connections.ProviderOwnershipConflict as exc:
+        current_request = channel_connections.get_connection_request(
+            connection_request.id
+        )
+        latest_request = (
+            channel_connections.get_latest_connection_request_for_tenant(tenant_id)
+        )
+        if (
+            current_request is not None
+            and latest_request is not None
+            and (
+                current_request.status == "cancelled"
+                or current_request.id != latest_request.id
+            )
+        ):
+            audit_log.record_event(
+                tenant_id=tenant_id,
+                action="whatsapp.callback_superseded",
+                result="ignored",
+                safe_summary=(
+                    "An older WhatsApp callback was ignored after a newer "
+                    "authorization link was generated."
+                ),
+                metadata={"request_id": connection_request.id},
+            )
+            return _result_redirect("failed", tenant_id=tenant_id)
         error_summary = (
             "Provider authorization matched an account or profile already "
             "owned by another tenant; routing remained disabled."

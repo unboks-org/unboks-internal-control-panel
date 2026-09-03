@@ -231,3 +231,15 @@ def test_build_whatsapp_callback_url(monkeypatch):
         build_whatsapp_callback_url(get_settings())
         == "https://icp.unboks.org/internal/api/connect/whatsapp/callback"
     )
+
+
+def test_build_whatsapp_callback_url_includes_nr3_correlation_token(monkeypatch):
+    monkeypatch.setenv("NR3_BASE_URL", "https://icp.unboks.org")
+
+    assert build_whatsapp_callback_url(
+        get_settings(),
+        correlation_token="nonce with reserved/value",
+    ) == (
+        "https://icp.unboks.org/internal/api/connect/whatsapp/callback"
+        "?nr3_token=nonce+with+reserved%2Fvalue"
+    )

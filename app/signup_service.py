@@ -77,6 +77,8 @@ def _docker_compose_text(slug: str, host_port: int) -> str:
         "      - ./config/platform.env\n"
         "    environment:\n"
         "      - GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/app/config/calendar-key.json\n"
+        "      - TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+        "      - TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n"
         "    volumes:\n"
         "      - ./config:/app/config:rw\n"
         "      - ./data:/app/data\n"

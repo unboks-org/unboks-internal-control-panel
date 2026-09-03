@@ -144,6 +144,71 @@ def test_whatsapp_callback_replay_is_read_only(monkeypatch, tmp_path):
     )
 
 
+def test_inflight_old_callback_cannot_beat_new_authorization_link(
+    monkeypatch,
+    tmp_path,
+):
+    client = _client(monkeypatch, tmp_path)
+    old_request = _connection_request("old_inflight_token")
+    replacement = {}
+
+    class SupersedingZernioService:
+        def get_account(self, account_id):
+            # Model the exact race: the old callback is already claimed and
+            # waiting on Zernio when the operator generates a replacement.
+            replacement["request"] = channel_connections.create_connection_request(
+                tenant_id="lawyer",
+                auth_url="https://facebook.com/connect/replacement",
+                zernio_profile_id="profile_lawyer",
+                state_token="replacement_token",
+                status="link_generated",
+            ).request
+            return ZernioAccountSummary(
+                id=account_id,
+                platform="whatsapp",
+                profile_id="profile_lawyer",
+                profile_name="Lawyer",
+                display_name="Old WhatsApp",
+                username="+599 9 000 0000",
+                enabled=True,
+                is_active=True,
+                platform_status="active",
+                display_phone_number="+599 9 000 0000",
+                phone_number_id="old_phone",
+                waba_id="old_waba",
+            )
+
+    monkeypatch.setattr(
+        "app.routes.connect.ZernioService",
+        SupersedingZernioService,
+    )
+
+    response = client.get(
+        "/internal/api/connect/whatsapp/callback",
+        params={
+            "state": "old_inflight_token",
+            "connected": "whatsapp",
+            "accountId": "old_account",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        "/connect/whatsapp/result?status=failed&tenantId=lawyer"
+    )
+    cancelled = channel_connections.get_connection_request(old_request.id)
+    assert cancelled is not None and cancelled.status == "cancelled"
+    assert channel_connections.get_latest_connection_request_for_tenant(
+        "lawyer"
+    ).id == replacement["request"].id
+    assert channel_connections.get_tenant_channel_connection("lawyer") is None
+    client_data = json.loads(
+        (tmp_path / "tenants" / "lawyer" / "config" / "client.json").read_text()
+    )
+    assert client_data["channel_account_allowlist"]["zernio_accounts"] == []
+
+
 def test_whatsapp_callback_claim_is_atomic(monkeypatch, tmp_path):
     _client(monkeypatch, tmp_path)
     created = _connection_request("claim_once_state")
@@ -215,6 +280,30 @@ def test_whatsapp_callback_accepts_zernio_connect_token_and_username(monkeypatch
     assert connection.status == "connected"
     assert connection.zernio_account_id == "account_1"
     assert connection.display_phone_number == "+599 9 694 5527"
+
+
+def test_whatsapp_callback_prefers_nr3_token_over_provider_state(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    created = _connection_request("nr3_owned_token")
+
+    response = client.get(
+        "/internal/api/connect/whatsapp/callback",
+        params={
+            "nr3_token": "nr3_owned_token",
+            "state": "provider_internal_state",
+            "connected": "whatsapp",
+            "accountId": "account_1",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        "/connect/whatsapp/result?status=success&tenantId=lawyer"
+    )
+    stored = channel_connections.get_connection_request(created.id)
+    assert stored is not None
+    assert stored.status == "connected"
 
 
 def test_whatsapp_callback_queues_allowlist_repair_for_readonly_tenant_mount(
@@ -342,11 +431,14 @@ def test_whatsapp_callback_rejects_account_from_different_profile(
     stored = channel_connections.get_connection_request(created.id)
     assert stored is not None
     assert stored.status == "failed"
-    assert stored.zernio_account_id is None
+    # Retain the callback's account only as an unverified recovery candidate;
+    # status refresh may promote it solely after an exact account/profile
+    # provider lookup succeeds.
+    assert stored.zernio_account_id == "account_other"
     assert stored.zernio_account_verified is False
     connection = channel_connections.get_tenant_channel_connection("lawyer")
     assert connection is not None
-    assert connection.zernio_account_id is None
+    assert connection.zernio_account_id == "account_other"
     assert connection.zernio_account_verified is False
     assert "account_other" not in channel_connections.list_tenant_zernio_ids(
         "lawyer"
@@ -528,12 +620,12 @@ def test_whatsapp_callback_marks_pending_when_number_is_missing(monkeypatch, tmp
     stored = channel_connections.get_connection_request(created.id)
     assert stored is not None
     assert stored.status == "pending_number"
-    assert stored.zernio_account_id is None
+    assert stored.zernio_account_id == "account_1"
     assert stored.zernio_account_verified is False
     connection = channel_connections.get_tenant_channel_connection("lawyer")
     assert connection is not None
     assert connection.status == "pending"
-    assert connection.zernio_account_id is None
+    assert connection.zernio_account_id == "account_1"
     assert connection.zernio_account_verified is False
 
 

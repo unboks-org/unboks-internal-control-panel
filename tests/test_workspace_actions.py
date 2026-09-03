@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.provisioning import AutoProvisionResult
 
 
 @pytest.fixture(autouse=True)
@@ -181,6 +182,7 @@ def test_tenant_details_form_updates_safe_client_fields(client, tmp_path):
             "contact_person": "Ada Operator",
             "email": "ada@example.com",
             "phone": "+59996880000",
+            "whatsapp": "+1 223 276 0075",
             "website": "https://example.com",
             "address": "Main Street 1",
             "logo_url": "https://example.com/logo.png",
@@ -196,7 +198,8 @@ def test_tenant_details_form_updates_safe_client_fields(client, tmp_path):
     assert client_json["name"] == "Action Company Updated"
     assert client_json["contact_person"] == "Ada Operator"
     assert client_json["email"] == "ada@example.com"
-    assert client_json["whatsapp"] == "+59996880000"
+    assert client_json["phone"] == "+59996880000"
+    assert client_json["whatsapp"] == "+1 223 276 0075"
     assert client_json["website"] == "https://example.com"
     assert client_json["address"] == "Main Street 1"
     assert client_json["logo_url"] == "https://example.com/logo.png"
@@ -207,7 +210,68 @@ def test_tenant_details_form_updates_safe_client_fields(client, tmp_path):
     assert workspace.status_code == 200
     assert "Action Company Updated" in workspace.text
     assert "Ada Operator" in workspace.text
+    assert 'name="phone" type="text" value="+59996880000"' in workspace.text
+    assert 'name="whatsapp" type="text" value="+1 223 276 0075"' in workspace.text
     assert "https://example.com/logo.png" in workspace.text
+
+
+def test_tenant_details_form_queues_host_write_for_read_only_mount(
+    client,
+    monkeypatch,
+):
+    queued = {}
+
+    def read_only_write(*_args, **_kwargs):
+        raise OSError(30, "Read-only file system")
+
+    def fake_queue(**kwargs):
+        queued.update(kwargs)
+        return AutoProvisionResult(
+            status="queued",
+            message="Host action queued.",
+            job_id="details-action-co",
+        )
+
+    monkeypatch.setattr(
+        "app.routes.admin.update_tenant_account_details",
+        read_only_write,
+    )
+    monkeypatch.setattr("app.routes.admin.queue_tenant_host_action", fake_queue)
+
+    response = client.post(
+        "/admin/tenants/action-co/details",
+        data={
+            "name": "Action Company Updated",
+            "contact_person": "Ada Operator",
+            "email": "ada@example.com",
+            "phone": "+599 9 123 4567",
+            "whatsapp": "+1 223 276 0075",
+            "website": "https://example.com",
+            "address": "Main Street 1",
+            "logo_url": "https://example.com/logo.png",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "Tenant+details+update+queued" in response.headers["location"]
+    assert queued == {
+        "slug": "action-co",
+        "action": "update_tenant_details",
+        "dashboard_url": (
+            "https://dashboard.unboks.org/login?workspace=action-co"
+        ),
+        "tenant_details": {
+            "name": "Action Company Updated",
+            "contact_person": "Ada Operator",
+            "email": "ada@example.com",
+            "phone": "+599 9 123 4567",
+            "whatsapp": "+1 223 276 0075",
+            "website": "https://example.com",
+            "address": "Main Street 1",
+            "logo_url": "https://example.com/logo.png",
+        },
+    }
 
 
 def test_tenant_details_form_rejects_invalid_email(client):

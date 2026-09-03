@@ -58,6 +58,15 @@ The mocked E2E test covers:
 6. Copy the generated link.
 7. Send the link to the client manually in the separate WhatsApp connection email.
 8. Client opens the link in their own browser and approves Meta/Zernio access.
+   Nr3 puts its own one-time correlation nonce in the configured redirect URL;
+   Zernio preserves that existing query parameter when appending its standard
+   `connected`, `profileId`, `accountId`, and `username` result fields. The
+   provider OAuth `state` returned when the link is generated is not expected
+   in Zernio's standard callback and is not used as the Nr3 trust anchor.
+   Generating a replacement link atomically cancels every older in-flight
+   request for that tenant generation. A late or already-running callback for
+   an older link is rejected before it can change the connection or strict
+   account allowlist.
    The callback does not trust its query-string account ID: Nr3 fetches that
    account from Zernio and requires an active WhatsApp account whose profile ID
    exactly matches the tenant's connection request.
@@ -92,9 +101,14 @@ The mocked E2E test covers:
 ## Security Checks
 
 - Zernio API calls are backend-only.
-- Raw callback state is never stored; only its hash is stored.
+- The raw Nr3 callback nonce is never stored; only its hash is stored.
 - Callback state is claimed atomically. Duplicate or concurrent deliveries are
   read-only and cannot downgrade a completed connection or switch accounts.
+- If the callback's exact account is temporarily unavailable from Zernio, Nr3
+  retains that ID only as an unverified recovery candidate. Authenticated
+  status refresh can promote it only after Zernio returns the exact same active
+  WhatsApp account on the tenant's exact profile; it never selects a different
+  account from that profile for failed-callback recovery.
 - A valid callback state alone cannot authorize an arbitrary account ID or an
   account owned by another Zernio profile.
 - A tenant connection stays pending (or failed) until strict allowlist

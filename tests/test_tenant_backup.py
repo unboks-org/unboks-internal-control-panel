@@ -40,6 +40,8 @@ def _seed(monkeypatch, tmp_path, slug="acme"):
                 "slug": slug,
                 "name": "Acme Co",
                 "email": "owner@example.com",
+                "phone": "+599 9 123 4567",
+                "whatsapp": "+1 223 276 0075",
                 "password": "do-not-export",
                 "access_key": "do-not-export",
                 "whatsapp_connect_token": "donor-token",
@@ -88,6 +90,8 @@ def test_export_package_contains_manifest_and_excludes_secrets(monkeypatch, tmp_
         assert "client_tree/config/platform.env" in names
         assert "client_tree/data/knowledge/sot.txt" in names
         tenant = json.loads(zf.read("tenant.json"))
+        assert tenant["account"]["phone"] == "+599 9 123 4567"
+        assert tenant["account"]["whatsapp"] == "+1 223 276 0075"
         assert tenant["client_json_sanitized"]["password"]["excluded"] is True
         assert tenant["client_json_sanitized"]["access_key"]["excluded"] is True
         raw_client = json.loads(zf.read("client_tree/config/client.json"))
@@ -157,6 +161,8 @@ def test_import_clone_restores_nr3_state_to_new_slug(monkeypatch, tmp_path):
     clone_root = tmp_path / "clients" / "acme-clone"
     clone_client = json.loads((clone_root / "config" / "client.json").read_text(encoding="utf-8"))
     assert clone_client["slug"] == "acme-clone"
+    assert clone_client["phone"] == "+599 9 123 4567"
+    assert clone_client["whatsapp"] == "+1 223 276 0075"
     assert clone_client["creation_id"] == creation_id
     assert clone_client["whatsapp_connect_token"] == ""
     assert clone_client["channel_account_allowlist"] == {}
@@ -200,6 +206,8 @@ def test_import_restore_replaces_existing_nr3_state(monkeypatch, tmp_path):
     assert notes == ["Important internal note"]
     restored_client = json.loads((target_root / "config" / "client.json").read_text(encoding="utf-8"))
     assert restored_client["slug"] == "target"
+    assert restored_client["phone"] == "+599 9 123 4567"
+    assert restored_client["whatsapp"] == "+1 223 276 0075"
     assert restored_client["password"] == "do-not-export"
     assert restored_client["whatsapp_connect_token"] == ""
     assert restored_client["channel_account_allowlist"] == {}

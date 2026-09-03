@@ -164,6 +164,204 @@ def test_whatsapp_status_returns_connected(monkeypatch, tmp_path):
     assert payload["lastUpdatedAt"]
 
 
+def test_whatsapp_status_revalidates_exact_legacy_connected_account(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    _set_allowlist(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        name="Lawyer",
+    )
+    historical_link = channel_connections.create_connection_request(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        state_token="expired_historical_token",
+        status="link_generated",
+        expires_in_minutes=-1,
+    ).request
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="connected",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="account_1",
+        zernio_account_verified=False,
+        phone_number_id="legacy_phone",
+        display_phone_number="+599 9 000 0000",
+        waba_id="legacy_waba",
+    )
+    calls = []
+
+    class FakeZernioService:
+        def list_accounts(self, *, platform=None):
+            calls.append(platform)
+            return [
+                ZernioAccountSummary(
+                    id="account_1",
+                    platform="whatsapp",
+                    profile_id="profile_lawyer",
+                    profile_name="Lawyer",
+                    display_name="Lawyer WhatsApp",
+                    username="+599 9 694 5527",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+599 9 694 5527",
+                    phone_number_id="phone_1",
+                    waba_id="waba_1",
+                )
+            ]
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", FakeZernioService)
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "connected_healthy"
+    assert payload["providerAccountId"] == "account_1"
+    assert payload["phoneNumberId"] == "phone_1"
+    assert calls == ["whatsapp"]
+    repaired = channel_connections.get_tenant_channel_connection("lawyer")
+    assert repaired is not None
+    assert repaired.zernio_account_verified is True
+    assert repaired.zernio_profile_id == "profile_lawyer"
+    assert repaired.zernio_account_id == "account_1"
+    assert repaired.last_request_id is None
+    unchanged_historical_link = channel_connections.get_connection_request(
+        historical_link.id
+    )
+    assert unchanged_historical_link is not None
+    assert unchanged_historical_link.status == "link_generated"
+
+
+def test_whatsapp_status_never_substitutes_different_account_for_legacy_owner(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    _set_allowlist(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        name="Lawyer",
+    )
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="connected",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="legacy_account",
+        zernio_account_verified=False,
+    )
+
+    class DifferentAccountService:
+        def list_accounts(self, *, platform=None):
+            return [
+                ZernioAccountSummary(
+                    id="different_account",
+                    platform="whatsapp",
+                    profile_id="profile_lawyer",
+                    profile_name="Lawyer",
+                    display_name="Different WhatsApp",
+                    username="+599 9 000 0001",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+599 9 000 0001",
+                    phone_number_id="different_phone",
+                    waba_id="different_waba",
+                )
+            ]
+
+    monkeypatch.setattr(
+        "app.routes.connect.ZernioService",
+        DifferentAccountService,
+    )
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "needs_reconnect_unverified_account"
+    unchanged = channel_connections.get_tenant_channel_connection("lawyer")
+    assert unchanged is not None
+    assert unchanged.zernio_account_verified is False
+    assert unchanged.zernio_account_id == "legacy_account"
+
+
+def test_new_link_blocks_recovery_candidate_from_older_pending_request(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    _login(client)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        name="Lawyer",
+    )
+    old = channel_connections.create_connection_request(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        state_token="old_pending_token",
+        status="link_generated",
+    ).request
+    channel_connections.update_connection_request(
+        old.id,
+        status="pending_number",
+        zernio_account_id="old_account",
+        zernio_account_verified=False,
+        error_summary=None,
+    )
+    channel_connections.upsert_tenant_channel_connection(
+        tenant_id="lawyer",
+        status="pending",
+        zernio_profile_id="profile_lawyer",
+        zernio_account_id="old_account",
+        zernio_account_verified=False,
+        last_request_id=old.id,
+    )
+    replacement = channel_connections.create_connection_request(
+        tenant_id="lawyer",
+        zernio_profile_id="profile_lawyer",
+        state_token="replacement_token",
+        status="link_generated",
+    ).request
+
+    class ProviderMustNotBeQueried:
+        def list_accounts(self, *, platform=None):
+            raise AssertionError(
+                "Status must not recover an account from a superseded request"
+            )
+
+    monkeypatch.setattr(
+        "app.routes.connect.ZernioService",
+        ProviderMustNotBeQueried,
+    )
+
+    response = _status(client)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "connection_pending"
+    assert channel_connections.get_latest_connection_request_for_tenant(
+        "lawyer"
+    ).id == replacement.id
+    unchanged = channel_connections.get_tenant_channel_connection("lawyer")
+    assert unchanged is not None
+    assert unchanged.status == "pending"
+    assert unchanged.zernio_account_id == "old_account"
+    assert unchanged.zernio_account_verified is False
+
+
 def test_whatsapp_status_requires_allowlist_for_healthy_connected(monkeypatch, tmp_path):
     tenants_root = tmp_path / "tenants"
     _write_tenant(tenants_root)

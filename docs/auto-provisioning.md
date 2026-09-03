@@ -53,10 +53,23 @@ ID. New tenant creation also keeps an ownership claim until a matching terminal
 result is reconciled.
 
 Existing-runtime mutations (`suspend`, `unpause`, `restart`, password reset,
-allowlist repair, and same-target restore) carry the exact SHA-256 generation
-fingerprint derived from the mounted target runtime. Clone/new-target restore
-instead carries its reserved `creation_id` and host port. A delayed action can
-therefore never act on a later tenant that reused the same slug.
+safe tenant-detail update, allowlist repair, and same-target restore) carry the
+exact SHA-256 generation fingerprint derived from the mounted target runtime.
+Clone/new-target restore instead carries its reserved `creation_id` and host
+port. A delayed action can therefore never act on a later tenant that reused
+the same slug.
+
+Safe tenant-detail updates keep the web container's tenant mount read-only and
+delegate the narrow `client.json` patch to the host worker. The worker accepts
+only the eight public business fields exposed by the form, including separate
+public phone and WhatsApp values, revalidates the
+generation and payload, and holds the shared `config/client.json.lock` across
+read/modify/atomic-replace. The privileged worker opens the tenant-writable
+`client.json` with `O_NOFOLLOW`, verifies the opened descriptor is a regular
+file, and reads from that descriptor, so a tenant cannot substitute another
+tenant's config through a symlink. Every other process that writes
+`client.json` must use that exact lock path and protocol; deploys must not
+combine a locking worker with an older unlocked runtime writer.
 
 Delete is a two-job operation bound to one durable delete ledger entry and one
 generation fingerprint. `prepare_delete_tenant` creates the authorization
@@ -68,6 +81,12 @@ absence, and only then removes the tenant tree, nginx route, and bridge token.
 The host worker, not the web payload, generates the final Docker Compose and
 managed nginx text. Caller-supplied text must first match that canonical shape;
 extra mounts, ports, directives, or privileged options are rejected.
+New canonical `platform.env` and Compose artifacts both force
+`TENANT_RUNTIME_CONTROLS_REQUIRED=true` and
+`TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true`, so a cold start or Nr3/config outage
+cannot fall back to legacy-open runtime behavior. Exact historical Compose
+files remain recognizable only as existing tenant artifacts; provisioning
+rejects them, while a restore rewrites them to the strict canonical form.
 
 The worker holds a nonblocking `flock` on
 `data/provisioning/jobs/.nr3-provision-worker.lock`. It scans orphaned
@@ -199,13 +218,28 @@ active. Use this sequence for the first v2 rollout:
    ICP backup.
 6. Deploy one reviewed source revision to the host checkout and build/recreate
    `wtyj-admin` from that exact revision. Install the unit from the same tree.
-7. Start the worker, then recreate/start the web container. Do not resume job
+7. While tenant runtimes are still quiesced, inventory every existing
+   `platform.env` and Compose file. Preserve each exact slug, host port, bridge
+   token, and secret while setting both required-runtime flags to `true` and
+   replacing an exact legacy Compose artifact with the strict canonical form.
+   Reject any noncanonical Compose instead of normalizing it. Validate every
+   migrated artifact with the reviewed worker before restarting containers.
+8. Start the worker, then recreate/start the web container. Do not resume job
    creation between those two steps.
-8. Verify the commit/image identity, effective unit, singleton ownership,
+9. Verify the commit/image identity, effective unit, singleton ownership,
    worker logs, `/healthz`, an authenticated read-only tenant view, lifecycle
    claims/generations/delete ledgers, and an empty queue.
-9. Re-enable owner actions and verified-signup provisioning only after all
-   checks pass.
+10. On the first rollout that adds provider-ownership verification, preflight
+   every existing connected WhatsApp tenant through the authenticated status
+   endpoint before external traffic resumes. The status reconciliation may
+   mark a legacy row verified only when Zernio returns the exact stored account
+   ID as an active WhatsApp account on that tenant's exact stored profile. Wait
+   for any strict-allowlist host repair, then require `connected_healthy` and
+   an empty queue for every existing sender. A missing, different, inactive, or
+   ambiguously owned provider account is a stop condition and requires an
+   explicit reconnect; never substitute another account from the same profile.
+11. Re-enable owner actions and verified-signup provisioning only after all
+    checks pass.
 
 Rollback uses the same drain-and-quiesce rule. Restore the app, worker, and all
 correlated durable state to one compatible snapshot/revision; never roll back

@@ -220,9 +220,17 @@ class ZernioService:
         return payload
 
 
-def build_whatsapp_callback_url(settings: Settings | None = None) -> str:
+def build_whatsapp_callback_url(
+    settings: Settings | None = None,
+    *,
+    correlation_token: str | None = None,
+) -> str:
     resolved = settings or get_settings()
-    return f"{resolved.base_url}/internal/api/connect/whatsapp/callback"
+    callback_url = f"{resolved.base_url}/internal/api/connect/whatsapp/callback"
+    token = str(correlation_token or "").strip()
+    if token:
+        callback_url = f"{callback_url}?{urlencode({'nr3_token': token})}"
+    return callback_url
 
 
 def summarize_account(account: dict[str, Any]) -> ZernioAccountSummary:

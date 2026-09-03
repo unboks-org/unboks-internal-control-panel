@@ -538,6 +538,8 @@ def test_platform_env_carries_dashboard_password(client):
     assert "ANTHROPIC_API_KEY=SET_BY_FULL_VPS_SETUP_SCRIPT" in env_text
     assert "PASTE_NR3_INTERNAL_API_TOKEN_HERE" not in env_text
     assert "ICP_OVERRIDES_TTL_SECONDS=5" in env_text
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in env_text
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in env_text
 
 
 def test_docker_compose_names_container_and_port(client):
@@ -550,6 +552,8 @@ def test_docker_compose_names_container_and_port(client):
     assert "container_name: wtyj-acme" in compose
     assert "image: wtyj-agent" in compose
     assert "env_file:\n      - ./config/platform.env" in compose
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in compose
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in compose
     assert "./logs:/app/logs" in compose
     assert re.search(r'"127\.0\.0\.1:\d{4}:8001"', compose),         f"no localhost host_port mapping in compose: {compose!r}"
 
@@ -614,6 +618,8 @@ def test_full_vps_setup_script_is_ready_to_paste(client):
     assert "cat > \"$TENANT_DIR/docker-compose.yml\"" in script
     assert "docker network inspect unboks-control" in script
     assert "NR3_INTERNAL_OVERRIDES_URL=http://wtyj-admin:8010" in script
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in script
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in script
     assert "python3 - <<'UNBOKS_NGINX_INSERT'" in script
     assert "# BEGIN UNBOKS TENANT one-paste" in script
     assert "docker compose down || true" in script

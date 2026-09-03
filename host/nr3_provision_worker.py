@@ -72,6 +72,10 @@ INITIAL_CHANNEL_ACCOUNT_ALLOWLIST = {
     "zernio_accounts": [],
     "notes": "No provider account is authorized until Nr3 verifies and selects it.",
 }
+REQUIRED_RUNTIME_ENV = {
+    "TENANT_RUNTIME_CONTROLS_REQUIRED": "true",
+    "TENANT_ACCOUNT_ALLOWLIST_REQUIRED": "true",
+}
 COMPOSE_FILENAMES = {
     "compose.yaml",
     "compose.yml",
@@ -84,6 +88,16 @@ COMPOSE_FILENAMES = {
 }
 RESTORE_OWNER_MARKER = ".nr3-restore-owner.json"
 WORKER_LOCK_FILENAME = ".nr3-provision-worker.lock"
+TENANT_DETAIL_LIMITS = {
+    "name": 200,
+    "contact_person": 200,
+    "email": 320,
+    "phone": 80,
+    "whatsapp": 80,
+    "website": 2048,
+    "address": 1000,
+    "logo_url": 2048,
+}
 
 
 def env_path(name: str, default: str) -> Path:
@@ -244,6 +258,65 @@ def worker_execution_lock():
         os.close(fd)
 
 
+@contextmanager
+def exclusive_client_json_lock(client_path: Path):
+    """Share the exact ``client.json.lock`` protocol used by Nr3/runtime writers."""
+    lock_path = client_path.with_suffix(client_path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(lock_path, flags, 0o600)
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError(f"Client config lock is not a regular file: {lock_path}")
+        os.fchmod(fd, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def read_client_json_no_follow(client_path: Path) -> dict[str, Any]:
+    """Read a tenant-writable client.json without following its final path.
+
+    Tenant containers mount their config directory read/write. A compromised
+    tenant must not be able to replace ``client.json`` with a symlink to a
+    different tenant and make the privileged worker copy that tenant's config
+    into the attacker's own runtime during a read/modify/replace operation.
+    """
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if no_follow is None:
+        raise RuntimeError("Safe no-follow client.json reads are unavailable.")
+    flags = os.O_RDONLY | no_follow
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        fd = os.open(client_path, flags)
+    except OSError as exc:
+        raise RuntimeError(
+            f"client.json is not a readable regular file: {client_path}"
+        ) from exc
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError(f"client.json is not a regular file: {client_path}")
+        try:
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                fd = -1
+                data = json.load(handle)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            raise RuntimeError(f"client.json is unreadable: {client_path}") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"client.json is not an object: {client_path}")
+    return data
+
+
 def write_result(job_id: str, payload: dict[str, Any]) -> None:
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     payload.setdefault("job_id", job_id)
@@ -364,6 +437,8 @@ def platform_env_text(slug: str, password: str, created_at: str, token: str) -> 
         f"NR3_INTERNAL_OVERRIDES_URL=http://wtyj-admin:8010\n"
         f"NR3_INTERNAL_API_TOKEN={token}\n"
         f"ICP_OVERRIDES_TTL_SECONDS=5\n"
+        f"TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+        f"TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n"
     )
     anthropic_key = read_optional_anthropic_key()
     if anthropic_key:
@@ -720,6 +795,8 @@ def canonical_docker_compose_text(slug: str, host_port: int) -> str:
         "      - ./config/platform.env\n"
         "    environment:\n"
         "      - GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/app/config/calendar-key.json\n"
+        "      - TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+        "      - TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n"
         "    volumes:\n"
         "      - ./config:/app/config:rw\n"
         "      - ./data:/app/data\n"
@@ -737,12 +814,26 @@ def validate_canonical_docker_compose_text(
     slug: str,
     host_port: int,
     supplied_text: str,
+    *,
+    allow_legacy: bool = False,
 ) -> str:
     if host_port < 1024 or host_port > 65535:
         raise RuntimeError(f"Invalid host port for tenant runtime: {host_port}")
     expected = canonical_docker_compose_text(slug, host_port)
-    if supplied_text.rstrip("\n") + "\n" != expected:
-        raise RuntimeError("docker compose text is not the canonical tenant runtime")
+    normalized = supplied_text.rstrip("\n") + "\n"
+    if normalized != expected:
+        # Existing tenants created by the prior canonical generator did not
+        # carry the two explicit fail-closed environment lines. Continue to
+        # recognize that exact historical artifact for lifecycle operations,
+        # but return the strict canonical form so restores migrate it and new
+        # provisioning jobs can only supply the hardened form.
+        legacy = expected.replace(
+            "      - TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+            "      - TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n",
+            "",
+        )
+        if normalized != legacy or not allow_legacy:
+            raise RuntimeError("docker compose text is not the canonical tenant runtime")
     return expected
 
 
@@ -769,7 +860,12 @@ def trusted_compose_for_existing_tenant(slug: str, tenant_dir: Path) -> str:
         raise RuntimeError(
             f"Existing tenant compose has no single canonical host port: {compose_path}"
         )
-    return validate_canonical_docker_compose_text(slug, int(port_lines[0]), text)
+    return validate_canonical_docker_compose_text(
+        slug,
+        int(port_lines[0]),
+        text,
+        allow_legacy=True,
+    )
 
 
 def canonical_managed_nginx_block_text(slug: str, host_port: int) -> str:
@@ -870,36 +966,93 @@ def validate_managed_nginx_block(slug: str, host_port: int, block: str) -> None:
 
 def update_client_status(tenant_dir: Path, status: str) -> None:
     client_path = tenant_dir / "config" / "client.json"
-    data = json.loads(client_path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise RuntimeError(f"client.json is not an object: {client_path}")
-    business = data.get("business")
-    if isinstance(business, dict) and business:
-        business["status"] = status
-    data["status"] = status
-    atomic_write(
-        client_path,
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-        mode=0o600,
-    )
+    with exclusive_client_json_lock(client_path):
+        data = read_client_json_no_follow(client_path)
+        business = data.get("business")
+        if isinstance(business, dict) and business:
+            business["status"] = status
+        data["status"] = status
+        atomic_write(
+            client_path,
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            mode=0o600,
+        )
+
+
+def validate_tenant_details(raw: object) -> dict[str, str]:
+    """Accept only the non-secret business fields exposed by the Nr3 form."""
+    if not isinstance(raw, dict) or set(raw) != set(TENANT_DETAIL_LIMITS):
+        raise RuntimeError("Tenant details contain an unsupported or missing field.")
+    clean: dict[str, str] = {}
+    for field, limit in TENANT_DETAIL_LIMITS.items():
+        value = raw.get(field)
+        if not isinstance(value, str):
+            raise RuntimeError(f"Tenant detail {field!r} must be text.")
+        value = value.strip()
+        if any(unicodedata.category(char).startswith("C") for char in value):
+            raise RuntimeError(f"Tenant detail {field!r} contains a control character.")
+        if len(value) > limit:
+            raise RuntimeError(f"Tenant detail {field!r} is too long.")
+        clean[field] = value
+    if not clean["name"]:
+        raise RuntimeError("Tenant business name is required.")
+    return clean
+
+
+def update_tenant_details(
+    tenant_dir: Path,
+    slug: str,
+    raw_details: object,
+) -> None:
+    """Patch safe business metadata while preserving all runtime secrets."""
+    details = validate_tenant_details(raw_details)
+    client_path = tenant_dir / "config" / "client.json"
+    with exclusive_client_json_lock(client_path):
+        data = read_client_json_no_follow(client_path)
+        if str(data.get("slug") or "").strip() != slug:
+            raise RuntimeError("client.json slug does not match the tenant action.")
+
+        data["name"] = details["name"]
+        data["contact_person"] = details["contact_person"]
+        data["email"] = details["email"]
+        data["phone"] = details["phone"]
+        data["whatsapp"] = details["whatsapp"]
+        data["website"] = details["website"]
+        data["address"] = details["address"]
+        data["logo_url"] = details["logo_url"]
+        business = data.get("business")
+        if isinstance(business, dict) and business:
+            business["slug"] = slug
+            business["name"] = details["name"]
+            business["contact_person"] = details["contact_person"]
+            business["email"] = details["email"]
+            business["phone"] = details["phone"]
+            business["whatsapp"] = details["whatsapp"]
+            business["website"] = details["website"]
+            business["address"] = details["address"]
+            business["logo_url"] = details["logo_url"]
+        atomic_write(
+            client_path,
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            mode=0o600,
+        )
 
 
 def update_dashboard_password(tenant_dir: Path, slug: str, new_password: str) -> None:
     client_path = tenant_dir / "config" / "client.json"
-    data = json.loads(client_path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise RuntimeError(f"client.json is not an object: {client_path}")
-    data["password"] = new_password
-    data["dashboard_access_key"] = new_password
-    data["password_updated_at"] = utc_now()
-    business = data.get("business")
-    if isinstance(business, dict) and business:
-        business["password_updated_at"] = data["password_updated_at"]
-    atomic_write(
-        client_path,
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-        mode=0o600,
-    )
+    with exclusive_client_json_lock(client_path):
+        data = read_client_json_no_follow(client_path)
+        data["password"] = new_password
+        data["dashboard_access_key"] = new_password
+        data["password_updated_at"] = utc_now()
+        business = data.get("business")
+        if isinstance(business, dict) and business:
+            business["password_updated_at"] = data["password_updated_at"]
+        atomic_write(
+            client_path,
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            mode=0o600,
+        )
 
     env_path = tenant_dir / "config" / "platform.env"
     if env_path.exists():
@@ -929,23 +1082,22 @@ def repair_whatsapp_allowlist(
     if not account_id:
         raise RuntimeError("Zernio account id is required for allowlist repair.")
     client_path = tenant_dir / "config" / "client.json"
-    data = json.loads(client_path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise RuntimeError(f"client.json is not an object: {client_path}")
-    # client.json is tenant-writable and may contain permissive legacy IDs.
-    # The trusted Nr3 action supplies the one provider-verified account that
-    # may be authorized; never merge inherited entries into that decision.
-    data["channel_account_allowlist"] = {
-        "mode": "strict",
-        "zernio_accounts": [account_id],
-        "notes": str(note or "").strip()
-        or "Strict account allowlist maintained by Nr3 WhatsApp connection state.",
-    }
-    atomic_write(
-        client_path,
-        json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-        mode=0o600,
-    )
+    with exclusive_client_json_lock(client_path):
+        data = read_client_json_no_follow(client_path)
+        # client.json is tenant-writable and may contain permissive legacy IDs.
+        # The trusted Nr3 action supplies the one provider-verified account that
+        # may be authorized; never merge inherited entries into that decision.
+        data["channel_account_allowlist"] = {
+            "mode": "strict",
+            "zernio_accounts": [account_id],
+            "notes": str(note or "").strip()
+            or "Strict account allowlist maintained by Nr3 WhatsApp connection state.",
+        }
+        atomic_write(
+            client_path,
+            json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            mode=0o600,
+        )
 
 
 def _quick_check_sqlite(path: Path) -> None:
@@ -1253,13 +1405,11 @@ def validate_generation_fingerprint(job: dict[str, Any]) -> str:
 def tenant_generation_fingerprint(slug: str, tenant_dir: Path) -> str:
     client_path = tenant_dir / "config" / "client.json"
     try:
-        data = json.loads(client_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        data = read_client_json_no_follow(client_path)
+    except RuntimeError as exc:
         raise RuntimeError(
             f"Tenant generation cannot be verified from {client_path}."
         ) from exc
-    if not isinstance(data, dict):
-        raise RuntimeError(f"Tenant generation data is malformed: {client_path}")
     business = data.get("business")
     source = business if isinstance(business, dict) and business else data
     configured_slug = str(source.get("slug") or data.get("slug") or slug).strip()
@@ -2232,6 +2382,7 @@ def rewrite_restored_runtime_identity(
     seen_id = False
     seen_slug = False
     seen_bridge_token = False
+    seen_required_runtime_env: set[str] = set()
     out: list[str] = []
     for line in lines:
         key = line.split("=", 1)[0].strip()
@@ -2245,6 +2396,10 @@ def rewrite_restored_runtime_identity(
             if not seen_bridge_token:
                 out.append(f"NR3_INTERNAL_API_TOKEN={target_bridge_token}")
                 seen_bridge_token = True
+        elif key in REQUIRED_RUNTIME_ENV:
+            if key not in seen_required_runtime_env:
+                out.append(f"{key}={REQUIRED_RUNTIME_ENV[key]}")
+                seen_required_runtime_env.add(key)
         elif key in PROVIDER_ENV_KEYS_TO_CLEAR:
             continue
         elif line.startswith("# platform.env for tenant "):
@@ -2257,6 +2412,9 @@ def rewrite_restored_runtime_identity(
         out.append(f"TENANT_SLUG={target}")
     if not seen_bridge_token:
         out.append(f"NR3_INTERNAL_API_TOKEN={target_bridge_token}")
+    for key, value in REQUIRED_RUNTIME_ENV.items():
+        if key not in seen_required_runtime_env:
+            out.append(f"{key}={value}")
     atomic_write(env_path, "\n".join(out).rstrip() + "\n", mode=0o600)
 
 
@@ -2784,6 +2942,7 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
         "reset_dashboard_password",
         "restart_tenant",
         "repair_whatsapp_allowlist",
+        "update_tenant_details",
     }:
         raise RuntimeError(f"Unsupported tenant action: {action!r}")
 
@@ -2797,13 +2956,18 @@ def process_tenant_action(job_id: str, job: dict[str, Any]) -> None:
         "restart_tenant",
         "reset_dashboard_password",
         "repair_whatsapp_allowlist",
+        "update_tenant_details",
     }:
         expected_generation = validate_generation_fingerprint(job)
         verify_live_tenant_generation(slug, tenant_dir, expected_generation)
         details.append(
             f"verified current tenant generation {expected_generation}"
         )
-    if action == "reset_dashboard_password":
+    if action == "update_tenant_details":
+        update_tenant_details(tenant_dir, slug, job.get("tenant_details"))
+        details.append("client.json safe tenant business details updated")
+        message = f"Tenant details updated for {slug}."
+    elif action == "reset_dashboard_password":
         raw_password = str(job.get("new_password") or "")
         if any(unicodedata.category(char).startswith("C") for char in raw_password):
             raise RuntimeError("New dashboard password contains a control character.")

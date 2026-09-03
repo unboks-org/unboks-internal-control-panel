@@ -3,11 +3,13 @@ import json
 import sqlite3
 import stat
 import subprocess
+import threading
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from app.file_lock import exclusive_file_lock
 from app.provisioning import (
     auto_provision_tenant,
     create_tenant_provision_claim,
@@ -133,9 +135,56 @@ def test_host_worker_provisions_private_fail_closed_tenant_files(
     assert client_data["channel_account_allowlist"]["zernio_accounts"] == []
     assert stat.S_IMODE(client_path.stat().st_mode) == 0o600
     assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
+    env_text = env_path.read_text(encoding="utf-8")
+    compose_text = (clients / "acme" / "docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+    for key in (
+        "TENANT_RUNTIME_CONTROLS_REQUIRED",
+        "TENANT_ACCOUNT_ALLOWLIST_REQUIRED",
+    ):
+        assert env_text.count(f"{key}=true") == 1
+        assert compose_text.count(f"{key}=true") == 1
     result_path = results / "job-acme.json"
     assert json.loads(result_path.read_text())["status"] == "succeeded"
     assert stat.S_IMODE(result_path.stat().st_mode) == 0o600
+
+
+def test_new_runtime_artifacts_force_fail_closed_controls_on_cold_start():
+    from host import nr3_provision_worker as worker
+
+    env_text = worker.platform_env_text(
+        "acme",
+        "temporary-password",
+        "2026-09-03T00:00:00+00:00",
+        "tenant-bridge-token-at-least-32-bytes-long",
+    )
+    compose_text = worker.canonical_docker_compose_text("acme", 8123)
+
+    for key in (
+        "TENANT_RUNTIME_CONTROLS_REQUIRED",
+        "TENANT_ACCOUNT_ALLOWLIST_REQUIRED",
+    ):
+        assert f"{key}=true" in env_text
+        assert f"      - {key}=true" in compose_text
+
+
+def test_legacy_compose_is_recognized_only_for_existing_tenant_migration(tmp_path):
+    from host import nr3_provision_worker as worker
+
+    strict = worker.canonical_docker_compose_text("acme", 8123)
+    legacy = strict.replace(
+        "      - TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+        "      - TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n",
+        "",
+    )
+    tenant_dir = tmp_path / "acme"
+    tenant_dir.mkdir()
+    (tenant_dir / "docker-compose.yml").write_text(legacy, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="not the canonical tenant runtime"):
+        worker.validate_canonical_docker_compose_text("acme", 8123, legacy)
+    assert worker.trusted_compose_for_existing_tenant("acme", tenant_dir) == strict
 
 
 def test_host_worker_rejects_provision_without_canonical_tenant_headers(
@@ -409,6 +458,332 @@ def test_host_worker_executes_strict_allowlist_repair(monkeypatch, tmp_path):
     assert result["status"] == "succeeded"
     assert result["job_type"] == "tenant_action"
     assert result["action"] == "repair_whatsapp_allowlist"
+
+
+def test_allowlist_repair_serializes_runtime_style_client_patch(
+    monkeypatch,
+    tmp_path,
+):
+    from host import nr3_provision_worker as worker
+
+    tenant_dir = tmp_path / "clients" / "acme"
+    client_path = tenant_dir / "config" / "client.json"
+    client_path.parent.mkdir(parents=True)
+    client_path.write_text(
+        json.dumps({"slug": "acme", "response_timing": {"mode": "old"}}),
+        encoding="utf-8",
+    )
+    original_atomic_write = worker.atomic_write
+    competitor_started = threading.Event()
+    competitor_acquired = threading.Event()
+    competitor_done = threading.Event()
+    competitor_thread = None
+
+    def runtime_style_patch():
+        lock_path = client_path.with_suffix(client_path.suffix + ".lock")
+        competitor_started.set()
+        with exclusive_file_lock(lock_path):
+            competitor_acquired.set()
+            current = json.loads(client_path.read_text(encoding="utf-8"))
+            current["response_timing"] = {"mode": "updated-concurrently"}
+            original_atomic_write(
+                client_path,
+                json.dumps(current, indent=2) + "\n",
+                mode=0o600,
+            )
+        competitor_done.set()
+
+    def interleaving_atomic_write(path, content, *, mode=0o600):
+        nonlocal competitor_thread
+        competitor_thread = threading.Thread(target=runtime_style_patch)
+        competitor_thread.start()
+        assert competitor_started.wait(1)
+        assert not competitor_acquired.wait(0.1)
+        original_atomic_write(path, content, mode=mode)
+
+    monkeypatch.setattr(worker, "atomic_write", interleaving_atomic_write)
+
+    worker.repair_whatsapp_allowlist(
+        tenant_dir,
+        zernio_account_id="verified-account",
+        note="Verified by provider callback.",
+    )
+
+    assert competitor_acquired.wait(1)
+    assert competitor_done.wait(1)
+    assert competitor_thread is not None
+    competitor_thread.join(timeout=1)
+    assert not competitor_thread.is_alive()
+    updated = json.loads(client_path.read_text(encoding="utf-8"))
+    assert updated["channel_account_allowlist"]["zernio_accounts"] == [
+        "verified-account"
+    ]
+    assert updated["response_timing"] == {"mode": "updated-concurrently"}
+
+
+def test_host_worker_updates_only_safe_tenant_details(monkeypatch, tmp_path):
+    from host import nr3_provision_worker as worker
+
+    tenant_dir = tmp_path / "clients" / "acme"
+    client_path = tenant_dir / "config" / "client.json"
+    client_path.parent.mkdir(parents=True)
+    client_path.write_text(
+        json.dumps({
+            "slug": "acme",
+            "creation_id": "creation-acme",
+            "name": "Old name",
+            "password": "keep-secret",
+            "status": "active",
+            "channel_account_allowlist": {
+                "mode": "strict",
+                "zernio_accounts": ["verified-account"],
+            },
+            "business": {
+                "slug": "acme",
+                "name": "Old name",
+                "password": "keep-nested-secret",
+            },
+            "future_runtime_field": {"preserve": True},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(worker, "CLIENTS_ROOT", tmp_path / "clients")
+    monkeypatch.setattr(worker, "RESULT_DIR", tmp_path / "results")
+    monkeypatch.setattr(worker, "FAILED_DIR", tmp_path / "failed")
+    generation = worker.tenant_generation_fingerprint("acme", tenant_dir)
+    job_path = tmp_path / "details-acme.json"
+    job_path.write_text(
+        json.dumps({
+            "job_id": "details-acme",
+            "job_type": "tenant_action",
+            "action": "update_tenant_details",
+            "slug": "acme",
+            "generation_fingerprint": generation,
+            "tenant_details": {
+                "name": "Mermaid Demo",
+                "contact_person": "Demo Operator",
+                "email": "demo@example.com",
+                "phone": "+599 9 123 4567",
+                "whatsapp": "+1 223 276 0075",
+                "website": "https://unboks.org",
+                "address": "Demo Wharf 1",
+                "logo_url": "https://example.com/logo.png",
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    worker.process_job(job_path)
+
+    updated = json.loads(client_path.read_text(encoding="utf-8"))
+    assert updated["name"] == "Mermaid Demo"
+    assert updated["phone"] == "+599 9 123 4567"
+    assert updated["whatsapp"] == "+1 223 276 0075"
+    assert updated["password"] == "keep-secret"
+    assert updated["channel_account_allowlist"]["zernio_accounts"] == [
+        "verified-account"
+    ]
+    assert updated["future_runtime_field"] == {"preserve": True}
+    assert updated["business"]["name"] == "Mermaid Demo"
+    assert updated["business"]["password"] == "keep-nested-secret"
+    assert stat.S_IMODE(client_path.stat().st_mode) == 0o600
+    result = json.loads((tmp_path / "results" / "details-acme.json").read_text())
+    assert result["status"] == "succeeded"
+    assert result["action"] == "update_tenant_details"
+
+
+def test_host_tenant_details_update_serializes_concurrent_client_patch(
+    monkeypatch,
+    tmp_path,
+):
+    from host import nr3_provision_worker as worker
+
+    tenant_dir = tmp_path / "clients" / "acme"
+    client_path = tenant_dir / "config" / "client.json"
+    client_path.parent.mkdir(parents=True)
+    client_path.write_text(
+        json.dumps({
+            "slug": "acme",
+            "name": "Old name",
+            "channel_account_allowlist": {
+                "mode": "strict",
+                "zernio_accounts": ["verified-account"],
+            },
+        }),
+        encoding="utf-8",
+    )
+    original_atomic_write = worker.atomic_write
+    competitor_started = threading.Event()
+    competitor_acquired = threading.Event()
+    competitor_done = threading.Event()
+    competitor_thread = None
+
+    def competing_security_patch():
+        lock_path = client_path.with_suffix(client_path.suffix + ".lock")
+        competitor_started.set()
+        with exclusive_file_lock(lock_path):
+            competitor_acquired.set()
+            current = json.loads(client_path.read_text(encoding="utf-8"))
+            current["security_patch"] = "preserved"
+            original_atomic_write(
+                client_path,
+                json.dumps(current, indent=2) + "\n",
+                mode=0o600,
+            )
+        competitor_done.set()
+
+    def interleaving_atomic_write(path, content, *, mode=0o600):
+        nonlocal competitor_thread
+        competitor_thread = threading.Thread(target=competing_security_patch)
+        competitor_thread.start()
+        assert competitor_started.wait(1)
+        # The competing RMW must remain blocked while the worker holds the
+        # shared client.json.lock across its own read and atomic replacement.
+        assert not competitor_acquired.wait(0.1)
+        original_atomic_write(path, content, mode=mode)
+
+    monkeypatch.setattr(worker, "atomic_write", interleaving_atomic_write)
+
+    worker.update_tenant_details(
+        tenant_dir,
+        "acme",
+        {
+            "name": "Mermaid Demo",
+            "contact_person": "Demo Operator",
+            "email": "demo@example.com",
+            "phone": "+599 9 123 4567",
+            "whatsapp": "+1 223 276 0075",
+            "website": "https://unboks.org",
+            "address": "Demo Wharf 1",
+            "logo_url": "https://example.com/logo.png",
+        },
+    )
+
+    assert competitor_acquired.wait(1)
+    assert competitor_done.wait(1)
+    assert competitor_thread is not None
+    competitor_thread.join(timeout=1)
+    assert not competitor_thread.is_alive()
+    updated = json.loads(client_path.read_text(encoding="utf-8"))
+    assert updated["name"] == "Mermaid Demo"
+    assert updated["security_patch"] == "preserved"
+    assert updated["channel_account_allowlist"]["zernio_accounts"] == [
+        "verified-account"
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["status", "details", "password", "allowlist", "generation"],
+)
+def test_host_client_json_operations_reject_cross_tenant_symlink(
+    tmp_path,
+    mutation,
+):
+    from host import nr3_provision_worker as worker
+
+    victim_dir = tmp_path / "clients" / "victim"
+    victim_path = victim_dir / "config" / "client.json"
+    victim_path.parent.mkdir(parents=True)
+    victim_payload = {
+        "slug": "victim",
+        "password": "victim-secret-must-never-be-copied",
+        "channel_account_allowlist": {
+            "mode": "strict",
+            "zernio_accounts": ["victim-account"],
+        },
+    }
+    victim_path.write_text(json.dumps(victim_payload), encoding="utf-8")
+
+    attacker_dir = tmp_path / "clients" / "attacker"
+    attacker_path = attacker_dir / "config" / "client.json"
+    attacker_path.parent.mkdir(parents=True)
+    attacker_path.symlink_to(victim_path)
+
+    with pytest.raises(RuntimeError):
+        if mutation == "status":
+            worker.update_client_status(attacker_dir, "inactive")
+        elif mutation == "details":
+            worker.update_tenant_details(
+                attacker_dir,
+                "attacker",
+                {
+                    "name": "Attacker",
+                    "contact_person": "",
+                    "email": "",
+                    "phone": "",
+                    "whatsapp": "",
+                    "website": "",
+                    "address": "",
+                    "logo_url": "",
+                },
+            )
+        elif mutation == "password":
+            worker.update_dashboard_password(
+                attacker_dir,
+                "attacker",
+                "new-attacker-password",
+            )
+        elif mutation == "allowlist":
+            worker.repair_whatsapp_allowlist(
+                attacker_dir,
+                zernio_account_id="attacker-account",
+                note="Must not copy victim config.",
+            )
+        else:
+            worker.tenant_generation_fingerprint("attacker", attacker_dir)
+
+    assert attacker_path.is_symlink()
+    assert json.loads(victim_path.read_text(encoding="utf-8")) == victim_payload
+
+
+def test_host_worker_rejects_unsafe_tenant_detail_without_mutation(
+    monkeypatch,
+    tmp_path,
+):
+    from host import nr3_provision_worker as worker
+
+    tenant_dir = tmp_path / "clients" / "acme"
+    client_path = tenant_dir / "config" / "client.json"
+    client_path.parent.mkdir(parents=True)
+    original = json.dumps({
+        "slug": "acme",
+        "creation_id": "creation-acme",
+        "password": "keep-secret",
+    })
+    client_path.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(worker, "CLIENTS_ROOT", tmp_path / "clients")
+    monkeypatch.setattr(worker, "RESULT_DIR", tmp_path / "results")
+    monkeypatch.setattr(worker, "FAILED_DIR", tmp_path / "failed")
+    generation = worker.tenant_generation_fingerprint("acme", tenant_dir)
+    job_path = tmp_path / "details-acme.json"
+    job_path.write_text(
+        json.dumps({
+            "job_id": "details-acme",
+            "job_type": "tenant_action",
+            "action": "update_tenant_details",
+            "slug": "acme",
+            "generation_fingerprint": generation,
+            "tenant_details": {
+                "name": "Mermaid Demo\nINJECTED",
+                "contact_person": "",
+                "email": "",
+                "phone": "",
+                "whatsapp": "",
+                "website": "",
+                "address": "",
+                "logo_url": "",
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    worker.process_job(job_path)
+
+    result = json.loads((tmp_path / "results" / "details-acme.json").read_text())
+    assert result["status"] == "failed"
+    assert "control character" in result["message"]
+    assert client_path.read_text(encoding="utf-8") == original
 
 
 def test_host_health_check_rejects_non_success_response(monkeypatch):
@@ -694,6 +1069,54 @@ def test_host_action_queue_writes_allowlist_repair_job(monkeypatch, tmp_path):
     assert payload["zernio_account_id"] == "account_acme"
     assert payload["allowlist_note"] == "Repair from verified account."
     assert payload["generation_fingerprint"] == generation
+
+
+def test_host_action_queue_writes_safe_tenant_details_job(monkeypatch, tmp_path):
+    jobs = tmp_path / "jobs"
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
+    monkeypatch.setenv("NR3_PROVISION_QUEUE_DIR", str(jobs))
+    monkeypatch.setenv("NR3_PROVISION_RESULT_DIR", str(tmp_path / "results"))
+    monkeypatch.setenv("NR3_PROVISION_TIMEOUT_SECONDS", "0")
+    generation = _seed_control_panel_runtime(monkeypatch, tmp_path)
+    tenant_details = {
+        "name": "Mermaid Demo",
+        "contact_person": "Demo Operator",
+        "email": "demo@example.com",
+        "phone": "+599 9 123 4567",
+        "whatsapp": "+1 223 276 0075",
+        "website": "https://unboks.org",
+        "address": "Demo Wharf 1",
+        "logo_url": "https://example.com/logo.png",
+    }
+
+    result = queue_tenant_host_action(
+        slug="acme",
+        action="update_tenant_details",
+        tenant_details=tenant_details,
+    )
+
+    assert result.status == "queued"
+    payload = json.loads(next(jobs.glob("*.json")).read_text())
+    assert payload["action"] == "update_tenant_details"
+    assert payload["tenant_details"] == tenant_details
+    assert payload["generation_fingerprint"] == generation
+
+
+def test_host_action_queue_rejects_unsafe_tenant_details_shape(monkeypatch, tmp_path):
+    monkeypatch.setenv("NR3_AUTO_PROVISION", "true")
+    monkeypatch.setenv("NR3_PROVISION_QUEUE_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("NR3_PROVISION_RESULT_DIR", str(tmp_path / "results"))
+    _seed_control_panel_runtime(monkeypatch, tmp_path)
+
+    result = queue_tenant_host_action(
+        slug="acme",
+        action="update_tenant_details",
+        tenant_details={"name": "Acme", "password": "must-not-cross"},
+    )
+
+    assert result.status == "failed"
+    assert "exact safe field set" in result.message
+    assert not list((tmp_path / "jobs").glob("*.json"))
 
 
 def test_host_action_queue_writes_restore_runtime_job(monkeypatch, tmp_path):
@@ -2501,7 +2924,10 @@ def test_host_restore_injects_target_bridge_token(tmp_path):
             json.dumps({"slug": slug}), encoding="utf-8"
         )
         (root / "config" / "platform.env").write_text(
-            f"TENANT_ID={slug}\nNR3_INTERNAL_API_TOKEN={token}\n",
+            f"TENANT_ID={slug}\n"
+            f"NR3_INTERNAL_API_TOKEN={token}\n"
+            "TENANT_RUNTIME_CONTROLS_REQUIRED=false\n"
+            "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=false\n",
             encoding="utf-8",
         )
     target_token = "target-token-" + "x" * 40
@@ -2520,6 +2946,9 @@ def test_host_restore_injects_target_bridge_token(tmp_path):
     assert f"NR3_INTERNAL_API_TOKEN={target_token}" in env_text
     assert "donor-secret" not in env_text
     assert env_text.count("NR3_INTERNAL_API_TOKEN=") == 1
+    assert env_text.count("TENANT_RUNTIME_CONTROLS_REQUIRED=true") == 1
+    assert env_text.count("TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true") == 1
+    assert "_REQUIRED=false" not in env_text
 
 
 def test_app_runtime_restore_preserves_target_token_and_clone_strips_donor(
@@ -2582,6 +3011,8 @@ def test_app_runtime_restore_preserves_target_token_and_clone_strips_donor(
     assert restored_client["channel_account_allowlist"] == trusted_allowlist
     assert restored_client["zernio_account_id"] == ""
     assert restored_client["zernio_account_verified"] == ""
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in restored_env
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in restored_env
 
     clone = clients / "clone"
     tenant_backup._restore_client_tree(
@@ -2591,9 +3022,41 @@ def test_app_runtime_restore_preserves_target_token_and_clone_strips_donor(
     clone_client = json.loads((clone / "config" / "client.json").read_text())
     assert "NR3_INTERNAL_API_TOKEN=" not in clone_env
     assert "donor-token" not in clone_env
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in clone_env
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in clone_env
     assert clone_client["channel_account_allowlist"] == {}
     assert clone_client["zernio_account_id"] == ""
     assert clone_client["zernio_account_verified"] == ""
+
+
+def test_app_clone_creates_fail_closed_env_when_archive_has_none(
+    monkeypatch,
+    tmp_path,
+):
+    from app import tenant_backup
+
+    clients = tmp_path / "clients"
+    monkeypatch.setenv("NR3_TENANTS_CLIENT_DIR", str(clients))
+    source = tmp_path / "source"
+    (source / "config").mkdir(parents=True)
+    (source / "config" / "client.json").write_text(
+        json.dumps({"slug": "donor"}),
+        encoding="utf-8",
+    )
+
+    tenant_backup._restore_client_tree(
+        "clone",
+        source,
+        clients / "clone",
+        trusted_host_port=8124,
+        target_creation_id="clone-generation",
+    )
+
+    env = (clients / "clone" / "config" / "platform.env").read_text()
+    assert "TENANT_ID=clone" in env
+    assert "TENANT_SLUG=clone" in env
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in env
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in env
 
 
 @pytest.mark.parametrize("orphan_kind", ["container", "nginx"])
@@ -2814,6 +3277,10 @@ def test_host_clone_generates_canonical_compose_and_strips_donor_token(
     env = (clone_root / "config" / "platform.env").read_text()
     assert "donor-token" not in env
     assert "NR3_INTERNAL_API_TOKEN=target-token-" in env
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in env
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in env
+    assert "TENANT_RUNTIME_CONTROLS_REQUIRED=true" in canonical
+    assert "TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true" in canonical
     assert (paths["tokens"] / "clone").read_text().strip().startswith(
         "target-token-"
     )

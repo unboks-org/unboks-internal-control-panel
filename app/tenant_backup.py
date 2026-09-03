@@ -80,6 +80,10 @@ PROVIDER_ENV_KEYS_TO_CLEAR = {
     "ZERNIO_PHONE_NUMBER_ID",
     "ZERNIO_PROFILE_ID",
 }
+REQUIRED_RUNTIME_ENV = {
+    "TENANT_RUNTIME_CONTROLS_REQUIRED": "true",
+    "TENANT_ACCOUNT_ALLOWLIST_REQUIRED": "true",
+}
 
 
 def _now() -> str:
@@ -195,6 +199,8 @@ def _canonical_docker_compose_text(slug: str, host_port: int) -> str:
         "      - ./config/platform.env\n"
         "    environment:\n"
         "      - GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/app/config/calendar-key.json\n"
+        "      - TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+        "      - TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n"
         "    volumes:\n"
         "      - ./config:/app/config:rw\n"
         "      - ./data:/app/data\n"
@@ -230,8 +236,15 @@ def _trusted_canonical_compose(
     if expected_host_port is not None and host_port != expected_host_port:
         raise ValueError("existing target compose does not match its reserved host port")
     canonical = _canonical_docker_compose_text(slug, host_port)
-    if text.rstrip("\n") + "\n" != canonical:
-        raise ValueError("existing target compose is not canonical")
+    normalized = text.rstrip("\n") + "\n"
+    if normalized != canonical:
+        legacy = canonical.replace(
+            "      - TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+            "      - TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n",
+            "",
+        )
+        if normalized != legacy:
+            raise ValueError("existing target compose is not canonical")
     return canonical, host_port
 
 
@@ -648,46 +661,51 @@ def _restore_client_tree(
         write_private_client_json(client_path, data)
 
     env_path = target_root / "config" / "platform.env"
-    if env_path.exists() or previous_bridge_token:
-        lines = (
-            env_path.read_text(encoding="utf-8").splitlines()
-            if env_path.exists()
-            else []
-        )
-        seen_tenant_id = False
-        seen_tenant_slug = False
-        seen_bridge_token = False
-        out: list[str] = []
-        for line in lines:
-            key = line.split("=", 1)[0].strip()
-            if key == "TENANT_ID":
-                out.append(f"TENANT_ID={target}")
-                seen_tenant_id = True
-            elif key == "TENANT_SLUG":
-                out.append(f"TENANT_SLUG={target}")
-                seen_tenant_slug = True
-            elif key == "NR3_INTERNAL_API_TOKEN":
-                # Runtime archives may contain a donor's live bridge token.
-                # Keep only the target's existing token; clones with no target
-                # identity strip the donor token entirely.
-                if previous_bridge_token and not seen_bridge_token:
-                    out.append(
-                        f"NR3_INTERNAL_API_TOKEN={previous_bridge_token}"
-                    )
-                    seen_bridge_token = True
-            elif key in PROVIDER_ENV_KEYS_TO_CLEAR:
-                continue
-            elif line.startswith("# platform.env for tenant "):
-                out.append(f"# platform.env for tenant {target}")
-            else:
-                out.append(line)
-        if not seen_tenant_id:
+    lines = (
+        env_path.read_text(encoding="utf-8").splitlines()
+        if env_path.exists()
+        else []
+    )
+    seen_tenant_id = False
+    seen_tenant_slug = False
+    seen_bridge_token = False
+    seen_required_runtime_env: set[str] = set()
+    out: list[str] = []
+    for line in lines:
+        key = line.split("=", 1)[0].strip()
+        if key == "TENANT_ID":
             out.append(f"TENANT_ID={target}")
-        if not seen_tenant_slug:
+            seen_tenant_id = True
+        elif key == "TENANT_SLUG":
             out.append(f"TENANT_SLUG={target}")
-        if previous_bridge_token and not seen_bridge_token:
-            out.append(f"NR3_INTERNAL_API_TOKEN={previous_bridge_token}")
-        write_private_text(env_path, "\n".join(out).rstrip() + "\n")
+            seen_tenant_slug = True
+        elif key == "NR3_INTERNAL_API_TOKEN":
+            # Runtime archives may contain a donor's live bridge token.
+            # Keep only the target's existing token; clones with no target
+            # identity strip the donor token entirely.
+            if previous_bridge_token and not seen_bridge_token:
+                out.append(f"NR3_INTERNAL_API_TOKEN={previous_bridge_token}")
+                seen_bridge_token = True
+        elif key in REQUIRED_RUNTIME_ENV:
+            if key not in seen_required_runtime_env:
+                out.append(f"{key}={REQUIRED_RUNTIME_ENV[key]}")
+                seen_required_runtime_env.add(key)
+        elif key in PROVIDER_ENV_KEYS_TO_CLEAR:
+            continue
+        elif line.startswith("# platform.env for tenant "):
+            out.append(f"# platform.env for tenant {target}")
+        else:
+            out.append(line)
+    if not seen_tenant_id:
+        out.append(f"TENANT_ID={target}")
+    if not seen_tenant_slug:
+        out.append(f"TENANT_SLUG={target}")
+    if previous_bridge_token and not seen_bridge_token:
+        out.append(f"NR3_INTERNAL_API_TOKEN={previous_bridge_token}")
+    for key, value in REQUIRED_RUNTIME_ENV.items():
+        if key not in seen_required_runtime_env:
+            out.append(f"{key}={value}")
+    write_private_text(env_path, "\n".join(out).rstrip() + "\n")
 
     # Compose files are executable host configuration. Remove every archive
     # candidate before restoring only a pre-existing target compose or a fresh
@@ -895,6 +913,11 @@ def import_uploaded_package(
             contact_person=str(account.get("contact_person") or ""),
             email=str(account.get("email") or ""),
             phone=str(account.get("phone") or ""),
+            whatsapp=(
+                str(account.get("whatsapp") or "")
+                if "whatsapp" in account
+                else None
+            ),
             website=str(account.get("website") or ""),
             address=str(account.get("address") or ""),
             logo_url=str(account.get("logo_url") or ""),

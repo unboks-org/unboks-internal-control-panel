@@ -70,7 +70,7 @@
   <details id="tenant-details-section" class="tenant-details-editor">
     <summary>
       <span>Edit tenant details</span>
-      <span class="muted">Business name, contact, website, address, and logo URL.</span>
+      <span class="muted">Business name, public contact, WhatsApp, website, address, and logo URL.</span>
     </summary>
     <form method="post" action="/admin/tenants/{{ tenant.id }}/details" class="tenant-details-form">
       <label>
@@ -86,8 +86,12 @@
         <input name="email" type="email" value="{{ tenant_account.email }}">
       </label>
       <label>
-        <span>Phone / WhatsApp</span>
+        <span>Public/business phone</span>
         <input name="phone" type="text" value="{{ tenant_account.phone }}">
+      </label>
+      <label>
+        <span>WhatsApp number</span>
+        <input name="whatsapp" type="text" value="{{ tenant_account.whatsapp }}">
       </label>
       <label>
         <span>Website</span>

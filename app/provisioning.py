@@ -14,6 +14,7 @@ import re
 import secrets
 import tempfile
 import time
+import unicodedata
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -28,6 +29,17 @@ _HELD_TENANT_LIFECYCLE_LOCKS: ContextVar[frozenset[str]] = ContextVar(
     "held_tenant_lifecycle_locks",
     default=frozenset(),
 )
+
+TENANT_DETAIL_LIMITS = {
+    "name": 200,
+    "contact_person": 200,
+    "email": 320,
+    "phone": 80,
+    "whatsapp": 80,
+    "website": 2048,
+    "address": 1000,
+    "logo_url": 2048,
+}
 
 
 @dataclass(frozen=True)
@@ -539,6 +551,7 @@ def queue_tenant_host_action(
     prepared_backup_digest: str = "",
     host_port: int = 0,
     creation_id: str = "",
+    tenant_details: dict[str, str] | None = None,
     before_queue: Callable[[], list[str] | tuple[str, ...] | None] | None = None,
 ) -> AutoProvisionResult:
     """Queue a privileged host action such as suspending a tenant.
@@ -562,6 +575,7 @@ def queue_tenant_host_action(
         "restart_tenant",
         "restore_tenant_runtime",
         "repair_whatsapp_allowlist",
+        "update_tenant_details",
     }:
         return AutoProvisionResult(
             status="failed",
@@ -611,6 +625,37 @@ def queue_tenant_host_action(
                 job_id=requested_job_id or None,
                 dashboard_url=dashboard_url,
             )
+    if action == "update_tenant_details":
+        if (
+            not isinstance(tenant_details, dict)
+            or set(tenant_details) != set(TENANT_DETAIL_LIMITS)
+            or not str(tenant_details.get("name") or "").strip()
+            or any(not isinstance(value, str) for value in tenant_details.values())
+        ):
+            return AutoProvisionResult(
+                status="failed",
+                message="Tenant details host action requires the exact safe field set.",
+                job_id=requested_job_id or None,
+                dashboard_url=dashboard_url,
+            )
+        normalized_details: dict[str, str] = {}
+        for field, limit in TENANT_DETAIL_LIMITS.items():
+            value = tenant_details[field].strip()
+            if (
+                len(value) > limit
+                or any(
+                    unicodedata.category(char).startswith("C")
+                    for char in value
+                )
+            ):
+                return AutoProvisionResult(
+                    status="failed",
+                    message=f"Tenant detail {field!r} is invalid.",
+                    job_id=requested_job_id or None,
+                    dashboard_url=dashboard_url,
+                )
+            normalized_details[field] = value
+        tenant_details = normalized_details
     # Serialize every lifecycle mutation for one tenant. Per-action locks would
     # let (for example) a restart and an allowlist repair both pass the active
     # job check and race on the same runtime files.
@@ -651,6 +696,7 @@ def queue_tenant_host_action(
             "restart_tenant",
             "reset_dashboard_password",
             "repair_whatsapp_allowlist",
+            "update_tenant_details",
         } or (action == "restore_tenant_runtime" and not creation_id)
         if generation_guarded_action:
             try:
@@ -739,6 +785,8 @@ def queue_tenant_host_action(
                     "zernio_account_id": zernio_account_id,
                     "allowlist_note": allowlist_note,
                 })
+            elif action == "update_tenant_details":
+                expected_fields["tenant_details"] = tenant_details
             same_request = isinstance(active_payload, dict) and all(
                 active_payload.get(key) == value
                 for key, value in expected_fields.items()
@@ -810,6 +858,8 @@ def queue_tenant_host_action(
             payload["host_port"] = host_port
         if creation_id:
             payload["creation_id"] = creation_id
+        if tenant_details is not None:
+            payload["tenant_details"] = dict(tenant_details)
         payload["preserve_provider_connection"] = bool(preserve_provider_connection)
         _write_private_json(tmp_path, payload)
         pre_queue_details: tuple[str, ...] = tuple()

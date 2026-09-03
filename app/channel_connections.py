@@ -611,6 +611,37 @@ def create_connection_request(
         datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
     ).isoformat(timespec="seconds")
     with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        # A tenant may generate a replacement authorization link before an
+        # earlier one is used. Retire every older in-flight request in the
+        # same lifecycle generation atomically with the new insert so two
+        # valid nonces can never race to replace the tenant's provider owner.
+        conn.execute(
+            """
+            UPDATE connection_requests
+            SET status = 'cancelled',
+                error_summary = 'Superseded by a newer authorization link.',
+                updated_at = ?
+            WHERE tenant_id = ?
+              AND channel = ?
+              AND provider = ?
+              AND (tenant_generation_id IS NULL OR tenant_generation_id = ?)
+              AND status IN (
+                  'pending',
+                  'link_generated',
+                  'auth_started',
+                  'callback_received',
+                  'pending_number'
+              )
+            """,
+            (
+                now,
+                tenant_id,
+                channel,
+                provider,
+                _lifecycle_generation_id,
+            ),
+        )
         conn.execute(
             """
             INSERT INTO connection_requests (
@@ -678,7 +709,9 @@ def get_latest_connection_request_for_tenant(
             """
             SELECT * FROM connection_requests
             WHERE tenant_id = ? AND channel = ? AND provider = ?
-            ORDER BY updated_at DESC
+            -- "Latest" means the newest authorization attempt, not whichever
+            -- older row most recently received a late callback/status update.
+            ORDER BY created_at DESC, rowid DESC
             LIMIT 1
             """,
             (tenant_id, channel, provider),

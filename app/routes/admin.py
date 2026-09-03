@@ -1351,6 +1351,7 @@ def admin_update_tenant_details(
     contact_person: str = Form(default=""),
     email: str = Form(default=""),
     phone: str = Form(default=""),
+    whatsapp: str = Form(default=""),
     website: str = Form(default=""),
     address: str = Form(default=""),
     logo_url: str = Form(default=""),
@@ -1378,16 +1379,20 @@ def admin_update_tenant_details(
             message="Enter a valid contact email or leave it empty.",
             level="warn",
         )
+    safe_details = {
+        "name": clean_name,
+        "contact_person": (contact_person or "").strip(),
+        "email": clean_email,
+        "phone": (phone or "").strip(),
+        "whatsapp": (whatsapp or "").strip(),
+        "website": (website or "").strip(),
+        "address": (address or "").strip(),
+        "logo_url": (logo_url or "").strip(),
+    }
     try:
         update_tenant_account_details(
             tenant_id,
-            name=clean_name,
-            contact_person=contact_person,
-            email=clean_email,
-            phone=phone,
-            website=website,
-            address=address,
-            logo_url=logo_url,
+            **safe_details,
         )
     except TenantCreateError as exc:
         return _workspace_redirect(
@@ -1397,11 +1402,74 @@ def admin_update_tenant_details(
             level="warn",
         )
     except OSError as exc:
-        logger.warning("tenant_details.save_failed slug=%s err=%r", tenant_id, exc)
+        # Production intentionally mounts /root/clients read-only into Nr3.
+        # Preserve that security boundary and delegate this narrow patch to
+        # the generation-fenced host worker instead of making the mount RW.
+        logger.info(
+            "tenant_details.direct_write_unavailable slug=%s err=%r",
+            tenant_id,
+            exc,
+        )
+        try:
+            result = queue_tenant_host_action(
+                slug=tenant_id,
+                action="update_tenant_details",
+                dashboard_url=(
+                    f"https://dashboard.unboks.org/login?workspace={tenant_id}"
+                ),
+                tenant_details=safe_details,
+            )
+        except Exception as queue_exc:
+            logger.warning(
+                "tenant_details.host_write_queue_failed slug=%s err=%r",
+                tenant_id,
+                queue_exc,
+            )
+            return _workspace_redirect(
+                tenant_id,
+                "tenant-details-section",
+                message="Tenant details could not be saved.",
+                level="warn",
+            )
+        if result.status == "succeeded":
+            try:
+                register_tenant({
+                    "slug": tenant_id,
+                    "name": safe_details["name"],
+                    "status": tenant.status,
+                })
+            except Exception as registry_exc:
+                logger.warning(
+                    "tenant_details.registry_refresh_failed slug=%s err=%r",
+                    tenant_id,
+                    registry_exc,
+                )
+            return _workspace_redirect(
+                tenant_id,
+                "tenant-details-section",
+                message="Tenant details saved through the host worker.",
+                level="ok",
+            )
+        if result.status == "queued":
+            return _workspace_redirect(
+                tenant_id,
+                "tenant-details-section",
+                message="Tenant details update queued. Refresh after it completes.",
+                level="ok",
+            )
+        logger.warning(
+            "tenant_details.host_write_failed slug=%s status=%s message=%s",
+            tenant_id,
+            result.status,
+            result.message[:240],
+        )
         return _workspace_redirect(
             tenant_id,
             "tenant-details-section",
-            message="Tenant details could not be saved.",
+            message=(
+                "Tenant details could not be saved through the host worker: "
+                f"{result.message}"
+            ),
             level="warn",
         )
     return _workspace_redirect(
@@ -2138,6 +2206,8 @@ async def admin_tenant_create_submit(
         f"NR3_INTERNAL_OVERRIDES_URL=http://wtyj-admin:8010\n"
         f"NR3_INTERNAL_API_TOKEN=SET_BY_FULL_VPS_SETUP_SCRIPT_TENANT_SCOPED\n"
         f"ICP_OVERRIDES_TTL_SECONDS=5\n"
+        f"TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+        f"TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n"
         f"ANTHROPIC_API_KEY=SET_BY_FULL_VPS_SETUP_SCRIPT\n"
         f"LATE_API_KEY=SET_BY_FULL_VPS_SETUP_SCRIPT\n"
         f"ZERNIO_WEBHOOK_SECRET=SET_BY_FULL_VPS_SETUP_SCRIPT\n"
@@ -2156,6 +2226,8 @@ async def admin_tenant_create_submit(
         f"      - ./config/platform.env\n"
         f"    environment:\n"
         f"      - GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/app/config/calendar-key.json\n"
+        f"      - TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+        f"      - TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n"
         f"    volumes:\n"
         f"      - ./config:/app/config:rw\n"
         f"      - ./data:/app/data\n"
@@ -2279,6 +2351,8 @@ async def admin_tenant_create_submit(
         f"NR3_INTERNAL_OVERRIDES_URL=http://wtyj-admin:8010\n"
         f"NR3_INTERNAL_API_TOKEN=${{BRIDGE_TOKEN}}\n"
         f"ICP_OVERRIDES_TTL_SECONDS=5\n"
+        f"TENANT_RUNTIME_CONTROLS_REQUIRED=true\n"
+        f"TENANT_ACCOUNT_ALLOWLIST_REQUIRED=true\n"
         f"ANTHROPIC_API_KEY=${{ANTHROPIC_API_KEY}}\n"
         f"LATE_API_KEY=${{LATE_API_KEY}}\n"
         f"ZERNIO_WEBHOOK_SECRET=${{ZERNIO_WEBHOOK_SECRET}}\n"
