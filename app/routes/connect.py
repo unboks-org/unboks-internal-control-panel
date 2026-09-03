@@ -35,6 +35,7 @@ from app.provisioning import (
     AutoProvisionResult,
     queue_tenant_host_action,
     tenant_creation_lock,
+    tenant_read_lock,
 )
 from app.tenants import (
     get_tenant,
@@ -1774,7 +1775,7 @@ def _tenant_id_for_zernio_account(account_id: str) -> _ZernioOwnerResolution:
     )
     if connection:
         try:
-            with tenant_creation_lock(connection.tenant_id):
+            with tenant_read_lock(connection.tenant_id):
                 generation_id = require_tenant_mutation_generation(
                     connection.tenant_id
                 )
@@ -1930,9 +1931,10 @@ def _forward_generation_bound_zernio_webhook(
     This function runs in a worker thread. Holding a synchronous filesystem
     lock across an ``await`` on the main event loop can deadlock another async
     request; the private event loop here keeps the server loop free while the
-    cross-process lifecycle lease serializes delete/recreate and forwarding.
+    shared lifecycle lease fences delete/recreate while allowing the tenant
+    to call the authenticated control bridge before acknowledging its message.
     """
-    with tenant_creation_lock(tenant_id):
+    with tenant_read_lock(tenant_id):
         require_tenant_mutation_generation(
             tenant_id,
             expected_generation_id=expected_generation_id,
@@ -2020,7 +2022,10 @@ async def zernio_webhook_router(request: Request) -> PlainTextResponse:
     expected_generation_id = resolution.generation_id
 
     try:
-        status_code, response_text = await run_in_threadpool(
+        # Forwarding waits on tenant callbacks into synchronous bridge routes.
+        # Use a separate executor from Starlette's route thread pool so a
+        # burst of webhooks cannot consume every callback worker.
+        status_code, response_text = await asyncio.to_thread(
             _forward_generation_bound_zernio_webhook,
             tenant_id=tenant_id,
             expected_generation_id=expected_generation_id,

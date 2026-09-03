@@ -22,12 +22,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from app.file_lock import exclusive_file_lock
+from app.file_lock import exclusive_file_lock, shared_file_lock
 
 
 _HELD_TENANT_LIFECYCLE_LOCKS: ContextVar[frozenset[str]] = ContextVar(
     "held_tenant_lifecycle_locks",
     default=frozenset(),
+)
+
+_HELD_TENANT_READ_LOCKS: ContextVar[frozenset[str]] = ContextVar(
+    "held_tenant_read_locks", default=frozenset(),
 )
 
 TENANT_DETAIL_LIMITS = {
@@ -120,15 +124,9 @@ def tenant_creation_lock(slug: str):
     deadlocking on a second ``flock`` descriptor, while other threads and
     processes remain serialized by the on-disk lock.
     """
-    if re.fullmatch(r"[a-z][a-z0-9_-]{1,49}", slug or "") is None:
-        raise ValueError("Invalid tenant slug for creation lock.")
-    configured = os.getenv("NR3_TENANT_CREATE_LOCK_DIR", "").strip()
-    lock_dir = (
-        Path(configured)
-        if configured
-        else _provision_claims_path().parent / "create-locks"
-    )
-    lock_path = str((lock_dir / f"{slug}.lock").resolve())
+    lock_path = _tenant_lifecycle_lock_path(slug)
+    if lock_path in _HELD_TENANT_READ_LOCKS.get():
+        raise RuntimeError("Cannot upgrade a tenant read lease to a mutation lock.")
     held = _HELD_TENANT_LIFECYCLE_LOCKS.get()
     if lock_path in held:
         yield
@@ -139,6 +137,38 @@ def tenant_creation_lock(slug: str):
             yield
     finally:
         _HELD_TENANT_LIFECYCLE_LOCKS.reset(token)
+
+
+def _tenant_lifecycle_lock_path(slug: str) -> str:
+    if re.fullmatch(r"[a-z][a-z0-9_-]{1,49}", slug or "") is None:
+        raise ValueError("Invalid tenant slug for creation lock.")
+    configured = os.getenv("NR3_TENANT_CREATE_LOCK_DIR", "").strip()
+    lock_dir = (
+        Path(configured)
+        if configured
+        else _provision_claims_path().parent / "create-locks"
+    )
+    return str((lock_dir / f"{slug}.lock").resolve())
+
+
+@contextmanager
+def tenant_read_lock(slug: str):
+    """Pin one tenant generation while allowing its authenticated callbacks.
+
+    Lifecycle mutations retain the exclusive lock on the same file. Read
+    leases cannot be upgraded: a writer must release and revalidate instead.
+    """
+    lock_path = _tenant_lifecycle_lock_path(slug)
+    held = _HELD_TENANT_READ_LOCKS.get()
+    if lock_path in held or lock_path in _HELD_TENANT_LIFECYCLE_LOCKS.get():
+        yield
+        return
+    token = _HELD_TENANT_READ_LOCKS.set(held | {lock_path})
+    try:
+        with shared_file_lock(Path(lock_path)):
+            yield
+    finally:
+        _HELD_TENANT_READ_LOCKS.reset(token)
 
 
 def _provision_claims_path() -> Path:

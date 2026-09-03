@@ -99,6 +99,8 @@ def _authorized_bridge_lease(
     tenant_id: str,
     authorization: str,
     x_tenant_identity: Optional[str],
+    *,
+    read_only: bool = False,
 ):
     """Keep bridge authentication and tenant access on one generation.
 
@@ -116,9 +118,10 @@ def _authorized_bridge_lease(
         raise HTTPException(status_code=403, detail="Tenant identity mismatch")
 
     from app.delete_operations import require_tenant_mutation_generation
-    from app.provisioning import tenant_creation_lock
+    from app.provisioning import tenant_creation_lock, tenant_read_lock
 
-    with tenant_creation_lock(safe_tenant_id):
+    lease = tenant_read_lock if read_only else tenant_creation_lock
+    with lease(safe_tenant_id):
         _require_internal_bridge(
             safe_tenant_id,
             authorization,
@@ -143,7 +146,7 @@ def read_tenant_overrides(
     x_tenant_identity: Optional[str] = Header(default=None),
 ) -> dict:
     with _authorized_bridge_lease(
-        tenant_id, authorization, x_tenant_identity
+        tenant_id, authorization, x_tenant_identity, read_only=True
     ):
         return effective_state_envelope(tenant_id)
 
