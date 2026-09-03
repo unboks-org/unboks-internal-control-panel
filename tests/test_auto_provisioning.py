@@ -737,6 +737,90 @@ def test_host_client_json_operations_reject_cross_tenant_symlink(
     assert json.loads(victim_path.read_text(encoding="utf-8")) == victim_payload
 
 
+def test_password_reset_rejects_cross_tenant_platform_env_symlink_before_mutation(
+    tmp_path,
+):
+    from host import nr3_provision_worker as worker
+
+    victim_env = tmp_path / "clients" / "victim" / "config" / "platform.env"
+    victim_env.parent.mkdir(parents=True)
+    victim_bytes = b"DASHBOARD_PASSWORD=victim-password\nVICTIM_SECRET=never-copy\n"
+    victim_env.write_bytes(victim_bytes)
+
+    attacker_dir = tmp_path / "clients" / "attacker"
+    attacker_config = attacker_dir / "config"
+    attacker_config.mkdir(parents=True)
+    attacker_client = attacker_config / "client.json"
+    attacker_client_bytes = json.dumps(
+        {"slug": "attacker", "password": "original-attacker-password"}
+    ).encode("utf-8")
+    attacker_client.write_bytes(attacker_client_bytes)
+    attacker_env = attacker_config / "platform.env"
+    attacker_env.symlink_to(victim_env)
+
+    with pytest.raises(RuntimeError, match="platform.env"):
+        worker.update_dashboard_password(
+            attacker_dir,
+            "attacker",
+            "new-attacker-password",
+        )
+
+    assert attacker_client.read_bytes() == attacker_client_bytes
+    assert attacker_env.is_symlink()
+    assert victim_env.read_bytes() == victim_bytes
+
+
+def test_password_reset_atomic_replace_does_not_follow_late_platform_env_symlink(
+    monkeypatch,
+    tmp_path,
+):
+    from host import nr3_provision_worker as worker
+
+    victim_env = tmp_path / "clients" / "victim" / "config" / "platform.env"
+    victim_env.parent.mkdir(parents=True)
+    victim_bytes = b"DASHBOARD_PASSWORD=victim-password\nVICTIM_SECRET=never-copy\n"
+    victim_env.write_bytes(victim_bytes)
+
+    attacker_dir = tmp_path / "clients" / "attacker"
+    attacker_config = attacker_dir / "config"
+    attacker_config.mkdir(parents=True)
+    (attacker_config / "client.json").write_text(
+        json.dumps({"slug": "attacker", "password": "original-password"}),
+        encoding="utf-8",
+    )
+    attacker_env = attacker_config / "platform.env"
+    attacker_env.write_text(
+        "DASHBOARD_PASSWORD=original-password\nATTACKER_SETTING=preserve\n",
+        encoding="utf-8",
+    )
+    original_atomic_write = worker.atomic_write
+    swapped = False
+
+    def swap_before_env_replace(path, content, *, mode=None):
+        nonlocal swapped
+        if Path(path) == attacker_env:
+            attacker_env.unlink()
+            attacker_env.symlink_to(victim_env)
+            swapped = True
+        original_atomic_write(path, content, mode=mode)
+
+    monkeypatch.setattr(worker, "atomic_write", swap_before_env_replace)
+
+    worker.update_dashboard_password(
+        attacker_dir,
+        "attacker",
+        "new-attacker-password",
+    )
+
+    assert swapped is True
+    assert not attacker_env.is_symlink()
+    attacker_text = attacker_env.read_text(encoding="utf-8")
+    assert "DASHBOARD_PASSWORD=new-attacker-password" in attacker_text
+    assert "ATTACKER_SETTING=preserve" in attacker_text
+    assert "VICTIM_SECRET" not in attacker_text
+    assert victim_env.read_bytes() == victim_bytes
+
+
 def test_host_worker_rejects_unsafe_tenant_detail_without_mutation(
     monkeypatch,
     tmp_path,

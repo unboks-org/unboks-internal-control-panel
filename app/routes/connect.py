@@ -6,8 +6,9 @@ import logging
 import hashlib
 import hmac
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 import httpx
@@ -91,6 +92,33 @@ SAFE_CALLBACK_KEYS = {
     "error_description",
     "message",
 }
+
+
+@dataclass(frozen=True)
+class _ZernioOwnerResolution:
+    status: Literal["ready", "unmapped", "retryable"]
+    tenant_id: str = ""
+    generation_id: str = ""
+    reason: str = ""
+
+
+def _zernio_owner_ready(
+    tenant_id: str,
+    generation_id: str,
+) -> _ZernioOwnerResolution:
+    return _ZernioOwnerResolution(
+        status="ready",
+        tenant_id=tenant_id,
+        generation_id=generation_id,
+    )
+
+
+def _zernio_owner_unmapped(reason: str) -> _ZernioOwnerResolution:
+    return _ZernioOwnerResolution(status="unmapped", reason=reason)
+
+
+def _zernio_owner_retryable(reason: str) -> _ZernioOwnerResolution:
+    return _ZernioOwnerResolution(status="retryable", reason=reason)
 
 
 class WhatsAppPhoneSelection(BaseModel):
@@ -1598,7 +1626,9 @@ def _verify_zernio_webhook_signature(body: bytes, signature: str, secret: str) -
     return hmac.compare_digest(received.strip(), expected)
 
 
-def _tenant_id_for_zernio_account(account_id: str) -> tuple[str, str] | None:
+def _tenant_id_for_zernio_account(account_id: str) -> _ZernioOwnerResolution:
+    if not account_id:
+        return _zernio_owner_unmapped("missing_account")
     connection = channel_connections.get_tenant_channel_connection_by_account_id(
         account_id
     )
@@ -1629,31 +1659,31 @@ def _tenant_id_for_zernio_account(account_id: str) -> tuple[str, str] | None:
                     else []
                 )
                 if (
-                    current is not None
-                    and current.id == connection.id
-                    and current.tenant_id == connection.tenant_id
-                    and account_id
-                    in {str(item).strip() for item in allowed or []}
+                    current is None
+                    or current.id != connection.id
+                    or current.tenant_id != connection.tenant_id
                 ):
-                    return connection.tenant_id, generation_id
+                    return _zernio_owner_unmapped("stale_or_conflicting_owner")
+                if account_id in {str(item).strip() for item in allowed or []}:
+                    return _zernio_owner_ready(connection.tenant_id, generation_id)
         except (DeleteOperationConflict, channel_connections.ProviderOwnershipConflict):
-            return None
+            return _zernio_owner_unmapped("stale_or_conflicting_owner")
         logger.warning(
             "zernio_webhook_router_connected_account_not_allowlisted tenant=%s account=%s",
             connection.tenant_id,
             account_id[:24],
         )
-        return None
+        return _zernio_owner_retryable("strict_allowlist_not_ready")
     # Never route solely from legacy client.json. Older callback handling could
     # persist an unverified query-string account id there. The provider-backed
     # reconciliation below must re-establish account/profile ownership first.
     return _sync_tenant_for_zernio_account(account_id)
 
 
-def _sync_tenant_for_zernio_account(account_id: str) -> tuple[str, str] | None:
+def _sync_tenant_for_zernio_account(account_id: str) -> _ZernioOwnerResolution:
     """Self-heal webhook routing when Zernio completed but callback state was missed."""
     if not account_id:
-        return None
+        return _zernio_owner_unmapped("missing_account")
     owner_candidates: list[tuple[object, str, str]] = []
     for candidate in list_tenants():
         try:
@@ -1673,7 +1703,7 @@ def _sync_tenant_for_zernio_account(account_id: str) -> tuple[str, str] | None:
             account_id[:24],
             str(exc)[:120],
         )
-        return None
+        return _zernio_owner_retryable("provider_lookup_unavailable")
 
     matched = next(
         (
@@ -1684,7 +1714,7 @@ def _sync_tenant_for_zernio_account(account_id: str) -> tuple[str, str] | None:
         None,
     )
     if matched is None or not matched.profile_id:
-        return None
+        return _zernio_owner_unmapped("provider_account_not_connected")
 
     owners = [item for item in owner_candidates if item[1] == matched.profile_id]
     if len(owners) != 1:
@@ -1693,7 +1723,7 @@ def _sync_tenant_for_zernio_account(account_id: str) -> tuple[str, str] | None:
             matched.profile_id[:24],
             len(owners),
         )
-        return None
+        return _zernio_owner_unmapped("ambiguous_profile_owner")
     tenant, _, expected_generation_id = owners[0]
     try:
         _, allowlist_result = _upsert_connected_account(
@@ -1713,7 +1743,7 @@ def _sync_tenant_for_zernio_account(account_id: str) -> tuple[str, str] | None:
             tenant.id,
             account_id[:24],
         )
-        return None
+        return _zernio_owner_unmapped("provider_owner_conflict")
     if allowlist_result.status != "succeeded":
         logger.info(
             "zernio_webhook_router_reconcile_allowlist_pending tenant=%s account=%s status=%s",
@@ -1721,13 +1751,13 @@ def _sync_tenant_for_zernio_account(account_id: str) -> tuple[str, str] | None:
             account_id[:24],
             allowlist_result.status,
         )
-        return None
+        return _zernio_owner_retryable("strict_allowlist_repair_pending")
     logger.info(
         "zernio_webhook_router_reconciled tenant=%s account=%s",
         tenant.id,
         account_id[:24],
     )
-    return tenant.id, expected_generation_id
+    return _zernio_owner_ready(tenant.id, expected_generation_id)
 
 
 async def _forward_zernio_webhook_to_tenant(
@@ -1825,15 +1855,29 @@ async def zernio_webhook_router(request: Request) -> PlainTextResponse:
     account_id = _zernio_payload_account_id(payload)
     # Ownership resolution may take the synchronous lifecycle flock (and, on
     # self-heal, perform a provider read), so keep it off the async event loop.
-    owner = await run_in_threadpool(_tenant_id_for_zernio_account, account_id)
-    if not owner:
+    resolution = await run_in_threadpool(_tenant_id_for_zernio_account, account_id)
+    if resolution.status == "retryable":
         logger.warning(
-            "zernio_webhook_router_unmapped_account account=%s event=%s",
+            "zernio_webhook_router_resolution_retryable account=%s event=%s reason=%s",
             account_id[:24],
             str(payload.get("event") or "")[:80],
+            resolution.reason,
+        )
+        return PlainTextResponse(
+            "Routing temporarily unavailable",
+            status_code=503,
+            headers={"Retry-After": "5"},
+        )
+    if resolution.status != "ready":
+        logger.warning(
+            "zernio_webhook_router_unmapped_account account=%s event=%s reason=%s",
+            account_id[:24],
+            str(payload.get("event") or "")[:80],
+            resolution.reason,
         )
         return PlainTextResponse("OK", status_code=202)
-    tenant_id, expected_generation_id = owner
+    tenant_id = resolution.tenant_id
+    expected_generation_id = resolution.generation_id
 
     try:
         status_code, response_text = await run_in_threadpool(

@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from app import channel_connections
 from app.main import app
-from app.zernio import ZernioAccountSummary
+from app.provisioning import AutoProvisionResult
+from app.zernio import ZernioAccountSummary, ZernioAPIError
 
 
 def _write_tenant(root, slug="test", name="Test"):
@@ -129,11 +130,19 @@ def test_zernio_webhook_router_rejects_connected_account_without_allowlist(
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
 
 
 def test_zernio_webhook_router_accepts_unmapped_account(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+
+    class FakeZernioService:
+        def list_accounts(self, *, platform=None):
+            assert platform == "whatsapp"
+            return []
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", FakeZernioService)
 
     body = json.dumps({"event": "message.received", "data": {"accountId": "unknown"}}).encode(
         "utf-8"
@@ -163,6 +172,13 @@ def test_zernio_webhook_router_rejects_non_strict_fallback_allowlist(
     }
     client_path.write_text(json.dumps(data), encoding="utf-8")
     client = _client(monkeypatch, tmp_path)
+
+    class FakeZernioService:
+        def list_accounts(self, *, platform=None):
+            assert platform == "whatsapp"
+            return []
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", FakeZernioService)
 
     async def fake_forward(**_kwargs):
         raise AssertionError("Non-strict allowlist must never route a webhook")
@@ -255,6 +271,178 @@ def test_zernio_webhook_router_reconciles_connected_account(
     assert connection.status == "connected"
     assert connection.zernio_account_id == "account_test"
     assert connection.phone_number_id == "phone_test"
+
+
+def test_zernio_webhook_router_retries_provider_outage_then_forwards_once(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="test",
+        name="Test",
+        zernio_profile_id="profile_test",
+        status="active",
+    )
+    provider_calls = 0
+    forwarded = []
+
+    class FlakyZernioService:
+        def list_accounts(self, *, platform=None):
+            nonlocal provider_calls
+            assert platform == "whatsapp"
+            provider_calls += 1
+            if provider_calls == 1:
+                raise ZernioAPIError(503, "temporary provider outage")
+            return [
+                ZernioAccountSummary(
+                    id="account_test",
+                    platform="whatsapp",
+                    profile_id="profile_test",
+                    profile_name="Test",
+                    display_name="Test WhatsApp",
+                    username="+599 9 694 5527",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+599 9 694 5527",
+                    phone_number_id="phone_test",
+                    waba_id="waba_test",
+                )
+            ]
+
+    async def fake_forward(**kwargs):
+        forwarded.append(kwargs["tenant_id"])
+        return 200, "OK"
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", FlakyZernioService)
+    monkeypatch.setattr(
+        "app.routes.connect._forward_zernio_webhook_to_tenant",
+        fake_forward,
+    )
+    payload = {
+        "event": "message.received",
+        "data": {"accountId": "account_test", "id": "same-message"},
+    }
+    body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "X-Zernio-Signature": _signature(body),
+    }
+
+    first = client.post(
+        "/internal/api/zernio/webhook-router", content=body, headers=headers
+    )
+    assert first.status_code == 503
+    assert first.headers["retry-after"] == "5"
+    assert forwarded == []
+    assert channel_connections.get_tenant_channel_connection("test") is None
+
+    retry = client.post(
+        "/internal/api/zernio/webhook-router", content=body, headers=headers
+    )
+    assert retry.status_code == 200
+    assert forwarded == ["test"]
+
+
+def test_zernio_webhook_router_retries_until_queued_allowlist_repair_completes(
+    monkeypatch,
+    tmp_path,
+):
+    tenants_root = tmp_path / "tenants"
+    _write_tenant(tenants_root)
+    client = _client(monkeypatch, tmp_path)
+    channel_connections.set_tenant_zernio_profile_id(
+        tenant_id="test",
+        name="Test",
+        zernio_profile_id="profile_test",
+        status="active",
+    )
+    provider_calls = 0
+    queued = []
+    forwarded = []
+
+    class FakeZernioService:
+        def list_accounts(self, *, platform=None):
+            nonlocal provider_calls
+            assert platform == "whatsapp"
+            provider_calls += 1
+            return [
+                ZernioAccountSummary(
+                    id="account_test",
+                    platform="whatsapp",
+                    profile_id="profile_test",
+                    profile_name="Test",
+                    display_name="Test WhatsApp",
+                    username="+599 9 694 5527",
+                    enabled=True,
+                    is_active=True,
+                    platform_status="active",
+                    display_phone_number="+599 9 694 5527",
+                    phone_number_id="phone_test",
+                    waba_id="waba_test",
+                )
+            ]
+
+    def fake_queue(**kwargs):
+        queued.append(kwargs)
+        return AutoProvisionResult(
+            status="queued",
+            message="allowlist repair queued",
+            job_id="repair-account-test",
+        )
+
+    async def fake_forward(**kwargs):
+        forwarded.append(kwargs["tenant_id"])
+        return 200, "OK"
+
+    monkeypatch.setattr("app.routes.connect.ZernioService", FakeZernioService)
+    monkeypatch.setattr(
+        "app.routes.connect.update_tenant_channel_account_allowlist",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr("app.routes.connect.queue_tenant_host_action", fake_queue)
+    monkeypatch.setattr(
+        "app.routes.connect._forward_zernio_webhook_to_tenant",
+        fake_forward,
+    )
+    payload = {
+        "event": "message.received",
+        "data": {"accountId": "account_test", "id": "same-message"},
+    }
+    body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "X-Zernio-Signature": _signature(body),
+    }
+
+    first = client.post(
+        "/internal/api/zernio/webhook-router", content=body, headers=headers
+    )
+    assert first.status_code == 503
+    assert forwarded == []
+    connection = channel_connections.get_tenant_channel_connection("test")
+    assert connection is not None
+    assert connection.status == "pending"
+    assert connection.zernio_account_verified is True
+    assert len(queued) == 1
+
+    before_repair = client.post(
+        "/internal/api/zernio/webhook-router", content=body, headers=headers
+    )
+    assert before_repair.status_code == 503
+    assert forwarded == []
+    assert len(queued) == 1
+    assert provider_calls == 1
+
+    _set_allowlist(tenants_root)
+    after_repair = client.post(
+        "/internal/api/zernio/webhook-router", content=body, headers=headers
+    )
+    assert after_repair.status_code == 200
+    assert forwarded == ["test"]
 
 
 def test_zernio_webhook_router_rejects_ambiguous_profile_ownership(

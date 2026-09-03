@@ -293,6 +293,8 @@ def read_client_json_no_follow(client_path: Path) -> dict[str, Any]:
     flags = os.O_RDONLY | no_follow
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
     try:
         fd = os.open(client_path, flags)
     except OSError as exc:
@@ -315,6 +317,46 @@ def read_client_json_no_follow(client_path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RuntimeError(f"client.json is not an object: {client_path}")
     return data
+
+
+def read_regular_text_no_follow(
+    path: Path,
+    *,
+    description: str,
+    allow_missing: bool = False,
+) -> str | None:
+    """Read a managed text file without following a tenant-controlled symlink."""
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if no_follow is None:
+        raise RuntimeError(f"Safe no-follow {description} reads are unavailable.")
+    flags = os.O_RDONLY | no_follow
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        raise RuntimeError(f"{description} is not a readable regular file: {path}")
+    except OSError as exc:
+        raise RuntimeError(
+            f"{description} is not a readable regular file: {path}"
+        ) from exc
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError(f"{description} is not a regular file: {path}")
+        try:
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                fd = -1
+                return handle.read()
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            raise RuntimeError(f"{description} is unreadable: {path}") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def write_result(job_id: str, payload: dict[str, Any]) -> None:
@@ -1039,9 +1081,16 @@ def update_tenant_details(
 
 
 def update_dashboard_password(tenant_dir: Path, slug: str, new_password: str) -> None:
+    env_path = tenant_dir / "config" / "platform.env"
     client_path = tenant_dir / "config" / "client.json"
     with exclusive_client_json_lock(client_path):
         data = read_client_json_no_follow(client_path)
+        env_text = read_regular_text_no_follow(
+            env_path,
+            description="platform.env",
+        )
+        assert env_text is not None
+        lines = env_text.splitlines()
         data["password"] = new_password
         data["dashboard_access_key"] = new_password
         data["password_updated_at"] = utc_now()
@@ -1054,11 +1103,6 @@ def update_dashboard_password(tenant_dir: Path, slug: str, new_password: str) ->
             mode=0o600,
         )
 
-    env_path = tenant_dir / "config" / "platform.env"
-    if env_path.exists():
-        lines = env_path.read_text(encoding="utf-8").splitlines()
-    else:
-        lines = [f"# platform.env for tenant {slug}"]
     replaced = False
     out: list[str] = []
     for line in lines:
@@ -2374,11 +2418,12 @@ def rewrite_restored_runtime_identity(
     if len(target_bridge_token) < 32:
         raise RuntimeError("Target tenant bridge token is missing or too short.")
     env_path = target_dir / "config" / "platform.env"
-    lines = (
-        env_path.read_text(encoding="utf-8").splitlines()
-        if env_path.exists()
-        else []
+    env_text = read_regular_text_no_follow(
+        env_path,
+        description="restored platform.env",
+        allow_missing=True,
     )
+    lines = env_text.splitlines() if env_text is not None else []
     seen_id = False
     seen_slug = False
     seen_bridge_token = False
