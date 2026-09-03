@@ -136,12 +136,12 @@ def _validate_admin_media_upload(filename: str, content_type: str, content: byte
         suffix = "." + clean_name.rsplit(".", 1)[-1]
     expected = _ADMIN_MEDIA_TYPES.get(suffix)
     if expected is None:
-        return "Use a JPG, PNG, or WebP image."
+        return "Use a JPG, JPEG, PNG, or WebP image."
     if len(content) > _ADMIN_MEDIA_MAX_BYTES:
         return "Image is over 10 MB."
     supplied_type = (content_type or "").lower().split(";", 1)[0].strip()
     if supplied_type and supplied_type not in set(_ADMIN_MEDIA_TYPES.values()):
-        return "Use a JPG, PNG, or WebP image."
+        return "Use a JPG, JPEG, PNG, or WebP image."
     if expected == "image/jpeg":
         if not content.startswith(b"\xff\xd8\xff"):
             return "Invalid image file."

@@ -857,7 +857,7 @@
       <form method="post" action="/admin/tenants/{{ tenant.id }}/media/upload#tenant-media-section" enctype="multipart/form-data" class="media-upload-form">
         <label class="media-upload-file">
           <span>Upload image</span>
-          <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+          <input type="file" name="image" accept=".jpg,.jpeg,.png,.webp,image/png,image/jpeg,image/webp" required>
         </label>
         <div class="media-upload-fields">
           <label>
@@ -872,7 +872,7 @@
         <div class="agent-form-actions">
           <button type="submit" class="button-secondary">Upload image</button>
         </div>
-        <p class="muted compact-note">JPG, PNG, or WebP only. Max 10 MB. No raw VPS paths are exposed.</p>
+        <p class="muted compact-note">JPG, JPEG, PNG, or WebP only. Max 10 MB. No raw VPS paths are exposed.</p>
       </form>
 
       {% if nr2_knowledge.knowledge_media %}
