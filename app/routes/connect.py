@@ -60,6 +60,10 @@ public_router = APIRouter(tags=["connect"])
 templates = Jinja2Templates(directory="app/templates")
 
 CALLBACK_RESULT_PATH = "/connect/whatsapp/result"
+STRICT_ALLOWLIST_REPAIR_FAILED_ERROR = (
+    "Provider authorization succeeded, but strict tenant routing could not be secured."
+)
+STRICT_ALLOWLIST_REPAIR_QUEUED_ERROR = "Strict tenant allowlist repair is queued."
 FAILED_STATUSES = {"failed", "failure", "error", "cancelled", "canceled", "denied"}
 PENDING_NUMBER_STATUSES = {
     "pending",
@@ -100,6 +104,66 @@ class _ZernioOwnerResolution:
     tenant_id: str = ""
     generation_id: str = ""
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class _ConnectionMutationFence:
+    """Security-relevant connection state captured before provider I/O."""
+
+    exists: bool
+    status: str | None = None
+    zernio_profile_id: str | None = None
+    zernio_account_id: str | None = None
+    zernio_account_verified: bool | None = None
+    last_request_id: str | None = None
+    last_error: str | None = None
+
+
+@dataclass(frozen=True)
+class _RequestMutationFence:
+    """Security-relevant authorization-request state before provider I/O."""
+
+    exists: bool
+    id: str | None = None
+    status: str | None = None
+    updated_at: str | None = None
+    zernio_profile_id: str | None = None
+    zernio_account_id: str | None = None
+    zernio_account_verified: bool | None = None
+    selected_phone_number_id: str | None = None
+
+
+def _connection_mutation_fence(
+    connection: channel_connections.TenantChannelConnection | None,
+) -> _ConnectionMutationFence:
+    if connection is None:
+        return _ConnectionMutationFence(exists=False)
+    return _ConnectionMutationFence(
+        exists=True,
+        status=connection.status,
+        zernio_profile_id=connection.zernio_profile_id,
+        zernio_account_id=connection.zernio_account_id,
+        zernio_account_verified=connection.zernio_account_verified,
+        last_request_id=connection.last_request_id,
+        last_error=connection.last_error,
+    )
+
+
+def _request_mutation_fence(
+    connection_request: channel_connections.ConnectionRequest | None,
+) -> _RequestMutationFence:
+    if connection_request is None:
+        return _RequestMutationFence(exists=False)
+    return _RequestMutationFence(
+        exists=True,
+        id=connection_request.id,
+        status=connection_request.status,
+        updated_at=connection_request.updated_at,
+        zernio_profile_id=connection_request.zernio_profile_id,
+        zernio_account_id=connection_request.zernio_account_id,
+        zernio_account_verified=connection_request.zernio_account_verified,
+        selected_phone_number_id=connection_request.selected_phone_number_id,
+    )
 
 
 def _zernio_owner_ready(
@@ -298,8 +362,11 @@ def _upsert_connected_account(
     require_current_request: bool = False,
     enforce_latest_request: bool = False,
     expected_latest_request_id: str | None = None,
+    expected_connection_fence: _ConnectionMutationFence | None = None,
+    expected_request_fence: _RequestMutationFence | None = None,
     expected_generation_id: str | None = None,
 ) -> tuple[channel_connections.TenantChannelConnection, AutoProvisionResult]:
+    latest_request = None
     if require_current_request or enforce_latest_request:
         current_request = (
             channel_connections.get_connection_request(request_id)
@@ -324,6 +391,23 @@ def _upsert_connected_account(
         ):
             raise channel_connections.ProviderOwnershipConflict(
                 "The provider authorization request was superseded by a newer link."
+            )
+    if expected_request_fence is not None:
+        if latest_request is None:
+            latest_request = (
+                channel_connections.get_latest_connection_request_for_tenant(tenant_id)
+            )
+        if _request_mutation_fence(latest_request) != expected_request_fence:
+            raise channel_connections.ProviderOwnershipConflict(
+                "The WhatsApp authorization request changed during provider reconciliation."
+            )
+    if expected_connection_fence is not None:
+        current_connection = channel_connections.get_tenant_channel_connection(
+            tenant_id
+        )
+        if _connection_mutation_fence(current_connection) != expected_connection_fence:
+            raise channel_connections.ProviderOwnershipConflict(
+                "The tenant WhatsApp connection changed during provider reconciliation."
             )
     metadata: dict[str, object] = {
         "zernio": {
@@ -366,13 +450,10 @@ def _upsert_connected_account(
         last_error = None
     elif allowlist_result.status == "queued":
         connection_status = "pending"
-        last_error = "Strict tenant allowlist repair is queued."
+        last_error = STRICT_ALLOWLIST_REPAIR_QUEUED_ERROR
     else:
         connection_status = "failed"
-        last_error = (
-            "Provider authorization succeeded, but strict tenant routing "
-            "could not be secured."
-        )
+        last_error = STRICT_ALLOWLIST_REPAIR_FAILED_ERROR
     connection = channel_connections.upsert_tenant_channel_connection(
         tenant_id=tenant_id,
         status=connection_status,
@@ -441,6 +522,8 @@ def _sync_whatsapp_connection_from_zernio(
     expected_request_id: str | None = None,
     enforce_expected_request: bool = False,
     attach_latest_request: bool = True,
+    expected_connection_fence: _ConnectionMutationFence | None = None,
+    expected_request_fence: _RequestMutationFence | None = None,
 ) -> channel_connections.TenantChannelConnection | None:
     """Reconcile Nr3 state from Zernio when the browser callback was missed."""
     try:
@@ -478,7 +561,13 @@ def _sync_whatsapp_connection_from_zernio(
                     account,
                     request_id=request_to_update.id if request_to_update else None,
                     enforce_latest_request=True,
-                    expected_latest_request_id=(latest.id if latest else None),
+                    expected_latest_request_id=(
+                        expected_request_id
+                        if enforce_expected_request
+                        else (latest.id if latest else None)
+                    ),
+                    expected_connection_fence=expected_connection_fence,
+                    expected_request_fence=expected_request_fence,
                     expected_generation_id=expected_generation_id,
                 )
             except channel_connections.ProviderOwnershipConflict as exc:
@@ -753,19 +842,37 @@ def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     connection = channel_connections.get_tenant_channel_connection(tenant.id)
+    connection_fence = _connection_mutation_fence(connection)
+    latest_request = (
+        channel_connections.get_latest_connection_request_for_tenant(tenant.id)
+    )
+    request_fence = _request_mutation_fence(latest_request)
     unverified_account_can_reconcile = bool(
         connection
         and not connection.zernio_account_verified
         and connection.zernio_account_id
     )
-    expected_recovery_request_id: str | None = None
+    verified_allowlist_repair_row = bool(
+        connection
+        and connection.zernio_account_verified
+        and connection.zernio_account_id
+        and connection.zernio_profile_id
+        and (
+            (
+                connection.status == "failed"
+                and connection.last_error == STRICT_ALLOWLIST_REPAIR_FAILED_ERROR
+            )
+            or (
+                connection.status == "pending"
+                and connection.last_error == STRICT_ALLOWLIST_REPAIR_QUEUED_ERROR
+            )
+        )
+    )
+    verified_allowlist_repair_can_reconcile = verified_allowlist_repair_row
+    expected_recovery_request_id = latest_request.id if latest_request else None
     attach_recovery_request = True
     superseded_unverified_candidate = False
     if unverified_account_can_reconcile and connection:
-        latest_request = (
-            channel_connections.get_latest_connection_request_for_tenant(tenant.id)
-        )
-        expected_recovery_request_id = connection.last_request_id
         if connection.last_request_id and (
             (latest_request.id if latest_request else None)
             == connection.last_request_id
@@ -788,31 +895,64 @@ def whatsapp_connection_status(tenant_id: str, request: Request) -> dict:
             # Some pre-generation connections have no request correlation and
             # an old, already-expired link row. Revalidate only the exact stored
             # account/profile and leave that historical request untouched.
-            expected_recovery_request_id = (
-                latest_request.id if latest_request else None
-            )
             attach_recovery_request = False
         else:
             # A newly generated link supersedes any exact-account recovery
             # candidate left by an older failed/legacy request.
             unverified_account_can_reconcile = False
             superseded_unverified_candidate = True
-    if not superseded_unverified_candidate and (
+    verified_repair_blocked_by_newer_request = False
+    if verified_allowlist_repair_can_reconcile and connection:
+        latest_is_newer_in_flight_request = bool(
+            latest_request
+            and latest_request.id != connection.last_request_id
+            and latest_request.status
+            in {
+                "pending",
+                "link_generated",
+                "auth_started",
+                "callback_received",
+                "pending_number",
+            }
+            and not _is_expired(latest_request)
+            and latest_request.created_at >= connection.updated_at
+        )
+        if latest_is_newer_in_flight_request:
+            verified_allowlist_repair_can_reconcile = False
+            verified_repair_blocked_by_newer_request = True
+        else:
+            # A strict allowlist repair is local recovery of the already
+            # verified account, not completion of an authorization request.
+            attach_recovery_request = False
+    generic_connection_can_reconcile = bool(
         connection is None
-        or connection.status in {"pending", "not_connected"}
-        or unverified_account_can_reconcile
+        or (
+            connection.status in {"pending", "not_connected"}
+            and not verified_allowlist_repair_row
+        )
+    )
+    if (
+        not superseded_unverified_candidate
+        and not verified_repair_blocked_by_newer_request
+        and (
+            generic_connection_can_reconcile
+            or unverified_account_can_reconcile
+            or verified_allowlist_repair_can_reconcile
+        )
     ):
         connection = _sync_whatsapp_connection_from_zernio(
             tenant.id,
             expected_generation_id=expected_generation_id,
             expected_account_id=(
                 connection.zernio_account_id
-                if unverified_account_can_reconcile and connection
+                if connection and connection.zernio_account_id
                 else None
             ),
             expected_request_id=expected_recovery_request_id,
-            enforce_expected_request=unverified_account_can_reconcile,
+            enforce_expected_request=True,
             attach_latest_request=attach_recovery_request,
+            expected_connection_fence=connection_fence,
+            expected_request_fence=request_fence,
         ) or connection
     return whatsapp_health_to_api(build_whatsapp_health(tenant.id), tenant.id)
 
