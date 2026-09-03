@@ -1,0 +1,9 @@
+[Unit]
+Description=TRACY runtime and authenticated control callback health
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/unboks/tracy_watchdog.py
+TimeoutStartSec=30

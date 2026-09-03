@@ -1,0 +1,11 @@
+[Unit]
+Description=Check TRACY each minute and recover failed runtime
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+AccuracySec=5
+Unit=unboks-tracy-watchdog.service
+
+[Install]
+WantedBy=timers.target
